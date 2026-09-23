@@ -71,7 +71,7 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
     const unclip = clipToPlot(f);
     fillBand(f, series.outer, color, 0.16);
     fillBand(f, series.inner, color, 0.32);
-    for (const r of referenceLines(refs)) refLineH(f, r.value, r.label, cssColor("--chart-ref"));
+    for (const r of referenceLines(refs)) refLineH(f, r.value, r.label, cssColor("--chart-ref"), r.kind === "start" ? "left" : "right");
     series.paths.forEach((p, i) => {
       if (i !== selectedSession) strokeLine(f, p, color, 1, 0.22);
     });

@@ -116,8 +116,8 @@ export function strokeLine(f: Frame, l: Line, color: string, width: number, alph
   ctx.restore();
 }
 
-/** Dashed horizontal reference line with a small right-aligned label above it. */
-export function refLineH(f: Frame, value: number, label: string, color: string): void {
+/** Dashed horizontal reference line with a small label above it, at the left or right end. */
+export function refLineH(f: Frame, value: number, label: string, color: string, align: "left" | "right" = "right"): void {
   const { ctx } = f;
   const py = Math.round(f.y(value)) + 0.5;
   if (py < f.top || py > f.top + f.height) return;
@@ -132,9 +132,9 @@ export function refLineH(f: Frame, value: number, label: string, color: string):
   ctx.setLineDash([]);
   ctx.font = "10px system-ui, sans-serif";
   ctx.fillStyle = color;
-  ctx.textAlign = "right";
+  ctx.textAlign = align;
   ctx.textBaseline = "bottom";
-  ctx.fillText(label, f.left + f.width - 2, py - 2);
+  ctx.fillText(label, align === "right" ? f.left + f.width - 2 : f.left + 4, py - 2);
   ctx.restore();
 }
 

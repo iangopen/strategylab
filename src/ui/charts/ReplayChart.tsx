@@ -100,7 +100,7 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs }: Ca
     // 1. Bankroll, one line per strategy, with end markers.
     const fb = prepareFrame(bank.current, width, BANK_H, x, layout.bankrollY);
     drawAxes(fb, xTicks, niceTicks(0, layout.bankrollY.max, 4), countTick, moneyTick);
-    for (const r of referenceLines(refs)) refLineH(fb, r.value, r.label, cssColor("--chart-ref"));
+    for (const r of referenceLines(refs)) refLineH(fb, r.value, r.label, cssColor("--chart-ref"), r.kind === "start" ? "left" : "right");
     drawLines(fb, layout.bankroll);
     layout.bankroll.forEach((l, k) => {
       const n = l.x.length;
