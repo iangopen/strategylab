@@ -145,6 +145,9 @@ export function describeEvInvariant(strategy: AnyStrategy, config: StrategyConfi
   const games: [Game, number][] = [
     [GAME_PRESETS.find((g) => g.id === "european")!, 101],
     [GAME_PRESETS.find((g) => g.id === "fairCoin")!, 202],
+    // A POSITIVE-edge game (edge = -0.10, player edge +10%): the core truth is sign-agnostic, so
+    // EV per $ wagered must equal -edge = +0.10 here too. Testing only negative edges hides sign bugs.
+    [{ id: "posEdge", name: "Positive edge (p=0.55, even money)", winProb: 0.55, netPayout: 1 }, 303],
   ];
   describe(`${strategy.id}: EV per $ wagered invariant (shared scenario, stops ON)`, () => {
     for (const [game, master] of games) {
