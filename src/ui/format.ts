@@ -4,7 +4,7 @@ import { getStrategy } from "../engine/strategies/registry";
 import type { StrategyInstance } from "../scenario";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const pct = new Intl.NumberFormat("en-US", { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = new Intl.NumberFormat("en-US", { style: "percent", minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const ratio = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const int = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
