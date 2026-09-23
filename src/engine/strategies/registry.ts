@@ -1,5 +1,6 @@
 import type { AnyStrategy } from "./types";
 import { dalembert } from "./dalembert";
+import { fibonacci } from "./fibonacci";
 import { flat } from "./flat";
 import { martingale } from "./martingale";
 import { paroli } from "./paroli";
@@ -10,6 +11,7 @@ export const STRATEGIES: readonly AnyStrategy[] = [
   martingale,
   paroli,
   dalembert,
+  fibonacci,
 ];
 
 export function getStrategy(id: string): AnyStrategy | undefined {
