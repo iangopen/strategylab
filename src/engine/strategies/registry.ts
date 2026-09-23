@@ -1,0 +1,11 @@
+import type { AnyStrategy } from "./types";
+import { flat } from "./flat";
+
+// The ONE place strategies are registered. A new strategy = one file + one line here.
+export const STRATEGIES: readonly AnyStrategy[] = [
+  flat,
+];
+
+export function getStrategy(id: string): AnyStrategy | undefined {
+  return STRATEGIES.find((s) => s.id === id);
+}
