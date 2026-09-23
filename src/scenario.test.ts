@@ -5,6 +5,15 @@ import { defaultScenario, newStrategyInstance, toSimRequest, validateScenario, t
 const withChanges = (c: Partial<ScenarioConfig>): ScenarioConfig => ({ ...defaultScenario(), ...c });
 
 describe("ScenarioConfig", () => {
+  it("default scenario: $1,000, $10 base, win target $1,100, no floor, 1,000 rounds, European, Flat + Martingale x2", () => {
+    const s = defaultScenario();
+    expect([s.startBankroll, s.baseBet, s.stopWin, s.stopLoss, s.maxRounds, s.game.presetId]).toEqual([1000, 10, 1100, null, 1000, "european"]);
+    expect(s.strategies.map((i) => [i.strategyId, i.config])).toEqual([
+      ["flat", { units: 1 }],
+      ["martingale", { multiplier: 2 }],
+    ]);
+  });
+
   it("default scenario is valid, plain JSON, and survives a JSON round trip", () => {
     const s = defaultScenario();
     expect(validateScenario(s)).toEqual({});

@@ -2,7 +2,7 @@
 // Money here is in DOLLARS as the user types it; toSimRequest converts to engine cents.
 import { CUSTOM_GAME_ID, findPreset, validateGame } from "./engine/games";
 import { MAX_SESSIONS } from "./engine/montecarlo";
-import { getStrategy, STRATEGIES } from "./engine/strategies/registry";
+import { getStrategy } from "./engine/strategies/registry";
 import type { StrategyConfig } from "./engine/strategies/types";
 import { validateStrategyConfig } from "./engine/strategies/validate";
 import { DEFAULT_MAX_ROUNDS, MAX_ROUNDS_CAP } from "./engine/types";
@@ -48,6 +48,10 @@ export function newStrategyInstance(strategyId: string): StrategyInstance {
   return { uid: newUid(), strategyId, config: { ...strategy.defaultConfig } };
 }
 
+/**
+ * The first run a new user sees: Flat vs Martingale x2 with a $1,100 win target, so Martingale's
+ * high P(profit) sits next to the SAME negative EV per $ wagered. That contrast is the core lesson.
+ */
 export function defaultScenario(): ScenarioConfig {
   const european = findPreset("european")!;
   return {
@@ -57,13 +61,13 @@ export function defaultScenario(): ScenarioConfig {
     baseBet: 10,
     tableMin: 1,
     tableMax: null,
-    stopWin: null,
+    stopWin: 1100,
     stopLoss: null,
     maxRounds: DEFAULT_MAX_ROUNDS,
     insufficientFunds: "stop",
     sessions: 10_000,
     seed: 12345,
-    strategies: [newStrategyInstance(STRATEGIES[0]!.id)],
+    strategies: [newStrategyInstance("flat"), { ...newStrategyInstance("martingale"), config: { multiplier: 2 } }],
   };
 }
 
