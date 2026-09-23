@@ -1,5 +1,5 @@
 import type { Game } from "./games";
-import { validateGame } from "./games";
+import { edge, validateGame } from "./games";
 import { mulberry32, type Rng } from "./rng";
 import type { AnyStrategy, StrategyConfig, StrategyContext } from "./strategies/types";
 import type { EndReason, RunOptions, SamplePath, SessionConfig, SessionResult } from "./types";
@@ -61,7 +61,9 @@ export function runSessionWithRng(
   let longestLosingStreak = 0;
   let lastBet: number | null = null;
 
-  const ctx = (): StrategyContext => ({ bankroll, baseBet: config.baseBet, round: rounds, lastBet });
+  // Read-only game view, computed once: strategies may size bets from the payout.
+  const gameView = { winProb: game.winProb, netPayout: game.netPayout, edge: edge(game) };
+  const ctx = (): StrategyContext => ({ bankroll, baseBet: config.baseBet, round: rounds, lastBet, game: gameView });
   let state = strategy.init(strategyConfig, ctx());
   let endReason: EndReason;
   if (observer !== undefined) observer(0, bankroll);

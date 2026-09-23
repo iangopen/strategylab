@@ -20,6 +20,16 @@ export interface StrategyContext {
   readonly round: number;
   /** Bet actually placed last round after table rules, or null before the first bet. */
   readonly lastBet: number | null;
+  /**
+   * The game the session is played on. Read-only, filled by the runner. Kelly and Oscar's Grind
+   * size bets from the payout; reading it never touches the RNG, so it does not affect CRN.
+   */
+  readonly game: {
+    readonly winProb: number;
+    readonly netPayout: number;
+    /** House edge = 1 − winProb × (1 + netPayout). Negative means the player has the edge. */
+    readonly edge: number;
+  };
 }
 
 /**

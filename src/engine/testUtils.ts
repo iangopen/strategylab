@@ -4,7 +4,7 @@ import { edge, GAME_PRESETS, type Game } from "./games";
 import { sessionSeed, type Rng } from "./rng";
 import { runSession } from "./runner";
 import type { RunContext } from "./stats/types";
-import type { AnyStrategy, StrategyConfig } from "./strategies/types";
+import type { AnyStrategy, StrategyConfig, StrategyContext } from "./strategies/types";
 import type { SamplePath, SessionConfig, SessionResult } from "./types";
 
 /** An RNG that plays a scripted win/loss sequence and counts every draw. */
@@ -69,16 +69,32 @@ export function deepFreeze<T>(o: T): T {
   return o;
 }
 
+/** Read-only game view for ctx fixtures. Even money by default; pass a payout for Kelly/Oscar tests. */
+export function gameView(netPayout = 1, winProb = 0.5): StrategyContext["game"] {
+  return { winProb, netPayout, edge: 1 - winProb * (1 + netPayout) };
+}
+
 /**
  * Feeds a win/loss script straight to a strategy (no runner, no table rules) and returns
- * the bet it asks for before each round, plus one final bet after the script.
+ * the bet it asks for before each round, plus one final bet after the script. `lastBet` in the
+ * post-round ctx is the bet the strategy just returned (no table rules here), so strategies that
+ * track the placed bet (Oscar's Grind) work; `game` lets Kelly/Oscar see a non-even payout.
  */
-export function betSequence(strategy: AnyStrategy, config: StrategyConfig, outcomes: readonly boolean[], baseBet = 100): (number | "stop")[] {
-  const ctx = (round: number) => deepFreeze({ bankroll: 1_000_000_000, baseBet, round, lastBet: null });
+export function betSequence(
+  strategy: AnyStrategy,
+  config: StrategyConfig,
+  outcomes: readonly boolean[],
+  baseBet = 100,
+  game: StrategyContext["game"] = gameView(),
+): (number | "stop")[] {
+  let lastBet: number | null = null;
+  const ctx = (round: number) => deepFreeze({ bankroll: 1_000_000_000, baseBet, round, lastBet, game });
   let state = strategy.init(deepFreeze({ ...config }), ctx(0));
   const bets: (number | "stop")[] = [];
   outcomes.forEach((won, round) => {
-    bets.push(strategy.nextBet(state, ctx(round)));
+    const bet = strategy.nextBet(state, ctx(round));
+    bets.push(bet);
+    if (typeof bet === "number") lastBet = bet;
     state = strategy.update(state, won, ctx(round + 1));
   });
   bets.push(strategy.nextBet(state, ctx(outcomes.length)));
@@ -92,7 +108,7 @@ export function betSequence(strategy: AnyStrategy, config: StrategyConfig, outco
 export function expectPure(strategy: AnyStrategy, config: StrategyConfig): void {
   const cfg = deepFreeze(structuredClone(config));
   const cfgSnap = JSON.stringify(cfg);
-  const ctx = deepFreeze({ bankroll: 100_000, baseBet: 100, round: 0, lastBet: 100 });
+  const ctx = deepFreeze({ bankroll: 100_000, baseBet: 100, round: 0, lastBet: 100, game: gameView(1.2) });
   let state = deepFreeze(strategy.init(cfg, ctx));
   for (const won of [L, L, L, W, W, L, W, W, W, W, L]) {
     const snap = JSON.stringify(state);
