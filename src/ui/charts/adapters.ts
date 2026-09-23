@@ -197,3 +197,29 @@ export function nearestPath(paths: readonly Line[], px: number, py: number, toPx
   });
   return best;
 }
+
+// ---------------------------------------------------------------- tick labels
+
+/** Short money label for axis ticks, from cents: $0, $950, $1,100, $12k, $1.5M. */
+export function moneyTick(cents: number): string {
+  const d = cents / 100;
+  const a = Math.abs(d);
+  const trim = (x: number) => Number(x.toPrecision(3)).toString();
+  if (a >= 1e6) return `$${trim(d / 1e6)}M`;
+  if (a >= 1e4) return `$${trim(d / 1e3)}k`;
+  return `$${Math.round(d).toLocaleString("en-US")}`;
+}
+
+/** Short count label for axis ticks: 950, 1,000, 25k, 1M. */
+export function countTick(v: number): string {
+  const a = Math.abs(v);
+  const trim = (x: number) => Number(x.toPrecision(3)).toString();
+  if (a >= 1e6) return `${trim(v / 1e6)}M`;
+  if (a >= 1e4) return `${trim(v / 1e3)}k`;
+  return Math.round(v).toLocaleString("en-US");
+}
+
+/** Percent tick for histogram y axes (values already in %). */
+export function pctTick(v: number): string {
+  return v >= 1 ? `${Number(v.toPrecision(3))}%` : `${Number(v.toPrecision(2))}%`;
+}

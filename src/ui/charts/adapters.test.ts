@@ -10,6 +10,9 @@ import {
   histogramScales,
   logSafe,
   logTicks,
+  moneyTick,
+  countTick,
+  pctTick,
   nearestPath,
   niceCeil,
   niceTicks,
@@ -165,6 +168,14 @@ describe("nearestPath (click to pick a session)", () => {
     expect(nearestPath(paths, 50, 99, toPx)).toBe(0);
     expect(nearestPath(paths, 50, 52, toPx)).toBe(1);
     expect(nearestPath(paths, 50, 75, toPx)).toBeNull(); // 25 px from both
+  });
+});
+
+describe("tick labels", () => {
+  it("money from cents, counts and percents", () => {
+    expect([0, 95_000, 110_000, 1_200_000, 150_000_000].map(moneyTick)).toEqual(["$0", "$950", "$1,100", "$12k", "$1.5M"]);
+    expect([0, 950, 1000, 25_000, 1_000_000].map(countTick)).toEqual(["0", "950", "1,000", "25k", "1M"]);
+    expect([0.1, 0.5, 10, 12.5].map(pctTick)).toEqual(["0.1%", "0.5%", "10%", "12.5%"]);
   });
 });
 

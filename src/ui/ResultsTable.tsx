@@ -1,9 +1,11 @@
 import type { StrategyOutcome } from "../engine/montecarlo";
 import { STATS } from "../engine/stats/registry";
+import { seriesColorVar } from "./charts/adapters";
 import { formatStat } from "./format";
 
 interface Props {
-  columns: { label: string; outcome: StrategyOutcome }[];
+  /** colorIndex = the instance's index in the run: its ONE color everywhere (charts, replay, here). */
+  columns: { label: string; outcome: StrategyOutcome; colorIndex: number }[];
   nSessions: number;
   stale: boolean;
 }
@@ -32,6 +34,7 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
               <th scope="col">Statistic</th>
               {columns.map((c, i) => (
                 <th scope="col" key={i}>
+                  <span className="swatch" style={{ background: `var(${seriesColorVar(c.colorIndex)})` }} aria-hidden="true" />
                   {c.label}
                 </th>
               ))}

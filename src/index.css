@@ -7,14 +7,30 @@
   --accent: #2458c6;
   --error: #b42318;
   --emphasis-bg: #fff6d6;
+  /* Chart tokens */
+  --chart-grid: #e6e9ee;
+  --chart-axis: #5d6673;
+  --chart-ref: #3b4250;
+  --chart-win: #2e7d32;
+  --chart-loss: #c62828;
+  /* Okabe-Ito colorblind-safe palette, one slot per strategy instance (light variants) */
+  --series-0: #0072b2;
+  --series-1: #d55e00;
+  --series-2: #009e73;
+  --series-3: #cc79a7;
+  --series-4: #e69f00;
+  --series-5: #56b4e9;
+  --series-6: #8a7a00;
+  --series-7: #000000;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
   color: var(--text);
   background: var(--bg);
 }
 
+/* Dark theme: follows the OS unless the header control forces light (data-theme="light"). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #15171b;
     --panel: #1e2126;
     --text: #e6e8eb;
@@ -23,8 +39,47 @@
     --accent: #7aa2ff;
     --error: #ff8a80;
     --emphasis-bg: #3a3320;
+    --chart-grid: #2c3037;
+    --chart-axis: #9aa3ae;
+    --chart-ref: #c9ced6;
+    --chart-win: #66bb6a;
+    --chart-loss: #ef5350;
+    --series-0: #56b4e9;
+    --series-1: #ff8a3d;
+    --series-2: #2ec79a;
+    --series-3: #e59ac8;
+    --series-4: #f0b429;
+    --series-5: #9ad6f5;
+    --series-6: #f0e442;
+    --series-7: #e6e8eb;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #15171b;
+  --panel: #1e2126;
+  --text: #e6e8eb;
+  --muted: #9aa3ae;
+  --border: #353a42;
+  --accent: #7aa2ff;
+  --error: #ff8a80;
+  --emphasis-bg: #3a3320;
+  --chart-grid: #2c3037;
+  --chart-axis: #9aa3ae;
+  --chart-ref: #c9ced6;
+  --chart-win: #66bb6a;
+  --chart-loss: #ef5350;
+  --series-0: #56b4e9;
+  --series-1: #ff8a3d;
+  --series-2: #2ec79a;
+  --series-3: #e59ac8;
+  --series-4: #f0b429;
+  --series-5: #9ad6f5;
+  --series-6: #f0e442;
+  --series-7: #e6e8eb;
+}
+:root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); }
@@ -89,3 +144,17 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
   min-height: 140px; border: 1px dashed var(--border); border-radius: 6px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 12px;
 }
+
+/* Header theme control */
+.header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.theme-control { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.theme-control select { width: auto; }
+
+/* Charts: small multiples, one panel per strategy instance */
+.small-multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 8px; }
+.chart-panel { margin: 0; min-width: 0; }
+.chart-panel figcaption { font-size: 0.9rem; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.canvas-box { width: 100%; min-width: 0; }
+.canvas-box canvas { display: block; cursor: pointer; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; flex: none; }
+.chart-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
