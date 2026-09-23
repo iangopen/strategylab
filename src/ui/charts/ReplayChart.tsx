@@ -1,0 +1,157 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import type { Replay } from "../../engine/replay";
+import { formatStat } from "../format";
+import { useThemeVersion } from "../theme";
+import { countTick, endText, moneyTick, niceTicks, referenceLines, replayLayout, seriesColorVar, stripCells, type ChartRefs, type Line, type Range } from "./adapters";
+import { clipToPlot, cssColor, drawAxes, prepareFrame, refLineH, strokeLine, useContainerWidth, type Frame } from "./canvas";
+
+interface Props {
+  nSessions: number;
+  labels: readonly string[];
+  refs: ChartRefs;
+  replay: Replay | null;
+  status: string | null;
+  disabled: boolean;
+  onReplay: (session: number) => void;
+}
+
+/**
+ * Same-luck replay: one session re-simulated for every strategy, stacked on ONE shared x axis:
+ * bankroll lines, bet sizes, and a single win/loss strip (identical for all strategies by CRN).
+ */
+export const ReplayChart = memo(function ReplayChart({ nSessions, labels, refs, replay, status, disabled, onReplay }: Props) {
+  // Editing draft for the session number (view state, not scenario state).
+  const [draft, setDraft] = useState("");
+  const parsed = Number(draft);
+  const valid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= 0 && parsed < nSessions;
+  const layout = useMemo(() => (replay ? replayLayout(replay, refs) : null), [replay, refs]);
+
+  return (
+    <section className="panel chart-section">
+      <h2>Replay one session</h2>
+      <form
+        className="chart-tools"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (valid) onReplay(parsed);
+        }}
+      >
+        <p className="help">Every strategy faced exactly the same wins and losses in each session. Replay one to watch that luck play out differently.</p>
+        <label className="theme-control">
+          Session
+          <input type="text" inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={`0–${nSessions - 1}`} style={{ width: "8ch" }} aria-invalid={draft !== "" && !valid} />
+        </label>
+        <button type="submit" disabled={disabled || !valid}>
+          Replay
+        </button>
+      </form>
+      {draft !== "" && !valid && <div className="error">Enter a whole number from 0 to {nSessions - 1}.</div>}
+      {status && <div className="status">{status}</div>}
+      {!replay && !status && <p className="help">Pick a session number, or click a thin line in the bankroll chart above.</p>}
+      {replay && layout && (
+        <>
+          <ul className="replay-legend">
+            {replay.strategies.map((s, k) => (
+              <li key={k}>
+                <span className="swatch" style={{ background: `var(${seriesColorVar(k)})` }} aria-hidden="true" />
+                <strong>{labels[k] ?? s.strategyId}</strong>: {endText(s.endReason, s.rounds)}, final bankroll {formatStat("money", s.finalBankroll)}
+              </li>
+            ))}
+          </ul>
+          <ReplayCanvases replay={replay} layout={layout} refs={refs} />
+          <p className="help">
+            Session {replay.session.toLocaleString("en-US")}
+            {replay.downsampled ? ": long session, lines are min/max downsampled and the strip shows the win rate per block of rounds." : "."}
+          </p>
+        </>
+      )}
+    </section>
+  );
+});
+
+interface CanvasProps {
+  replay: Replay;
+  layout: ReturnType<typeof replayLayout>;
+  refs: ChartRefs;
+}
+
+const BANK_H = 220;
+const BET_H = 150;
+const STRIP_H = 64;
+
+const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs }: CanvasProps) {
+  const [box, width] = useContainerWidth<HTMLDivElement>();
+  const bank = useRef<HTMLCanvasElement | null>(null);
+  const bets = useRef<HTMLCanvasElement | null>(null);
+  const strip = useRef<HTMLCanvasElement | null>(null);
+  const theme = useThemeVersion();
+
+  useEffect(() => {
+    if (width === 0 || !bank.current || !bets.current || !strip.current) return;
+    const x: Range = layout.x;
+    const xTicks = niceTicks(x.min, x.max, 6);
+
+    const drawLines = (f: Frame, lines: Line[]) => {
+      const unclip = clipToPlot(f);
+      lines.forEach((l, k) => strokeLine(f, l, cssColor(seriesColorVar(k)), 2, 0.9));
+      unclip();
+    };
+
+    // 1. Bankroll, one line per strategy, with end markers.
+    const fb = prepareFrame(bank.current, width, BANK_H, x, layout.bankrollY);
+    drawAxes(fb, xTicks, niceTicks(0, layout.bankrollY.max, 4), countTick, moneyTick);
+    for (const r of referenceLines(refs)) refLineH(fb, r.value, r.label, cssColor("--chart-ref"));
+    drawLines(fb, layout.bankroll);
+    layout.bankroll.forEach((l, k) => {
+      const n = l.x.length;
+      if (n === 0) return;
+      fb.ctx.fillStyle = cssColor(seriesColorVar(k));
+      fb.ctx.beginPath();
+      fb.ctx.arc(fb.x(l.x[n - 1]!), fb.y(l.y[n - 1]!), 3.5, 0, Math.PI * 2);
+      fb.ctx.fill();
+    });
+
+    // 2. Bet size per strategy (same x).
+    const fbet = prepareFrame(bets.current, width, BET_H, x, layout.betY);
+    drawAxes(fbet, xTicks, niceTicks(0, layout.betY.max, 3), countTick, moneyTick);
+    drawLines(fbet, layout.bets);
+
+    // 3. ONE win/loss strip (identical for every strategy), spanning the longest strategy.
+    const fs = prepareFrame(strip.current, width, STRIP_H, x, { min: 0, max: 1 });
+    drawAxes(fs, xTicks, [], countTick, () => "");
+    // Encoded by HEIGHT (not color alone): per round, a won round is a tall bar and a lost round a
+    // short one; per bucket, bar height = the bucket's win rate over a faint full-height background.
+    const win = cssColor("--chart-win");
+    const loss = cssColor("--chart-loss");
+    const bottom = fs.top + fs.height;
+    for (const c of stripCells(replay)) {
+      const x0 = fs.x(c.x0);
+      const w = Math.max(0.5, fs.x(c.x1) - x0);
+      if (replay.strip.kind === "rounds") {
+        const h = c.winRate === 1 ? fs.height : fs.height * 0.35;
+        fs.ctx.fillStyle = c.winRate === 1 ? win : loss;
+        fs.ctx.fillRect(x0, bottom - h, w, h);
+      } else {
+        fs.ctx.fillStyle = loss;
+        fs.ctx.fillRect(x0, fs.top, w, fs.height);
+        fs.ctx.fillStyle = win;
+        fs.ctx.fillRect(x0, bottom - fs.height * c.winRate, w, fs.height * c.winRate);
+      }
+    }
+  }, [width, theme, replay, layout, refs]);
+
+  return (
+    <div ref={box} className="canvas-box replay-stack">
+      <div className="replay-row-label">Bankroll</div>
+      <canvas ref={bank} role="img" aria-label="Bankroll of each strategy in the replayed session" style={{ cursor: "default" }} />
+      <div className="replay-row-label">Bet size</div>
+      <canvas ref={bets} role="img" aria-label="Bet placed by each strategy in each round" style={{ cursor: "default" }} />
+      <div className="replay-row-label">
+        {replay.strip.kind === "rounds"
+          ? "Each round: tall bar = won, short bar = lost. The same for every strategy."
+          : "Each block of rounds: bar height = share of rounds won. The same for every strategy."}
+      </div>
+      <canvas ref={strip} role="img" aria-label="Win or loss of each round, shared by every strategy" style={{ cursor: "default" }} />
+    </div>
+  );
+});

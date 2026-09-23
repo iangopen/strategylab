@@ -11,8 +11,8 @@
   --chart-grid: #e6e9ee;
   --chart-axis: #5d6673;
   --chart-ref: #3b4250;
-  --chart-win: #2e7d32;
-  --chart-loss: #c62828;
+  --chart-win: #3b4250;
+  --chart-loss: #b9bfc8;
   /* Okabe-Ito colorblind-safe palette, one slot per strategy instance (light variants) */
   --series-0: #0072b2;
   --series-1: #d55e00;
@@ -42,8 +42,8 @@
     --chart-grid: #2c3037;
     --chart-axis: #9aa3ae;
     --chart-ref: #c9ced6;
-    --chart-win: #66bb6a;
-    --chart-loss: #ef5350;
+    --chart-win: #c9ced6;
+    --chart-loss: #50565f;
     --series-0: #56b4e9;
     --series-1: #ff8a3d;
     --series-2: #2ec79a;
@@ -66,8 +66,8 @@
   --chart-grid: #2c3037;
   --chart-axis: #9aa3ae;
   --chart-ref: #c9ced6;
-  --chart-win: #66bb6a;
-  --chart-loss: #ef5350;
+  --chart-win: #c9ced6;
+  --chart-loss: #50565f;
   --series-0: #56b4e9;
   --series-1: #ff8a3d;
   --series-2: #2ec79a;
@@ -158,3 +158,8 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
 .canvas-box canvas { display: block; cursor: pointer; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; flex: none; }
 .chart-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
+
+/* Replay */
+.replay-legend { list-style: none; padding: 0; margin: 8px 0; font-size: 0.85rem; display: grid; gap: 4px; }
+.replay-stack canvas { display: block; }
+.replay-row-label { font-size: 0.8rem; color: var(--muted); margin: 6px 0 2px; }

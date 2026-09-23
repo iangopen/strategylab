@@ -1,5 +1,6 @@
 import * as Comlink from "comlink";
 import type { MonteCarloResult } from "../engine/montecarlo";
+import type { Replay } from "../engine/replay";
 import type { SimApi, SimRequest } from "./sim.worker";
 
 export class CancelledError extends Error {
@@ -46,6 +47,12 @@ export class SimClient {
         },
       );
     });
+  }
+
+  /** Re-simulates one session for every strategy. Not allowed while a run is in progress. */
+  replay(req: SimRequest, session: number): Promise<Replay> {
+    if (this.running) return Promise.reject(new Error("Wait for the run to finish before replaying"));
+    return this.api.replay(req, session);
   }
 
   cancel(): void {

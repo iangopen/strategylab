@@ -1,6 +1,8 @@
 // Pure result-to-chart transforms. No DOM, no canvas: every function here is unit-tested.
 // Money stays in engine cents; components convert only when printing labels.
 import type { MonteCarloResult, StrategyOutcome } from "../../engine/montecarlo";
+import type { Replay } from "../../engine/replay";
+import type { EndReason } from "../../engine/types";
 
 export interface Range {
   min: number;
@@ -222,4 +224,79 @@ export function countTick(v: number): string {
 /** Percent tick for histogram y axes (values already in %). */
 export function pctTick(v: number): string {
   return v >= 1 ? `${Number(v.toPrecision(3))}%` : `${Number(v.toPrecision(2))}%`;
+}
+
+// ---------------------------------------------------------------- replay
+
+export interface ReplayLayout {
+  /** ONE x range shared by the bankroll, bet and win/loss strips: 0..longest strategy's rounds. */
+  x: Range;
+  bankrollY: Range;
+  betY: Range;
+  bankroll: Line[];
+  bets: Line[];
+}
+
+/** Stacked replay layout: shared x; bankroll and bet y ranges shared by every strategy, from 0. */
+export function replayLayout(rep: Replay, refs: ChartRefs): ReplayLayout {
+  let longest = 1;
+  let topBank = Math.max(refs.start, refs.stopWin ?? 0);
+  let topBet = 0;
+  for (const s of rep.strategies) {
+    longest = Math.max(longest, s.rounds);
+    for (const v of s.bankroll.bankroll) if (v > topBank) topBank = v;
+    for (const v of s.bets.bankroll) if (v > topBet) topBet = v;
+  }
+  return {
+    x: { min: 0, max: longest },
+    bankrollY: { min: 0, max: niceCeil(topBank * 1.02) },
+    betY: { min: 0, max: niceCeil(topBet * 1.05) || 1 },
+    bankroll: rep.strategies.map((s) => ({ x: s.bankroll.rounds, y: s.bankroll.bankroll })),
+    // A bet decided after r rounds is placed on round r + 1: drawn as a step over [r, r + 1].
+    bets: rep.strategies.map((s) => stepLine(s.bets.rounds, s.bets.bankroll)),
+  };
+}
+
+/** Step line: value v_i holds over [x_i, x_i + 1]. */
+function stepLine(x: readonly number[], y: readonly number[]): Line {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < x.length; i++) {
+    xs.push(x[i]!, x[i]! + 1);
+    ys.push(y[i]!, y[i]!);
+  }
+  return { x: xs, y: ys };
+}
+
+export interface StripCell {
+  x0: number;
+  x1: number;
+  /** 1 = every round won, 0 = every round lost; in between for bucketed strips. */
+  winRate: number;
+}
+
+/** The ONE win/loss strip as cells over rounds: one per round, or one per bucket (shaded by win rate). */
+export function stripCells(rep: Replay): StripCell[] {
+  const s = rep.strip;
+  if (s.kind === "rounds") return Array.from(s.wins, (w, r) => ({ x0: r, x1: r + 1, winRate: w }));
+  const out: StripCell[] = [];
+  s.counts.forEach((c, b) => {
+    if (c === 0) return;
+    out.push({ x0: b * s.bucketRounds, x1: b * s.bucketRounds + c, winRate: s.wins[b]! / c });
+  });
+  return out;
+}
+
+const END_TEXT: Record<EndReason, string> = {
+  ruin: "ruined (below table min)",
+  insufficientFunds: "couldn't cover the next bet",
+  stopWin: "reached the win target",
+  stopLoss: "hit the loss floor",
+  maxRounds: "played every round",
+  strategyStop: "stopped by the strategy",
+};
+
+/** Plain-language end of a replayed session, e.g. "couldn't cover the next bet after 37 rounds". */
+export function endText(reason: EndReason, rounds: number): string {
+  return `${END_TEXT[reason]} after ${rounds.toLocaleString("en-US")} round${rounds === 1 ? "" : "s"}`;
 }

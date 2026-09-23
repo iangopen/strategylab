@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MonteCarloResult } from "./engine/montecarlo";
+import type { Replay } from "./engine/replay";
 import { defaultScenario, toSimRequest, validateScenario, type ScenarioConfig } from "./scenario";
 import { ChartSlot } from "./ui/ChartSlot";
 import type { ChartRefs } from "./ui/charts/adapters";
 import { FanChart } from "./ui/charts/FanChart";
 import { HistogramChart } from "./ui/charts/HistogramChart";
+import { ReplayChart } from "./ui/charts/ReplayChart";
 import { ConfigPanel } from "./ui/ConfigPanel";
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls } from "./ui/RunControls";
@@ -37,6 +39,10 @@ export default function App() {
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   // Which session is highlighted / replayed. View state, not scenario state.
   const [selectedSession, setSelectedSession] = useState<number | null>(null);
+
+  const [replay, setReplay] = useState<Replay | null>(null);
+  const [replayStatus, setReplayStatus] = useState<string | null>(null);
+  const replayRequestId = useRef(0);
 
   useEffect(() => applyThemePref(theme), [theme]);
 
@@ -81,6 +87,8 @@ export default function App() {
         refs: { start: request.session.startBankroll, stopWin: request.session.stopWin, stopLoss: request.session.stopLoss },
       });
       setSelectedSession(null);
+      setReplay(null);
+      setReplayStatus(null);
       setStatus(`Done: ${result.nSessions.toLocaleString("en-US")} sessions in ${(ms / 1000).toFixed(1)}s.`);
     } catch (err) {
       setStatus(err instanceof CancelledError ? "Cancelled. Previous results (if any) are kept." : `Error: ${(err as Error).message}`);
@@ -88,6 +96,24 @@ export default function App() {
       setRunning(false);
     }
   }
+
+  // Replay the selected session for every strategy in the displayed run (re-simulated in the worker).
+  useEffect(() => {
+    const c = client.current;
+    if (!run || selectedSession === null || !c || running) return;
+    const id = ++replayRequestId.current;
+    setReplayStatus(`Replaying session ${selectedSession.toLocaleString("en-US")}...`);
+    c.replay(run.request, selectedSession).then(
+      (r) => {
+        if (id !== replayRequestId.current) return; // a newer replay was requested
+        setReplay(r);
+        setReplayStatus(null);
+      },
+      (err: unknown) => {
+        if (id === replayRequestId.current) setReplayStatus(`Replay failed: ${(err as Error).message}`);
+      },
+    );
+  }, [run, selectedSession, running]);
 
   const columns = useMemo(() => (run ? run.result.perStrategy.map((outcome, i) => ({ label: run.labels[i] ?? outcome.strategyId, outcome, colorIndex: i })) : []), [run]);
 
@@ -130,6 +156,17 @@ export default function App() {
             <FanChart result={run.result} labels={run.labels} refs={run.refs} onPickSession={setSelectedSession} selectedSession={selectedSession} />
           ) : (
             <ChartSlot title="Bankroll over time" description="Percentile bands and the first 50 sessions of each strategy, on shared axes." />
+          )}
+          {run && (
+            <ReplayChart
+              nSessions={run.result.nSessions}
+              labels={run.labels}
+              refs={run.refs}
+              replay={replay}
+              status={replayStatus}
+              disabled={running}
+              onReplay={setSelectedSession}
+            />
           )}
           {run ? (
             <HistogramChart result={run.result} labels={run.labels} start={run.refs.start} />

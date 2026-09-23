@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GAME_PRESETS } from "../../engine/games";
 import { runMonteCarlo, type MonteCarloResult, type StrategyOutcome } from "../../engine/montecarlo";
+import { replaySession } from "../../engine/replay";
 import { STRATEGIES } from "../../engine/strategies/registry";
 import { sessionConfig } from "../../engine/testUtils";
 import {
@@ -12,6 +13,9 @@ import {
   logTicks,
   moneyTick,
   countTick,
+  endText,
+  replayLayout,
+  stripCells,
   pctTick,
   nearestPath,
   niceCeil,
@@ -182,5 +186,55 @@ describe("tick labels", () => {
 describe("colors", () => {
   it("one CSS variable per instance index, cycling through the palette", () => {
     expect([0, 1, 7, 8].map(seriesColorVar)).toEqual(["--series-0", "--series-1", "--series-7", "--series-0"]);
+  });
+});
+
+describe("replay layout", () => {
+  const european = GAME_PRESETS.find((g) => g.id === "european")!;
+  const specs = STRATEGIES.map((strategy) => ({ strategy, config: { ...strategy.defaultConfig } }));
+
+  it("one x range for all stacked strips (0..longest strategy); y ranges start at 0 and cover every strategy", () => {
+    const cfg = sessionConfig({ startBankroll: 100_000, baseBet: 1_000, stopWin: 110_000, maxRounds: 1000 });
+    const rep = replaySession(european, specs, cfg, 12345, 4);
+    const l = replayLayout(rep, { start: cfg.startBankroll, stopWin: cfg.stopWin, stopLoss: null });
+    const longest = Math.max(...rep.strategies.map((s) => s.rounds));
+    expect(l.x).toEqual({ min: 0, max: longest });
+    expect(l.bankrollY.min).toBe(0);
+    expect(l.betY.min).toBe(0);
+    expect(l.bankrollY.max).toBeGreaterThanOrEqual(110_000);
+    for (const s of rep.strategies) {
+      for (const v of s.bankroll.bankroll) expect(v).toBeLessThanOrEqual(l.bankrollY.max);
+      for (const v of s.bets.bankroll) expect(v).toBeLessThanOrEqual(l.betY.max);
+    }
+    // Bets are steps: each bet holds over one round.
+    const b0 = l.bets[0]!;
+    expect([b0.x[0], b0.x[1]]).toEqual([0, 1]);
+    expect(b0.y[0]).toBe(b0.y[1]);
+    // Per-round strip spans exactly the longest strategy.
+    const cells = stripCells(rep);
+    expect(cells).toHaveLength(longest);
+    expect(cells[cells.length - 1]!.x1).toBe(longest);
+    expect(cells.every((c) => c.winRate === 0 || c.winRate === 1)).toBe(true);
+  });
+
+  it("bucketed strip (> 5,000 rounds) shades each bucket by its win rate and spans the longest strategy", () => {
+    const cfg = sessionConfig({ startBankroll: 1_000_000, baseBet: 1_000, tableMin: 100, maxRounds: 20_000 });
+    const rep = replaySession(european, specs, cfg, 777, 0);
+    const cells = stripCells(rep);
+    const longest = Math.max(...rep.strategies.map((s) => s.rounds));
+    expect(cells.length).toBeLessThanOrEqual(500);
+    expect(cells[cells.length - 1]!.x1).toBe(longest);
+    for (const c of cells) expect(c.winRate >= 0 && c.winRate <= 1).toBe(true);
+    const mean = cells.reduce((s, c) => s + c.winRate * (c.x1 - c.x0), 0) / longest;
+    // The strip's overall win rate is within 4 SE of 18/37 (SE from the number of rounds shown).
+    const p = european.winProb;
+    const se = Math.sqrt((p * (1 - p)) / longest);
+    console.log(`[strip] ${longest} rounds, win rate ${mean.toFixed(4)} vs ${p.toFixed(4)}, SE ${se.toFixed(4)}, z ${((mean - p) / se).toFixed(2)}`);
+    expect(Math.abs(mean - p)).toBeLessThan(4 * se);
+  });
+
+  it("endText reads naturally", () => {
+    expect(endText("insufficientFunds", 37)).toBe("couldn't cover the next bet after 37 rounds");
+    expect(endText("stopWin", 1)).toBe("reached the win target after 1 round");
   });
 });

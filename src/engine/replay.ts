@@ -1,0 +1,113 @@
+// Same-luck replay: re-simulates ONE session index for every strategy in a run, from its seed.
+// Paths are NEVER stored during runMonteCarlo for this; replay recomputes them on demand.
+// Uses only the existing runSession (no runner or montecarlo changes).
+import { MinMaxDownsampler } from "./downsample";
+import type { Game } from "./games";
+import type { StrategySpec } from "./montecarlo";
+import { sessionSeed } from "./rng";
+import { assertValidSetup, runSession } from "./runner";
+import type { AnyStrategy } from "./strategies/types";
+import { validateStrategyConfig } from "./strategies/validate";
+import type { EndReason, SamplePath, SessionConfig } from "./types";
+
+/** At or below this maxRounds, replay records full paths (recordPath); above it, it streams through the downsampler. */
+export const REPLAY_FULL_MAX_ROUNDS = 5000;
+/** Win/loss strip buckets when the replay is downsampled. */
+export const REPLAY_STRIP_BUCKETS = 500;
+
+export interface ReplayStrategy {
+  strategyId: string;
+  endReason: EndReason;
+  rounds: number;
+  finalBankroll: number;
+  /** Bankroll after each round (round 0 = start). Full path, or min/max downsampled above 5,000 rounds. */
+  bankroll: SamplePath;
+  /** Bet placed going into round r+1, at x = r (r = rounds already played). Same representation as bankroll. */
+  bets: SamplePath;
+}
+
+/** The ONE win/loss strip (identical for every strategy by CRN), spanning the longest strategy. */
+export type ReplayStrip =
+  | { kind: "rounds"; wins: Uint8Array } // wins[r] = 1 if round r+1 was won
+  | { kind: "buckets"; bucketRounds: number; wins: Uint32Array; counts: Uint32Array };
+
+export interface Replay {
+  session: number;
+  seed: number;
+  maxRounds: number;
+  downsampled: boolean;
+  strategies: ReplayStrategy[];
+  strip: ReplayStrip;
+}
+
+/** Wraps a strategy so every resolved round reports (roundsBefore, betPlaced, won). The strategy itself stays pure. */
+export function recordingStrategy(strategy: AnyStrategy, onRound: (roundsBefore: number, bet: number, won: boolean) => void): AnyStrategy {
+  return {
+    ...strategy,
+    // ctx is the post-round view: ctx.round = rounds completed, ctx.lastBet = the bet actually placed (after table rules).
+    update: (state, won, ctx) => {
+      onRound(ctx.round - 1, ctx.lastBet!, won);
+      return strategy.update(state, won, ctx);
+    },
+  };
+}
+
+export function replaySession(game: Game, specs: readonly StrategySpec[], config: SessionConfig, masterSeed: number, session: number): Replay {
+  assertValidSetup(game, config);
+  if (!Number.isInteger(session) || session < 0) throw new Error("session must be a non-negative integer");
+  for (const s of specs) {
+    const errors = validateStrategyConfig(s.strategy, s.config);
+    if (Object.keys(errors).length > 0) throw new Error(`Invalid config for "${s.strategy.id}": ${JSON.stringify(errors)}`);
+  }
+  const seed = sessionSeed(masterSeed, session);
+  const downsampled = config.maxRounds > REPLAY_FULL_MAX_ROUNDS;
+  const bucketRounds = Math.ceil(config.maxRounds / REPLAY_STRIP_BUCKETS);
+
+  let longest = -1;
+  let strip: ReplayStrip = { kind: "rounds", wins: new Uint8Array(0) };
+
+  const strategies = specs.map(({ strategy, config: strategyConfig }): ReplayStrategy => {
+    if (!downsampled) {
+      const betX: number[] = [];
+      const betY: number[] = [];
+      const wins: number[] = [];
+      const recorder = recordingStrategy(strategy, (r, bet, won) => {
+        betX.push(r);
+        betY.push(bet);
+        wins.push(won ? 1 : 0);
+      });
+      const res = runSession(game, recorder, strategyConfig, config, seed, { recordPath: true });
+      if (res.rounds > longest) {
+        longest = res.rounds;
+        strip = { kind: "rounds", wins: Uint8Array.from(wins) };
+      }
+      return { strategyId: strategy.id, endReason: res.endReason, rounds: res.rounds, finalBankroll: res.finalBankroll, bankroll: res.path!, bets: { rounds: betX, bankroll: betY } };
+    }
+
+    // Long sessions: stream bankroll AND bets through the same downsampler that produces stored sample paths.
+    const bankDs = new MinMaxDownsampler(config.maxRounds);
+    const betDs = new MinMaxDownsampler(config.maxRounds);
+    const bw = new Uint32Array(REPLAY_STRIP_BUCKETS);
+    const bc = new Uint32Array(REPLAY_STRIP_BUCKETS);
+    const recorder = recordingStrategy(strategy, (r, bet, won) => {
+      betDs.observer(r, bet);
+      const b = Math.min(REPLAY_STRIP_BUCKETS - 1, Math.floor(r / bucketRounds));
+      bc[b]!++;
+      if (won) bw[b]!++;
+    });
+    const res = runSession(game, recorder, strategyConfig, config, seed, { observer: bankDs.observer });
+    if (res.rounds > longest) {
+      longest = res.rounds;
+      strip = { kind: "buckets", bucketRounds, wins: bw, counts: bc };
+    }
+    const bets = res.rounds > 0 ? betDs.result() : { rounds: [], bankroll: [] };
+    return { strategyId: strategy.id, endReason: res.endReason, rounds: res.rounds, finalBankroll: res.finalBankroll, bankroll: bankDs.result(), bets };
+  });
+
+  return { session, seed, maxRounds: config.maxRounds, downsampled, strategies, strip };
+}
+
+/** Typed-array buffers in a replay, for Comlink.transfer. */
+export function replayTransferables(r: Replay): ArrayBuffer[] {
+  return r.strip.kind === "rounds" ? [r.strip.wins.buffer as ArrayBuffer] : [r.strip.wins.buffer as ArrayBuffer, r.strip.counts.buffer as ArrayBuffer];
+}
