@@ -257,6 +257,24 @@ export function replayLayout(rep: Replay, refs: ChartRefs): ReplayLayout {
   };
 }
 
+/** The earliest round at which any strategy in the replay ended (>= 1). "Fit to first ending" zooms here. */
+export function firstEndingRound(rep: Replay): number {
+  let m = Infinity;
+  for (const s of rep.strategies) m = Math.min(m, s.rounds);
+  return Number.isFinite(m) ? Math.max(1, m) : 1;
+}
+
+/**
+ * Zoom x-range from a drag between two data-x values, ordered and clamped to `full`. Returns null
+ * when the span is below `minSpan` rounds (a click, not a drag), so the caller keeps the current view.
+ */
+export function zoomFromDrag(a: number, b: number, full: Range, minSpan = 2): Range | null {
+  const lo = Math.max(full.min, Math.min(a, b));
+  const hi = Math.min(full.max, Math.max(a, b));
+  if (!(hi - lo >= minSpan)) return null;
+  return { min: Math.floor(lo), max: Math.ceil(hi) };
+}
+
 /** Step line: value v_i holds over [x_i, x_i + 1]. */
 function stepLine(x: readonly number[], y: readonly number[]): Line {
   const xs: number[] = [];

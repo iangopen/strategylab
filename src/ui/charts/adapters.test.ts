@@ -14,8 +14,10 @@ import {
   moneyTick,
   countTick,
   endText,
+  firstEndingRound,
   replayLayout,
   stripCells,
+  zoomFromDrag,
   pctTick,
   nearestPath,
   niceCeil,
@@ -236,5 +238,23 @@ describe("replay layout", () => {
   it("endText reads naturally", () => {
     expect(endText("insufficientFunds", 37)).toBe("couldn't cover the next bet after 37 rounds");
     expect(endText("stopWin", 1)).toBe("reached the win target after 1 round");
+  });
+});
+
+describe("replay zoom (pure)", () => {
+  const rep = (rounds: number[]) => ({ strategies: rounds.map((r) => ({ rounds: r })) }) as unknown as Parameters<typeof firstEndingRound>[0];
+
+  it("firstEndingRound is the earliest strategy end, at least 1", () => {
+    expect(firstEndingRound(rep([11, 1000, 37]))).toBe(11);
+    expect(firstEndingRound(rep([1000]))).toBe(1000);
+    expect(firstEndingRound(rep([0, 5]))).toBe(1); // a strategy that never bet does not zoom to 0
+  });
+
+  it("zoomFromDrag orders and clamps the drag, and rejects a too-small span (a click)", () => {
+    const full = { min: 0, max: 1000 };
+    expect(zoomFromDrag(100, 300, full)).toEqual({ min: 100, max: 300 });
+    expect(zoomFromDrag(300, 100, full)).toEqual({ min: 100, max: 300 }); // reversed drag
+    expect(zoomFromDrag(-50, 2000, full)).toEqual({ min: 0, max: 1000 }); // clamped to full
+    expect(zoomFromDrag(100, 100.5, full)).toBeNull(); // span < 2 rounds
   });
 });
