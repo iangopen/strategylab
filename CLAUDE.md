@@ -36,6 +36,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
 - GitHub: `iangopenbusinessai-lab/strategylab` (private). Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
 - Deploy: Vercel auto-deploys on push to `main`. Never run the Vercel CLI.
+- **Background dev/preview servers:** stopping the task that ran `npx vite preview` (or `vite`) can leave vite's `node` child alive and holding the port. Before starting a server, check the port; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
 - **Never create files with `echo > file` in PowerShell.** Windows PowerShell 5 writes UTF-16 LE, which git treats as binary (this happened to the first `README.md`). Use the editor/file tools, or `Set-Content -Encoding utf8`.
 
 ### Commands
@@ -79,9 +80,9 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 8. **runSession(game, strategy, config, seed, opts)** returns finalBankroll, rounds, totalWagered, peak, maxDrawdown, longestLosingStreak, endReason, and path only if `opts.recordPath`.
 
-9. **Stats are a plug-in layer** (`src/engine/stats/`). A stat is `{ id; label; format: "money" | "pct" | "ratio" | "int"; emphasis?: boolean; compute(acc: Accumulator): number }`. The Accumulator is built in a single pass per strategy and holds running sums (final, wagered, rounds, sums of squares for SE), endReason counts, and ONE `Float64Array` of final bankrolls per strategy. NEVER retain full paths for all sessions. Stats are registered in `stats/registry.ts`, and the results table renders purely from that registry.
+9. **Stats are a plug-in layer** (`src/engine/stats/`). A stat is `{ id; label; format: "money" | "pct" | "ratio" | "int"; emphasis?: boolean; compute(acc: Accumulator, ctx: RunContext): number }`, where `RunContext` is read-only `{ game, edge, config, nSessions }` (session 3). The Accumulator is built in a single pass per strategy and holds running sums (final, wagered, rounds, sums of squares for SE), endReason counts, and one `Float64Array` per strategy for EACH per-session column: final bankroll, max drawdown, longest losing streak (session 3). These columns NEVER leave the worker; only derived outputs cross, typed arrays via `Comlink.transfer`. Every percentile goes through ONE function, `quantileSorted` (type 7) in `stats/quantile.ts`, on a sorted copy made once per column (`sortedColumn`). NEVER retain full paths for all sessions. Stats are registered in `stats/registry.ts`, and the results table renders purely from that registry.
 
-10. **runMonteCarlo(game, strategies[], config, nSessions, masterSeed, onProgress)** runs every strategy over the SAME session seeds and returns per strategy: stat values, raw endReason counts, and the first 50 session paths. Percentile bands and histograms plug in at the marked extension point.
+10. **runMonteCarlo(game, strategies[], config, nSessions, masterSeed, onProgress)** runs every strategy over the SAME session seeds and returns per strategy: stat values, raw endReason counts, the first 50 session paths (streaming min/max downsampled), final-bankroll histogram counts over ONE set of 50 bins shared by every strategy in the run, and p5/p25/p50/p75/p95 percentile bands at round 0 + up to 200 checkpoints, from the first min(2000, n) sessions (the same indices for every strategy). Band and sample-path sessions are observed through the runner's optional per-round `observer`; every other session pays only a branch check. Memory per observed session is independent of maxRounds.
 
 11. **Worker.** `src/worker/sim.worker.ts` exposes runMonteCarlo via Comlink. The progress callback is passed with `Comlink.proxy` and reported about every 2%. Cancel = `worker.terminate()`, then respawn (Comlink cannot interrupt a sync loop). The UI NEVER runs a simulation on the main thread. `client.ts` owns the worker lifecycle.
 
@@ -100,8 +101,10 @@ src/
     rng.ts            mulberry32 + splitmix32
     games.ts          Game type, presets, edge, validation
     types.ts          shared engine types (SessionResult, EndReason, ...)
-    runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules
-    montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, EXTENSION POINT for bands
+    runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer
+    montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, histogram, bands, resultTransferables
+    downsample.ts     streaming min/max sample-path downsampler (<= 1000 points)
+    perf.bench.test.ts opt-in benchmark (BENCH=1): session 2 timing scenario + observer cost
     testUtils.ts      test-only helpers (scripted/counting RNG, sample-based SE)
     isolation.test.ts guards rules 1-2 (no Math.random / React / DOM in engine)
     strategies/
@@ -109,10 +112,15 @@ src/
       registry.ts     the ONE place strategies are registered
       flat.ts         reference implementation
       validate.ts     checks a config against its configSchema
+      crn.test.ts     CRN across every registered strategy
+      customGame.test.ts  every strategy on p = 0.45, payout 1.2, via the registered z stat
     stats/
-      types.ts        StatDef
-      accumulator.ts  single-pass accumulator
-      registry.ts     the ONE place stats are registered
+      types.ts        StatDef, RunContext
+      accumulator.ts  single-pass accumulator, per-session columns, sortedColumn (sort once)
+      quantile.ts     THE percentile function (type 7) + sortedCopy
+      histogram.ts    shared-bin histogram (50 bins over [min, max] across all strategies)
+      bands.ts        checkpoint rounds + BandRecorder (percentile bands over time)
+      registry.ts     the ONE place stats are registered (row order = table order)
   worker/
     sim.worker.ts     Comlink-exposed runMonteCarlo
     client.ts         worker lifecycle, progress, cancel
@@ -166,9 +174,9 @@ Every progression keeps its own level in State and computes the next bet from it
 
 ## How to add a stat
 
-1. If the stat needs data the Accumulator doesn't collect yet, extend `accumulator.ts` (single pass, no path retention) and add a test for the new field.
-2. Add a `StatDef` in `stats/` and one line to `stats/registry.ts`.
-3. Test `compute` against a hand-built accumulator with a known answer.
+1. If the stat needs data the Accumulator doesn't collect yet, extend `accumulator.ts` (single pass, no path retention; a new per-session column is one `Float64Array` plus a `ColumnKey`) and add a test for the new field.
+2. Add a `StatDef` with `compute(acc, ctx)` in `stats/` and one line to `stats/registry.ts`, **at the right position**: the table renders registry order. Use `ctx` (game, edge, config, nSessions) instead of re-deriving run facts. Any percentile MUST be `quantileSorted(sortedColumn(acc, key), p)`. Never sort a column yourself. Return NaN for "undefined" (the UI shows a dash).
+3. Test `compute` against a hand-built accumulator with a known answer (`testCtx(...)` in `testUtils.ts` builds the ctx). Update the row-order test in `stats.test.ts`.
 4. Confirm it appears in the results table with no UI edits.
 5. Update STATUS.
 
@@ -181,7 +189,7 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 1. **Infrastructure (session 1):** scaffold, repo, rng/games/runner, flat reference strategy, stats plug-in layer with starter stats, montecarlo, worker with progress and cancel, schema-driven UI shell, this file.
 2. **Strategy archetypes:** Martingale, Paroli, D'Alembert, Fibonacci, each with progression tests and the per-strategy invariant test. Martingale analytic check: with bankroll B, base b, multiplier m, no tableMax, and stopWin = start + b (one cycle), P(bust) matches (1−p)^k within 4 SE, where k is the largest integer with b(m^k − 1)/(m − 1) ≤ B. Table-max check: with tableMax set, the capped bet is asserted and one-cycle recovery visibly fails.
 3. **Statistics:** p5/p25/p75/p95 final bankroll, P(profit > 0), P(bust) = ruin + insufficientFunds, P(hit stopWin), max drawdown and longest losing streak summaries, SE shown for EV per $, final-bankroll histogram, percentile bands over time (subset of ≤2000 sessions, ≤200 checkpoints, early-ending sessions carry their final bankroll forward). P(profit > 0) sits next to EV per $ because that contrast is the lesson.
-4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay. Sample-path downsampling must preserve extrema and the final point (e.g. min/max per bucket), never plain stride; stride hides the bust. NOTE: session 1's `pathStride` in `runner.ts`/`montecarlo.ts` IS plain stride (lossless only while maxRounds ≤ 1000); the charts session must replace it.
+4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay. Sample-path downsampling must preserve extrema and the final point (e.g. min/max per bucket), never plain stride; stride hides the bust. (Done in session 3 in `downsample.ts`. All chart data is now produced; session 4 only renders it.)
 5. **More strategies:** Labouchere, Oscar's Grind, Kelly.
 6. **JSON rule builder:** user-defined strategies compiled into the same Strategy contract.
 7. **URL-serialized scenarios:** encode ScenarioConfig in the URL.
@@ -246,17 +254,43 @@ Session 2 (2026-09-22). `npm run test` (122 tests) and `npm run build` clean und
     - Session 1's exact run (flat, $100k, $25 base, 10,000 rounds, 100k sessions, seed 12345) took **89.3s on preview vs 75.7s on dev in session 1**, with identical results ($93,257.60 mean final). No console errors.
     - **Caveat:** the automation tab reported `visibilityState: hidden` and `hasFocus() = false` the whole time, in both sessions. The requested focused-tab condition was NOT met, and the timing comparison is inconclusive (hidden and deprioritized in both).
 
+Session 3 (2026-09-23). `npm run test` (168 passed, 2 benchmark tests skipped) and `npm run build` clean under strict.
+
+17. **quantile (type 7)** matches hand-computed values on odd, even, single-element and tied inputs, and on p = 0 and 1. My first hand value for the tied case was wrong (5.6); the correct value is 6.2, matching numpy.
+18. **Every new stat** was tested against a hand-built 5-session accumulator: EV, SE (vs the sample-based SE), theory, z, and P(profit), which is strict (a session ending at exactly start is not counted). Also P(bust), P(hit win target) (and "—" when off), final p5/p25/median/p75/p95/mean, mean and p95 drawdown, mean and max streak, volume, and end reasons. A test locks the exact row order.
+19. **Histogram:** the edges equal the global min and max final bankroll across all 5 strategies (checked with throwaway plug-in min/max stats). There are 51 strictly increasing edges, counts sum to n for every strategy, and the max lands in the last bin. Identical-values and `count` cases are unit-tested.
+20. **Bands:** p5 ≤ p25 ≤ p50 ≤ p75 ≤ p95 at every checkpoint for all 5 strategies. Round 0 equals start. The last checkpoint equals the type-7 percentiles of the subset's final bankrolls, recomputed independently. The subset is capped at 2000 with n = 2500. Carry-forward was tested with a session ending at round 1, both in the unit test and in a run where every session ends at round 1.
+21. **Streaming downsampler:** a 1,000,000-round synthetic path busting at round 777,777 kept 779 points (cap 1000), including the global max (round 123,457), the global min and bust round (777,777), and a lone one-round dip. A full 1M-round path keeps its final point. The downsampler is lossless at maxRounds 998.
+22. **maxRounds 1,000,000 with observed sessions:** 60 sessions × 1,000,000 rounds (50 sample paths plus bands) took 1.9–2.1s with **1.5–1.7 MB** heap growth (bound 50 MB; full paths would be ≈ 960 MB).
+23. **Memory test 6** (100k × 1000 with the new columns and bands): heap delta −2.1 MB after the run. GC ran and the columns are freed after `runMonteCarlo` returns, so this does not show the peak. The added peak working set by construction: 3 × 100k × 8 B = 2.4 MB per strategy for columns, plus 3.2 MB per strategy for band values until percentiles are computed.
+24. **Performance** (session 2 scenario, 100k × 6 strategies, median of 3): **before 10.45s; after 9.90s and 10.72s** on two runs (run-to-run noise ≈ ±5%). That is at most +2.6%, within the +25% budget. **Observer cost:** a 1000-round flat session with band + downsampler takes 130.0 µs vs 29.4 µs plain (**×4.43**, worst case). Only ≤ 2000 sessions per strategy are observed, and only 50 carry the downsampler.
+25. **CRN** holds across all 5 strategies (now on lossless maxRounds 998). The session 2 invariant table re-ran identically (every |z| ≤ 1.13), and the Martingale analytic check is unchanged.
+26. **Custom game p = 0.45, payout 1.2,** all 5 strategies, shared scenario with stops on, 20,000 sessions, via the registered z stat: flat z = 0.03, martingale 0.28, paroli −0.97, d'alembert −0.08, fibonacci −0.09. All within 4 SE. This closes the session 2 open item.
+27. **Transfer:** `resultTransferables` lists every typed-array buffer once. After `structuredClone(..., { transfer })` the source is detached (transferred, not copied), and a result carries no per-session arrays.
+28. **Manual** (`npm run build` + `npm run preview`, bundle `index-Bx6Ihsq9.js`, tab hidden / unfocused): all five strategies, European, default scenario, 10,000 sessions, done in 3.2s. Displayed exactly:
+
+    | Row | Flat | Martingale | Paroli | D'Alembert | Fibonacci |
+    |---|---|---|---|---|---|
+    | EV per $ wagered | -2.726% | -2.840% | -2.736% | -2.752% | -2.704% |
+    | SE of EV per $ | 0.032% | 0.180% | 0.039% | 0.073% | 0.103% |
+    | Theoretical EV per $ (−edge) | -2.703% | -2.703% | -2.703% | -2.703% | -2.703% |
+    | z vs theory | -0.74 | -0.76 | -0.84 | -0.67 | -0.01 |
+    | P(profit > 0) | 18.990% | 15.200% | 22.610% | 5.960% | 15.350% |
+    | P(bust: ruin or couldn't cover bet) | 1.800% | 95.890% | 29.690% | 93.960% | 84.630% |
+    | P(hit win target) | — | — | — | — | — |
+
+    All 25 rows rendered in registry order. No console errors.
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s.
-- The custom-game EV per $ at SE level. This will be checkable once session 3 adds the SE row.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Roadmap sessions 3 on.
+- Roadmap sessions 4 on.
 - Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
-- Sample-path downsampling is plain stride (see the Charts roadmap note). It is lossless at maxRounds ≤ 1000 and hides extrema above that.
+- The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
 
 ### Decisions made outside the spec
 
@@ -269,10 +303,10 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **`update(state, won, ctx)` receives the post-round ctx:** bankroll after resolution, `lastBet` = the bet actually placed (after table rules). Progressions that need their own intended bet must keep it in State.
 - **Win payout is `Math.round(bet * netPayout)` cents.** Exact for even money; for fractional custom payouts it introduces at most half a cent of rounding per win.
 - **`runSessionWithRng`** (exported from `runner.ts`) takes an injected RNG so tests can script outcomes and count draws. Production code uses `runSession` (seeded mulberry32).
-- **Sample paths are strided** so each has at most ~1000 points (`pathStride = ceil(maxRounds / 1000)`), stored as `{ rounds[], bankroll[] }`. Reason: 50 full paths at maxRounds = 1,000,000 would be ~400 MB.
+- **Sample paths are min/max downsampled, streaming** (session 3; replaced session 1's plain `pathStride`): 499 buckets over maxRounds, each keeping its min and max point; first, final, peak and trough always kept; ≤ 1000 points, stored as `{ rounds[], bankroll[] }`. Lossless while maxRounds ≤ 998 (≤ 2 rounds per bucket), which is why `crn.test.ts` uses maxRounds 998.
 - **Stats list is overridable:** `runMonteCarlo(..., onProgress, { stats })` defaults to the registry. Test 5 uses this to add a throwaway stat without editing any other code. The registry itself stays a static array.
-- **Accumulator stores profit-based second moments** (`sumProfitSq`, `sumWageredSq`, `sumProfitWagered`) for a delta-method SE of EV per $ (`evPerWageredSE` in `stats/registry.ts`, tested against the sample-based SE; not yet a table row).
-- **Median** sorts a copy of the `Float64Array` once at the end.
+- **Accumulator stores profit-based second moments** (`sumProfitSq`, `sumWageredSq`, `sumProfitWagered`) for a delta-method SE of EV per $ (`evPerWageredSE` in `stats/registry.ts`, tested against the sample-based SE; the "SE of EV per $" row since session 3).
+- **Median** is `quantileSorted(sortedColumn(acc, "finals"), 0.5)` (type 7; identical to the usual median).
 - **Engine validation:** `runSession`/`runMonteCarlo` throw on invalid game/config, non-finite strategy bets, strategy configs outside their `configSchema`, `nSessions` outside 1..1,000,000, or a seed that isn't uint32.
 - **Units in the UI:** dollars in `ScenarioConfig`, converted to integer cents in `toSimRequest`. stopWin/stopLoss/tableMax are absolute amounts; blank = off / no limit (`null`). `baseBet` is passed in ctx; flat bets `baseBet × units`.
 - **Number inputs keep a local text draft** (`NumberField`) only while typing; every parseable value is committed to `ScenarioConfig` immediately. Unparseable text shows an inline error and is not committed.
@@ -287,4 +321,13 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 2: the invariant scenario sets tableMax $250,** so Martingale's ladder ($5 → $320) is clamped inside the invariant test. The invariant holds under a clamp.
 - **Session 2: the Martingale analytic pairs were chosen so money is left over after k losses** ($370 and $245). If the leftover were exactly 0, the session would end in ruin (bankroll < tableMin) instead of insufficientFunds.
 - **Session 2: shared test kit in `testUtils.ts`** (`betSequence`, `expectPure`, `describeEvInvariant`, `deltasFromPath`). It imports vitest, so it is test-only. Production code never imports `testUtils`.
+- **Session 3: the owner rejected full-path recording** for bands and samples (2000 full paths at maxRounds 1,000,000 ≈ 16 GB). Instead the runner takes an optional per-round `observer(round, bankroll)`, called at round 0 and after every resolved round, passed ONLY for band-subset sessions. `recordPath` (full path) remains for tests and future single-session replay; `pathStride` is gone.
+- **Session 3: bands include round 0** (the starting bankroll) as checkpoint 0 (owner decision), then C = min(200, maxRounds) rounds at round(j × maxRounds / C), ending at maxRounds.
+- **Session 3: P(hit win target) is NaN ("—") when stopWin is off**, not 0%.
+- **Session 3: z vs theory is NaN ("—") when the SE is 0 or undefined.**
+- **Session 3: histogram with identical values everywhere** widens the range to [min − 1¢, max + 1¢]. Bins are [e_i, e_{i+1}), and the last bin includes max.
+- **Session 3: sample paths stay `number[]`**; histogram counts (`Uint32Array`), edges, and bands (`Float64Array`) are transferred with `Comlink.transfer` (`resultTransferables`).
+- **Session 3: percentages display with 3 decimals** (owner-approved; `src/ui/format.ts`) so the SE row is readable (0.032%, not 0.03%).
+- **Session 3: `testCtx` lives in `testUtils.ts`**; tests never import from other test files.
+- **Session 3: `perf.bench.test.ts` is committed and skipped unless `BENCH=1`**, so later sessions can re-measure against the same scenario.
 - **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
