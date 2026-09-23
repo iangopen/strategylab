@@ -15,7 +15,9 @@ describe("custom game p = 0.45, payout 1.2: every registered strategy within 4 S
 
   for (const strategy of STRATEGIES) {
     it(strategy.id, () => {
-      const r = runMonteCarlo(game, [{ strategy, config: { ...strategy.defaultConfig } }], INVARIANT_SCENARIO, INVARIANT_SESSIONS, 4545);
+      // Kelly's default refuses to bet on a negative-edge game; give it a misjudged edge so it wagers.
+      const config = strategy.id === "kelly" ? { assumedWinProb: 0.6, fraction: 1 } : { ...strategy.defaultConfig };
+      const r = runMonteCarlo(game, [{ strategy, config }], INVARIANT_SCENARIO, INVARIANT_SESSIONS, 4545);
       const s = r.perStrategy[0]!.stats;
       console.log(
         `[custom game] ${strategy.id}: measured=${s.evPerWagered!.toFixed(6)} theory=${s.evTheory!.toFixed(6)} SE=${s.evSE!.toFixed(6)} z=${s.evZ!.toFixed(2)}`,

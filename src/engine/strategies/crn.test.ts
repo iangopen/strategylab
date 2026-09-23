@@ -8,12 +8,14 @@ import { STRATEGIES } from "./registry";
 describe("common random numbers across every registered strategy", () => {
   it("session i sees an identical win/loss sequence in every strategy, over their overlapping rounds", () => {
     const european = GAME_PRESETS.find((g) => g.id === "european")!;
-    expect(STRATEGIES.map((s) => s.id)).toEqual(["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere", "oscars"]);
+    expect(STRATEGIES.map((s) => s.id)).toEqual(["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere", "oscars", "kelly"]);
     // Sample paths are min/max-downsampled; with maxRounds <= 2 x buckets (998) every bucket holds at
     // most 2 rounds, so the paths are lossless and every round's outcome is visible.
     const scenario = { ...INVARIANT_SCENARIO, maxRounds: 2 * DOWNSAMPLE_BUCKETS };
 
-    const specs = STRATEGIES.map((strategy) => ({ strategy, config: { ...strategy.defaultConfig } }));
+    // Kelly with its default (assumed 0 -> true prob) would refuse to bet on European (negative edge),
+    // so give it a misjudged edge here to make its CRN meaningful; every other strategy uses its default.
+    const specs = STRATEGIES.map((strategy) => ({ strategy, config: strategy.id === "kelly" ? { assumedWinProb: 0.6, fraction: 1 } : { ...strategy.defaultConfig } }));
     const r = runMonteCarlo(european, specs, scenario, SAMPLE_PATH_COUNT, 424242);
 
     let sessionsWithDifferentLengths = 0;
