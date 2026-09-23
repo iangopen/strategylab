@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GAME_PRESETS } from "../games";
+import { DOWNSAMPLE_BUCKETS } from "../downsample";
 import { runMonteCarlo, SAMPLE_PATH_COUNT } from "../montecarlo";
 import { INVARIANT_SCENARIO, outcomesFromPath } from "../testUtils";
 import { STRATEGIES } from "./registry";
@@ -8,15 +9,17 @@ describe("common random numbers across every registered strategy", () => {
   it("session i sees an identical win/loss sequence in every strategy, over their overlapping rounds", () => {
     const european = GAME_PRESETS.find((g) => g.id === "european")!;
     expect(STRATEGIES.map((s) => s.id)).toEqual(["flat", "martingale", "paroli", "dalembert", "fibonacci"]);
-    // maxRounds 1000 -> path stride 1, so every round is visible in the sample paths.
-    expect(INVARIANT_SCENARIO.maxRounds).toBeLessThanOrEqual(1000);
+    // Sample paths are min/max-downsampled; with maxRounds <= 2 x buckets (998) every bucket holds at
+    // most 2 rounds, so the paths are lossless and every round's outcome is visible.
+    const scenario = { ...INVARIANT_SCENARIO, maxRounds: 2 * DOWNSAMPLE_BUCKETS };
 
     const specs = STRATEGIES.map((strategy) => ({ strategy, config: { ...strategy.defaultConfig } }));
-    const r = runMonteCarlo(european, specs, INVARIANT_SCENARIO, SAMPLE_PATH_COUNT, 424242);
+    const r = runMonteCarlo(european, specs, scenario, SAMPLE_PATH_COUNT, 424242);
 
     let sessionsWithDifferentLengths = 0;
     let comparedRounds = 0;
     for (let i = 0; i < SAMPLE_PATH_COUNT; i++) {
+      for (const s of r.perStrategy) expect(s.samplePaths[i]!.rounds).toEqual(Array.from({ length: s.samplePaths[i]!.rounds.length }, (_, k) => k)); // lossless
       const seqs = r.perStrategy.map((s) => outcomesFromPath(s.samplePaths[i]!));
       const lengths = seqs.map((s) => s.length);
       if (new Set(lengths).size > 1) sessionsWithDifferentLengths++;

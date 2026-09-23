@@ -180,14 +180,12 @@ describe("session stats", () => {
     expect(r.totalWagered).toBe(800);
   });
 
-  it("records a path only when asked, with an optional stride", () => {
+  it("records a full path (every round) only when asked", () => {
     const cfg = sessionConfig({ startBankroll: 100000, maxRounds: 10 });
     expect(runSession(european, flat, { units: 1 }, cfg, 1).path).toBeUndefined();
     const full = runSession(european, flat, { units: 1 }, cfg, 1, { recordPath: true }).path!;
     expect(full.rounds).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    const strided = runSession(european, flat, { units: 1 }, cfg, 1, { recordPath: true, pathStride: 4 }).path!;
-    expect(strided.rounds).toEqual([0, 4, 8, 10]);
-    expect(strided.bankroll).toEqual([0, 4, 8, 10].map((k) => full.bankroll[k]));
+    expect(full.bankroll).toHaveLength(11);
   });
 });
 

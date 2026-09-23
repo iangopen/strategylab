@@ -1,3 +1,4 @@
+import { MinMaxDownsampler } from "./downsample";
 import { edge, type Game } from "./games";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
@@ -8,11 +9,11 @@ import { STATS } from "./stats/registry";
 import type { RunContext, StatDef } from "./stats/types";
 import type { AnyStrategy, StrategyConfig } from "./strategies/types";
 import { validateStrategyConfig } from "./strategies/validate";
-import type { EndReason, SamplePath, SessionConfig } from "./types";
+import type { EndReason, RoundObserver, SamplePath, SessionConfig } from "./types";
 
 export const MAX_SESSIONS = 1_000_000;
 export const SAMPLE_PATH_COUNT = 50;
-/** Sample paths are recorded with a stride so each has at most ~this many points. */
+/** Sample paths are min/max-downsampled (streaming) to at most this many points each. */
 export const MAX_PATH_POINTS = 1000;
 
 export interface StrategySpec {
@@ -79,7 +80,6 @@ export function runMonteCarlo(
   const stats = options.stats ?? STATS;
   const accs: Accumulator[] = strategies.map(() => createAccumulator(nSessions, config.startBankroll));
   const paths: SamplePath[][] = strategies.map(() => []);
-  const pathStride = Math.ceil(config.maxRounds / MAX_PATH_POINTS);
   // Percentile bands: the first min(BAND_SESSIONS, n) session indices, the SAME for every strategy
   // (CRN), are observed round by round; only checkpoint values are kept, so memory does not
   // depend on maxRounds. Early-ending sessions carry their final bankroll forward.
@@ -90,14 +90,30 @@ export function runMonteCarlo(
   let lastReported = -1;
   for (let i = 0; i < nSessions; i++) {
     const seed = sessionSeed(masterSeed, i);
-    const recordPath = i < SAMPLE_PATH_COUNT;
     for (let k = 0; k < strategies.length; k++) {
       const { strategy, config: strategyConfig } = strategies[k]!;
-      const band = i < bandSessions ? bandRecorders[k]!.observe(i) : undefined;
-      const r = runSession(game, strategy, strategyConfig, config, seed, { recordPath, pathStride, observer: band?.observer });
+      // Only band-subset sessions get an observer; the rest pay just a branch check per round.
+      let observer: RoundObserver | undefined;
+      let band: ReturnType<BandRecorder["observe"]> | undefined;
+      let ds: MinMaxDownsampler | undefined;
+      if (i < bandSessions) {
+        band = bandRecorders[k]!.observe(i);
+        if (i < SAMPLE_PATH_COUNT) {
+          ds = new MinMaxDownsampler(config.maxRounds);
+          const a = band.observer;
+          const b = ds.observer;
+          observer = (round, bankroll) => {
+            a(round, bankroll);
+            b(round, bankroll);
+          };
+        } else {
+          observer = band.observer;
+        }
+      }
+      const r = runSession(game, strategy, strategyConfig, config, seed, observer ? { observer } : {});
       band?.finish(r.finalBankroll);
+      if (ds) paths[k]!.push(ds.result());
       addSession(accs[k]!, r);
-      if (r.path) paths[k]!.push(r.path);
     }
     if (onProgress) {
       const step = Math.floor(((i + 1) * 50) / nSessions); // one step = 2%

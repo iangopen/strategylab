@@ -53,8 +53,6 @@ export type RoundObserver = (round: number, bankroll: number) => void;
 export interface RunOptions {
   /** Full path, every round (tests and single-session replay). runMonteCarlo uses observer instead. */
   recordPath?: boolean;
-  /** Record every Nth round (plus start and final). Default 1. */
-  pathStride?: number;
   /** Optional per-round observer. Sessions without one pay only a branch check per round. */
   observer?: RoundObserver;
 }

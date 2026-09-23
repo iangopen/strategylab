@@ -49,7 +49,6 @@ export function runSessionWithRng(
   opts: RunOptions = {},
 ): SessionResult {
   const { tableMin, tableMax, stopWin, stopLoss, maxRounds } = config;
-  const stride = Math.max(1, Math.floor(opts.pathStride ?? 1));
   const path: SamplePath | undefined = opts.recordPath ? { rounds: [0], bankroll: [config.startBankroll] } : undefined;
   const observer = opts.observer;
 
@@ -100,15 +99,10 @@ export function runSessionWithRng(
       longestLosingStreak = losingStreak;
     }
     if (observer !== undefined) observer(rounds, bankroll);
-    if (path && rounds % stride === 0) {
+    if (path) {
       path.rounds.push(rounds);
       path.bankroll.push(bankroll);
     }
-  }
-
-  if (path && path.rounds[path.rounds.length - 1] !== rounds) {
-    path.rounds.push(rounds);
-    path.bankroll.push(bankroll);
   }
 
   const result: SessionResult = { finalBankroll: bankroll, rounds, totalWagered, peak, maxDrawdown, longestLosingStreak, endReason };
