@@ -2,6 +2,7 @@ import { edge, type Game } from "./games";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
 import { addSession, createAccumulator, type Accumulator } from "./stats/accumulator";
+import { BAND_SESSIONS, BandRecorder, checkpointRounds, type Bands } from "./stats/bands";
 import { sharedHistogram } from "./stats/histogram";
 import { STATS } from "./stats/registry";
 import type { RunContext, StatDef } from "./stats/types";
@@ -28,6 +29,8 @@ export interface StrategyOutcome {
   samplePaths: SamplePath[];
   /** Final-bankroll counts over the run's SHARED bins (MonteCarloResult.histogram.edges). */
   histogramCounts: Uint32Array;
+  /** p5/p25/p50/p75/p95 bankroll at each checkpoint (MonteCarloResult.bands.rounds). */
+  bands: Bands;
 }
 
 export interface MonteCarloResult {
@@ -36,6 +39,8 @@ export interface MonteCarloResult {
   perStrategy: StrategyOutcome[];
   /** ONE set of final-bankroll bin edges (cents) shared by every strategy in the run. */
   histogram: { edges: Float64Array };
+  /** Checkpoint rounds (0 first) and the size of the band subset (first min(2000, n) sessions). */
+  bands: { rounds: Float64Array; sessions: number };
 }
 
 export interface MonteCarloOptions {
@@ -75,10 +80,12 @@ export function runMonteCarlo(
   const accs: Accumulator[] = strategies.map(() => createAccumulator(nSessions, config.startBankroll));
   const paths: SamplePath[][] = strategies.map(() => []);
   const pathStride = Math.ceil(config.maxRounds / MAX_PATH_POINTS);
-  // EXTENSION POINT (statistics session): percentile bands over time need per-checkpoint
-  // bankrolls for a subset of sessions (<= 2000 sessions, <= 200 checkpoints, early-ending
-  // sessions carry their final bankroll forward). Collect them here, alongside samplePaths,
-  // from the same runSession call. Histograms need only acc.finals.
+  // Percentile bands: the first min(BAND_SESSIONS, n) session indices, the SAME for every strategy
+  // (CRN), are observed round by round; only checkpoint values are kept, so memory does not
+  // depend on maxRounds. Early-ending sessions carry their final bankroll forward.
+  const bandSessions = Math.min(BAND_SESSIONS, nSessions);
+  const bandRounds = checkpointRounds(config.maxRounds);
+  const bandRecorders = strategies.map(() => new BandRecorder(bandRounds, bandSessions));
 
   let lastReported = -1;
   for (let i = 0; i < nSessions; i++) {
@@ -86,7 +93,9 @@ export function runMonteCarlo(
     const recordPath = i < SAMPLE_PATH_COUNT;
     for (let k = 0; k < strategies.length; k++) {
       const { strategy, config: strategyConfig } = strategies[k]!;
-      const r = runSession(game, strategy, strategyConfig, config, seed, { recordPath, pathStride });
+      const band = i < bandSessions ? bandRecorders[k]!.observe(i) : undefined;
+      const r = runSession(game, strategy, strategyConfig, config, seed, { recordPath, pathStride, observer: band?.observer });
+      band?.finish(r.finalBankroll);
       addSession(accs[k]!, r);
       if (r.path) paths[k]!.push(r.path);
     }
@@ -107,6 +116,7 @@ export function runMonteCarlo(
     nSessions,
     masterSeed,
     histogram: { edges: histogram.edges },
+    bands: { rounds: bandRounds, sessions: bandSessions },
     perStrategy: strategies.map((s, k) => {
       const acc = accs[k]!;
       const values: Record<string, number> = {};
@@ -117,6 +127,7 @@ export function runMonteCarlo(
         endReasonCounts: { ...acc.endReasons },
         samplePaths: paths[k]!,
         histogramCounts: histogram.counts[k]!,
+        bands: bandRecorders[k]!.percentiles(),
       };
     }),
   };

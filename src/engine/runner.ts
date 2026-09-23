@@ -51,6 +51,7 @@ export function runSessionWithRng(
   const { tableMin, tableMax, stopWin, stopLoss, maxRounds } = config;
   const stride = Math.max(1, Math.floor(opts.pathStride ?? 1));
   const path: SamplePath | undefined = opts.recordPath ? { rounds: [0], bankroll: [config.startBankroll] } : undefined;
+  const observer = opts.observer;
 
   let bankroll = config.startBankroll;
   let rounds = 0;
@@ -64,6 +65,7 @@ export function runSessionWithRng(
   const ctx = (): StrategyContext => ({ bankroll, baseBet: config.baseBet, round: rounds, lastBet });
   let state = strategy.init(strategyConfig, ctx());
   let endReason: EndReason;
+  if (observer !== undefined) observer(0, bankroll);
 
   for (;;) {
     if (stopWin !== null && bankroll >= stopWin) { endReason = "stopWin"; break; }
@@ -97,6 +99,7 @@ export function runSessionWithRng(
     } else if (++losingStreak > longestLosingStreak) {
       longestLosingStreak = losingStreak;
     }
+    if (observer !== undefined) observer(rounds, bankroll);
     if (path && rounds % stride === 0) {
       path.rounds.push(rounds);
       path.bankroll.push(bankroll);

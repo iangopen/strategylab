@@ -241,3 +241,25 @@ describe("common random numbers (test 2)", () => {
     expect(differentLengths).toBeGreaterThan(0);
   });
 });
+
+describe("round observer", () => {
+  it("sees round 0 and every resolved round, matches the full path, and changes nothing else", () => {
+    const cfg = sessionConfig({ startBankroll: 3000, baseBet: 100, maxRounds: 500 });
+    const seen: [number, number][] = [];
+    const observed = runSession(european, flat, { units: 1 }, cfg, 77, { recordPath: true, observer: (r, b) => seen.push([r, b]) });
+    const plain = runSession(european, flat, { units: 1 }, cfg, 77, { recordPath: true });
+    expect(observed).toEqual(plain);
+    expect(seen.map(([r]) => r)).toEqual(plain.path!.rounds);
+    expect(seen.map(([, b]) => b)).toEqual(plain.path!.bankroll);
+    expect(seen[seen.length - 1]).toEqual([plain.rounds, plain.finalBankroll]);
+  });
+
+  it("is not called for rounds that never resolve (draws === rounds still holds)", () => {
+    const rng = scriptedRng([L, L]);
+    let calls = 0;
+    const r = runSessionWithRng(coin, flat, { units: 2 }, sessionConfig({ startBankroll: 500 }), rng, { observer: () => calls++ });
+    expect(r.endReason).toBe("insufficientFunds");
+    expect(rng.draws()).toBe(2);
+    expect(calls).toBe(3); // round 0 + two resolved rounds
+  });
+});
