@@ -104,6 +104,7 @@ src/
     runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer
     montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, histogram, bands, resultTransferables
     downsample.ts     streaming min/max sample-path downsampler (<= 1000 points)
+    replay.ts         same-luck replay of one session for every strategy (calls runSession only)
     perf.bench.test.ts opt-in benchmark (BENCH=1): session 2 timing scenario + observer cost
     testUtils.ts      test-only helpers (scripted/counting RNG, sample-based SE)
     isolation.test.ts guards rules 1-2 (no Math.random / React / DOM in engine)
@@ -122,7 +123,7 @@ src/
       bands.ts        checkpoint rounds + BandRecorder (percentile bands over time)
       registry.ts     the ONE place stats are registered (row order = table order)
   worker/
-    sim.worker.ts     Comlink-exposed runMonteCarlo
+    sim.worker.ts     Comlink-exposed runMonteCarlo and replay
     client.ts         worker lifecycle, progress, cancel
   ui/
     ConfigPanel.tsx   game, bankroll, table, stops, rounds, sessions, seed
@@ -132,12 +133,29 @@ src/
     SchemaForm.tsx    renders any configSchema
     RunControls.tsx
     ResultsTable.tsx  renders any stats registry
-    ChartSlot.tsx     reserved chart panels
+    ChartSlot.tsx     placeholder panels shown before the first run
+    theme.ts          System / Light / Dark preference (data-theme; not scenario state)
+    charts/
+      adapters.ts     ALL result-to-chart transforms (pure, tested): shared scales, series, ticks, replay layout
+      canvas.ts       thin Canvas 2D layer: DPR sizing, axes, bands, lines, reference lines, resize hook
+      FanChart.tsx    fan + spaghetti small multiples (click a path to replay)
+      HistogramChart.tsx  final-bankroll histograms, shared bins, linear/log
+      ReplayChart.tsx stacked replay: bankroll, bet size, ONE win/loss strip
   scenario.ts         ScenarioConfig type, defaults, validation, toSimRequest (dollars -> cents)
   App.tsx             owns the ScenarioConfig and the SimClient
 ```
 
 ---
+
+## Chart rules
+
+These are the owner's session 4 directives, verbatim. They bind every chart, present and future.
+
+**SHARED AXES ACROSS STRATEGIES.** Charts are small multiples, one panel per strategy instance, and EVERY panel of a chart type uses the SAME x and y ranges (and the histogram uses the session 3 shared bins and a shared y max). NEVER autoscale per panel. Reason: per-panel scales make Martingale's tail look like Flat's; same principle as shared bins. Bankroll y-axes start at 0.
+
+**ONE COLOR PER STRATEGY INSTANCE**, used everywhere: results table header, every chart panel, replay lines. Colorblind-safe palette, and every panel also carries a text label (NEVER color alone). Theme-aware via CSS variables for light and dark.
+
+How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fanScales`, `histogramScales`, `replayLayout`), each computed over ALL strategies of the run and tested. The color of instance k is `var(--series-k mod 8)` (`seriesColorVar`), defined for light and dark in `index.css`, and it is always paired with the instance's text label. Components only draw. Charts redraw on new results, resize, or theme change, never on keystrokes.
 
 ## How to add a strategy
 
@@ -189,7 +207,7 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 1. **Infrastructure (session 1):** scaffold, repo, rng/games/runner, flat reference strategy, stats plug-in layer with starter stats, montecarlo, worker with progress and cancel, schema-driven UI shell, this file.
 2. **Strategy archetypes:** Martingale, Paroli, D'Alembert, Fibonacci, each with progression tests and the per-strategy invariant test. Martingale analytic check: with bankroll B, base b, multiplier m, no tableMax, and stopWin = start + b (one cycle), P(bust) matches (1−p)^k within 4 SE, where k is the largest integer with b(m^k − 1)/(m − 1) ≤ B. Table-max check: with tableMax set, the capped bet is asserted and one-cycle recovery visibly fails.
 3. **Statistics:** p5/p25/p75/p95 final bankroll, P(profit > 0), P(bust) = ruin + insufficientFunds, P(hit stopWin), max drawdown and longest losing streak summaries, SE shown for EV per $, final-bankroll histogram, percentile bands over time (subset of ≤2000 sessions, ≤200 checkpoints, early-ending sessions carry their final bankroll forward). P(profit > 0) sits next to EV per $ because that contrast is the lesson.
-4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay. Sample-path downsampling must preserve extrema and the final point (e.g. min/max per bucket), never plain stride; stride hides the bust. (Done in session 3 in `downsample.ts`. All chart data is now produced; session 4 only renders it.)
+4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay. Sample-path downsampling must preserve extrema and the final point (e.g. min/max per bucket), never plain stride; stride hides the bust. (Downsampler done in session 3; charts rendered in session 4.)
 5. **More strategies:** Labouchere, Oscar's Grind, Kelly.
 6. **JSON rule builder:** user-defined strategies compiled into the same Strategy contract.
 7. **URL-serialized scenarios:** encode ScenarioConfig in the URL.
@@ -281,14 +299,53 @@ Session 3 (2026-09-23). `npm run test` (168 passed, 2 benchmark tests skipped) a
 
     All 25 rows rendered in registry order. No console errors.
 
+Session 4 (2026-09-23). `npm run test` (194 passed, 2 benchmark tests skipped), `npm run build` and `oxlint` all clean under strict. `git diff cf0d8e5..HEAD -- src/engine/runner.ts src/engine/montecarlo.ts src/engine/stats/` is EMPTY.
+
+29. **Chart library spike:** see the Decisions table (raw canvas 9.4–10.5 ms vs uPlot 38.6–61.8 ms for 6 panels; +0.8 KB vs +21.8 KB gzip). Spike branch deleted, never pushed.
+30. **Adapters** (`adapters.test.ts`, 17 tests):
+    - Fan y range is shared and computed over ALL strategies (a tall path in one strategy sets every panel's top), and it starts at 0.
+    - On a real 5-strategy run, every panel's data fits the one range.
+    - Histogram % sums to 100 per strategy. Linear y is shared and starts at 0.
+    - Log mode turns empty bins into gaps (never log 0). Its y floor is the power of ten below the smallest nonzero % across all strategies.
+    - Replay: one x range for all three strips, spanning the longest strategy; y from 0.
+    - Bucketed strip win rate within 4 SE of 18/37 (z = −1.45).
+    - Also: ticks, nearest-path hit test, colors, tick labels.
+31. **Replay determinism** (`replay.test.ts`):
+    - At maxRounds 20,000 (downsampled replay), the re-simulated session i's path EXACTLY equals the stored sample path i for i < 50, for all 5 strategies (117,833 points compared; the longest session ran 20,000 rounds).
+    - At maxRounds 3,000 (full replay), downsampling the full path gives the stored sample path, for i < 50.
+    - Win/loss sequences are identical across strategies over overlapping rounds (100 sessions, lengths differ). The strip equals the longest strategy's sequence.
+    - Recorded bets equal |bankroll change| on even money and are exact on a 1.2 payout. The recording wrapper leaves every session identical.
+32. **Manual** (`npm run build` + `npm run preview`, bundle `index-Co9th7O4.js` 82.30 KB gzip; tab hidden / unfocused as in sessions 1–3). With the NEW defaults (10,000 sessions, seed 12345), displayed exactly:
+
+    | Row | Flat | Martingale |
+    |---|---|---|
+    | EV per $ wagered | -2.758% | -2.909% |
+    | SE of EV per $ | 0.042% | 0.432% |
+    | z vs theory | -1.33 | -0.48 |
+    | P(profit > 0) | 53.760% | 82.930% |
+    | P(bust) | 1.600% | 17.070% |
+    | P(hit win target) | 53.170% | 82.930% |
+
+    - **Fan:** both panels show identical axes, y $0–$2,000 and x 0–1,000 rounds (screenshot). Martingale's sessions average 18.6 rounds, so its fan is squeezed at the left: the shared axis doing its job.
+    - **Histogram log toggle:** shared 0.01%–100% axis. Martingale's ~83% spike at the target and its bust cluster around $360–$450 are both readable; empty bins show no bar.
+    - **Replay session 0** (typed into the Session input): both reach the win target, Martingale after 16 rounds and Flat after 28. The bet strip shows Martingale's ladder $10→$20 (three times) then $10→$20→$40→$80, with the round-16 win reaching $1,100. Flat stays at $10.
+    - **Replay of a Martingale bust:** clicking a low Martingale sample path (by screen position) picked **session 31**. Martingale couldn't cover the next bet after 11 rounds ($390, bets up to $320) under the same early losing streak Flat saw. Flat played all 1,000 rounds and ended at $600.
+    - **Theme:** switching Light → Dark → Light → System. An exact-pixel count of the Flat fan canvas shows the series color flipping completely: #0072b2 737 → 0 and #56b4e9 0 → 737 on Dark, then back on Light (668 / 0). Page background, swatches, legend and replay follow. No console errors.
+    - **Click methods:**
+      - Worked: `form_input` for selects; element-ref clicks for Run, the Session input and Replay (after a screenshot woke the tab); a screen-position click to pick the sample path.
+      - Failed: one position click on Run missed after the new header row moved the button.
+
 ### Built but not yet verified
 
-- Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s.
+- Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
+- The last session 4 commit (Start label moved to the left end so it cannot overlap the win-target label) passed tests and build but was NOT re-checked visually in the browser.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Roadmap sessions 4 on.
+- Roadmap sessions 5 on.
+- Replay x spans the longest strategy, so a strategy that ends in 11 rounds next to one that plays 1,000 is squeezed against the left edge. A zoom or brush on the replay would help (not built).
+- No hover tooltips or value readouts on charts yet.
 - Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
 - The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
 
@@ -337,4 +394,16 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
   | uPlot + paths in draw hook | +21.85 KB JS, +0.50 KB CSS | 38.6 / 47.1 ms | yes (`bands`) | yes (hook draws on u.ctx) | `setSize` + own ResizeObserver | colors fixed at creation: recreate or redraw |
   | uPlot mode 2 (all series) | +21.79 KB JS, +0.50 KB CSS | 49.9 / 61.8 ms | yes (band series share x) | yes (mode 2) | same | same |
   uPlot times include destroy + recreate per redraw. Chose raw canvas: 4–5× faster, ~20 KB smaller, arbitrary per-path x arrays for free, and full control of the SHARED axes rule; uPlot's extras (cursor, legend, auto ticks) are not needed. Cost: we own nice-tick generation (pure, tested in `adapters.ts`).
+- **Session 4: replay above 5,000 rounds** (owner-approved): ≤ 5,000 rounds uses `recordPath`; above, bankroll AND bets stream through the SAME `MinMaxDownsampler`/observer that produces stored sample paths (so replay ≡ sample path exactly), and the win/loss strip is 500 buckets over maxRounds shaded by win rate, drawn once, spanning the longest strategy.
+- **Session 4: theme control** (owner-approved): System / Light / Dark in the header sets `data-theme` on `<html>` (System removes it). Persisted in `localStorage` inside try/catch; NOT in `ScenarioConfig`. CSS: `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])` plus `:root[data-theme="dark"]`.
+- **Session 4: replay bets come from a recording wrapper** (`recordingStrategy` in `replay.ts`): it spreads the strategy and wraps `update` to read `won` and `ctx.lastBet` (the bet placed after table rules), then delegates. The bankroll path cannot give exact bets for non-even payouts. The real strategy stays pure; a test proves the wrapper changes nothing.
+- **Session 4: replay uses the run's own `SimRequest`** (stored with the result), never the live form, so it always matches the charts on screen. Replay is disabled while a run is in progress. The worker rejects a session index outside the run.
+- **Session 4: the win/loss strip encodes by HEIGHT with neutral grays** (tall = won, short = lost; buckets: height = win rate), not red/green, so it never relies on color and never borrows a strategy's color.
+- **Session 4: palette = Okabe-Ito**, in order blue, vermillion, bluish green, reddish purple, orange, sky blue, yellow, black (`--series-0..7`). Light theme darkens yellow to #8a7a00 for contrast on white. Dark theme uses lighter variants of each hue, and black becomes #e6e8eb. Color k = instance index k in the run.
+- **Session 4: fan y top = niceCeil(1.02 × max over ALL strategies of p95 bands, every sample-path point, the start and the win target).** Sample paths are included so no panel clips a thin line.
+- **Session 4: histogram x = the run's shared bin range** (edges[0]..edges[50]), not forced to $0: it is the bankroll axis of a histogram, and the "bankroll y-axes start at 0" rule applies to y axes. Histogram y is shared: linear from 0; log from the power of ten below the smallest nonzero % to the one above the largest.
+- **Session 4: replay bet sizes are drawn as steps** (a bet decided after r rounds holds over [r, r+1]). Replay y axes (bankroll, bet) start at 0 and are shared by every strategy's line.
+- **Session 4: selected session, histogram y mode and the replay input draft are view state**, not scenario state. Charts always show the last completed run and use its own labels, colors and reference values.
+- **Session 4: Start reference label sits at the left end of its line**, win target and floor at the right, so close values ($1,000 vs $1,100) never overlap.
+- **Session 4: the default scenario** keeps seed 12345, 10,000 sessions and table min $1 (not specified by the directive), and adds the $1,100 win target with Flat and Martingale ×2.
 - **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
