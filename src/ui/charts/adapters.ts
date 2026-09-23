@@ -200,6 +200,28 @@ export function nearestPath(paths: readonly Line[], px: number, py: number, toPx
   return best;
 }
 
+/**
+ * Index of the value in an ASCENDING array closest to `target` (ties go to the lower index).
+ * Empty array -> -1. Used by hover readouts to snap a cursor round to the nearest recorded point.
+ */
+export function nearestIndex(xs: ArrayLike<number>, target: number): number {
+  const n = xs.length;
+  if (n === 0) return -1;
+  if (target <= xs[0]!) return 0;
+  if (target >= xs[n - 1]!) return n - 1;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const v = xs[mid]!;
+    if (v === target) return mid;
+    if (v < target) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  // lo is the first index above target, hi = lo - 1 is the last below it.
+  return target - xs[hi]! <= xs[lo]! - target ? hi : lo;
+}
+
 // ---------------------------------------------------------------- tick labels
 
 /** Short money label for axis ticks, from cents: $0, $950, $1,100, $12k, $1.5M. */

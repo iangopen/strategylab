@@ -159,6 +159,32 @@ export function refLineV(f: Frame, value: number, label: string, color: string):
   ctx.restore();
 }
 
+/** Sizes an overlay canvas for the device pixel ratio, clears it, and returns its 2D context. */
+export function overlayCtx(canvas: HTMLCanvasElement, cssWidth: number, cssHeight: number): CanvasRenderingContext2D {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(cssWidth * dpr));
+  canvas.height = Math.max(1, Math.round(cssHeight * dpr));
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  const ctx = canvas.getContext("2d")!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  return ctx;
+}
+
+/** Dashed vertical crosshair on an overlay at pixel x, from top to bottom. */
+export function crosshairV(ctx: CanvasRenderingContext2D, px: number, top: number, bottom: number, color: string): void {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(px) + 0.5, top);
+  ctx.lineTo(Math.round(px) + 0.5, bottom);
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** Width of the container element, tracked with a ResizeObserver (redraw on resize only). */
 export function useContainerWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T | null>(null);

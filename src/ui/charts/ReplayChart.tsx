@@ -7,6 +7,7 @@ import {
   endText,
   firstEndingRound,
   moneyTick,
+  nearestIndex,
   niceTicks,
   referenceLines,
   replayLayout,
@@ -17,7 +18,7 @@ import {
   type Line,
   type Range,
 } from "./adapters";
-import { clipToPlot, cssColor, drawAxes, MARGIN, prepareFrame, refLineH, strokeLine, useContainerWidth, type Frame } from "./canvas";
+import { clipToPlot, crosshairV, cssColor, drawAxes, MARGIN, overlayCtx, prepareFrame, refLineH, strokeLine, useContainerWidth, type Frame } from "./canvas";
 
 interface Props {
   nSessions: number;
@@ -94,7 +95,12 @@ const BANK_H = 220;
 const BET_H = 150;
 const STRIP_H = 64;
 
-const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs }: CanvasProps) {
+interface ReplayHover {
+  round: number;
+  rows: { bankroll: number; bet: number | null }[];
+}
+
+const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labels }: CanvasProps) {
   const [box, width] = useContainerWidth<HTMLDivElement>();
   const bank = useRef<HTMLCanvasElement | null>(null);
   const bets = useRef<HTMLCanvasElement | null>(null);
@@ -106,6 +112,7 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs }: Ca
   const [zoom, setZoom] = useState<Range | null>(null);
   const x: Range = zoom ?? layout.x;
   const drag = useRef<number | null>(null); // drag start, in data-x
+  const [hover, setHover] = useState<ReplayHover | null>(null);
 
   useEffect(() => {
     if (width === 0 || !bank.current || !bets.current || !strip.current) return;
@@ -168,23 +175,30 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs }: Ca
     const t = (e.clientX - rect.left - MARGIN.left) / plotWidth;
     return x.min + t * (x.max - x.min);
   };
-  const drawSelection = (a: number | null, b: number) => {
-    const c = overlay.current;
-    if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
-    c.width = Math.max(1, Math.round(width * dpr));
-    c.height = Math.max(1, Math.round(BANK_H * dpr));
-    c.style.width = `${width}px`;
-    c.style.height = `${BANK_H}px`;
-    const ctx = c.getContext("2d")!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, BANK_H);
-    if (a === null) return;
-    const toPx = (d: number) => MARGIN.left + ((d - x.min) / (x.max - x.min || 1)) * plotWidth;
-    const p0 = toPx(a);
-    const p1 = toPx(b);
+  const toPx = (d: number) => MARGIN.left + ((d - x.min) / (x.max - x.min || 1)) * plotWidth;
+  const clearOverlay = () => {
+    if (overlay.current) overlayCtx(overlay.current, width, BANK_H);
+  };
+  const drawSelection = (a: number, b: number) => {
+    if (!overlay.current) return;
+    const ctx = overlayCtx(overlay.current, width, BANK_H);
     ctx.fillStyle = "rgba(120,140,170,0.28)";
-    ctx.fillRect(Math.min(p0, p1), MARGIN.top, Math.abs(p1 - p0), BANK_H - MARGIN.top - MARGIN.bottom);
+    ctx.fillRect(Math.min(toPx(a), toPx(b)), MARGIN.top, Math.abs(toPx(b) - toPx(a)), BANK_H - MARGIN.top - MARGIN.bottom);
+  };
+  // Hover: snap to the nearest recorded round, read each strategy's bankroll and bet there, and draw
+  // a crosshair on the overlay. The stacked charts are never redrawn on hover — only the overlay and
+  // the text readout below update.
+  const onHover = (round: number) => {
+    const rows = replay.strategies.map((s) => ({
+      bankroll: s.bankroll.bankroll[nearestIndex(s.bankroll.rounds, round)] ?? s.finalBankroll,
+      bet: s.bets.rounds.length ? s.bets.bankroll[nearestIndex(s.bets.rounds, round)] ?? null : null,
+    }));
+    setHover({ round: Math.round(round), rows });
+    if (overlay.current) crosshairV(overlayCtx(overlay.current, width, BANK_H), toPx(round), MARGIN.top, BANK_H - MARGIN.bottom, cssColor("--chart-axis"));
+  };
+  const clearHover = () => {
+    setHover(null);
+    if (drag.current === null) clearOverlay();
   };
 
   return (
@@ -201,22 +215,41 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs }: Ca
             e.currentTarget.setPointerCapture(e.pointerId);
           }}
           onPointerMove={(e) => {
-            if (drag.current !== null) drawSelection(drag.current, dataXFromEvent(e));
+            const d = dataXFromEvent(e);
+            if (drag.current !== null) drawSelection(drag.current, d);
+            else onHover(Math.max(x.min, Math.min(x.max, d)));
           }}
           onPointerUp={(e) => {
             if (drag.current === null) return;
             const z = zoomFromDrag(drag.current, dataXFromEvent(e), layout.x);
             drag.current = null;
-            drawSelection(null, 0);
+            clearOverlay();
             if (z) setZoom(z);
           }}
           onPointerCancel={() => {
             drag.current = null;
-            drawSelection(null, 0);
+            clearOverlay();
           }}
+          onPointerLeave={clearHover}
           onDoubleClick={() => setZoom(null)}
         />
         <canvas ref={overlay} aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />
+      </div>
+      <div className="chart-readout">
+        {hover ? (
+          <>
+            Round {hover.round.toLocaleString("en-US")}:
+            {hover.rows.map((r, k) => (
+              <span key={k}>
+                <span className="swatch" style={{ background: `var(${seriesColorVar(k)})` }} aria-hidden="true" />
+                {labels[k] ?? replay.strategies[k]!.strategyId} {formatStat("money", r.bankroll)}
+                {r.bet !== null && ` (bet ${formatStat("money", r.bet)})`}
+              </span>
+            ))}
+          </>
+        ) : (
+          "Hover the bankroll chart for each strategy's bankroll and bet at a round."
+        )}
       </div>
       <div className="chart-tools" style={{ marginTop: 4 }}>
         <button type="button" onClick={() => setZoom({ min: 0, max: firstEndingRound(replay) })}>

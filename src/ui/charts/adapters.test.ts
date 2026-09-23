@@ -15,6 +15,7 @@ import {
   countTick,
   endText,
   firstEndingRound,
+  nearestIndex,
   replayLayout,
   stripCells,
   zoomFromDrag,
@@ -238,6 +239,21 @@ describe("replay layout", () => {
   it("endText reads naturally", () => {
     expect(endText("insufficientFunds", 37)).toBe("couldn't cover the next bet after 37 rounds");
     expect(endText("stopWin", 1)).toBe("reached the win target after 1 round");
+  });
+});
+
+describe("nearestIndex (hover snapping)", () => {
+  it("snaps to the closest ascending value, ties to the lower index, clamps at the ends", () => {
+    const xs = [0, 10, 20, 40];
+    expect(nearestIndex(xs, 4)).toBe(0);
+    expect(nearestIndex(xs, 6)).toBe(1);
+    expect(nearestIndex(xs, 15)).toBe(1); // tie 10/20 -> lower
+    expect(nearestIndex(xs, 16)).toBe(2);
+    expect(nearestIndex(xs, -5)).toBe(0);
+    expect(nearestIndex(xs, 100)).toBe(3);
+    expect(nearestIndex(xs, 20)).toBe(2); // exact hit
+    expect(nearestIndex([5], 999)).toBe(0);
+    expect(nearestIndex([], 3)).toBe(-1);
   });
 });
 
