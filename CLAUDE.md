@@ -137,21 +137,32 @@ src/
 2. Define `Config`, `State`, `defaultConfig`, and a `configSchema` covering every config key. Give each field sensible min/max bounds.
 3. Implement `init`, `nextBet`, `update` as pure functions. Return new state objects; never mutate. Do not clamp to table limits or bankroll; the runner does that.
 4. Add one line to `strategies/registry.ts`.
-5. Write `<id>.test.ts` covering:
-   - the progression over a hand-written win/loss sequence (assert the exact bet sequence)
-   - reset behavior and any caps
-   - purity (inputs unchanged after calls)
-   - the invariant: EV per $ wagered within 4 SE of `-edge` on European roulette, and within 4 SE of 0 on a fair coin, with stop conditions ON
+5. Write `<id>.test.ts` (see "Strategy test kit" below) covering:
+   - the progression over a hand-written win/loss sequence (`betSequence`, assert the exact bet sequence in cents)
+   - reset behavior, caps and floors
+   - purity (`expectPure`)
+   - the invariant (`describeEvInvariant(strategy, config)`): EV per $ wagered within 4 SE of `-edge` on European roulette, and within 4 SE of 0 on a fair coin, with stop conditions ON
+   - then add the id to the expected list in `strategies/crn.test.ts`
 6. Run the app and confirm the strategy appears in the picker with a working config form and no UI edits.
 7. Update STATUS.
 
-### Strategy specs (for the strategies session)
+### Strategy specs
 
-- **Martingale:** on loss, bet × multiplier (default 2); on win, reset to base.
-- **Paroli / reverse Martingale:** on win, bet × 2 up to streakCap wins (default 3), then reset to base; on any loss, reset to base.
-- **D'Alembert:** on loss, +1 unit; on win, −1 unit; never below base bet.
-- **Fibonacci:** on loss, advance one step; on win, move back 2 steps (floor at step 0); bet = base × fib(step).
+Every progression keeps its own level in State and computes the next bet from it. NEVER derive the next bet from `ctx.lastBet`: that is the bet AFTER table limits, so a tableMax clamp would silently rewrite the progression. Table limits are the runner's job alone (rule 7). Config values a strategy needs are copied into State at `init` (`nextBet` receives no config).
+
+- **Martingale** (`martingale.ts`): bet = base × multiplier^level. Loss: level + 1. Win: level = 0. Config `multiplier` number, default 2, 1.1–10.
+- **Paroli** (`paroli.ts`): bet = base × 2^wins. Win: wins + 1, and when wins reaches streakCap it resets to 0. Loss: wins = 0. Largest bet = base × 2^(streakCap − 1). Config `streakCap` integer, default 3, 1–10 (1 = flat).
+- **D'Alembert** (`dalembert.ts`): bet = base + units × unitSize × base. Loss: units + 1. Win: units − 1, floor 0. Config `unitSize` number (multiple of base), default 1, 0.1–10.
+- **Fibonacci** (`fibonacci.ts`): bet = base × fib(step), fib(0) = fib(1) = 1. Loss: step + 1. Win: step − 2, floor 0. No config (empty `configSchema`).
+- **Overflow guard:** Martingale and Fibonacci cap the *returned* bet at `Number.MAX_SAFE_INTEGER` (the level keeps climbing), because the runner rejects non-finite bets and a long enough streak would overflow to Infinity. The runner still clamps and checks bankroll as usual.
 - **Labouchere, Oscar's Grind, Kelly:** spec to be written at the start of their session and added here before coding.
+
+### Strategy test kit (`src/engine/testUtils.ts`)
+
+- `betSequence(strategy, config, script)`: feeds a W/L script straight to init/nextBet/update (no runner) and returns every requested bet, so tests assert the exact sequence in cents.
+- `expectPure(strategy, config)`: deep-frozen config, state and ctx, plus before/after snapshots (`testUtils.test.ts` proves it rejects a mutating strategy).
+- `describeEvInvariant(strategy, config)`: THE fixed invariant scenario, shared by every strategy: $1,000 bankroll, $5 base, table $1–$250, stopWin $1,500, stopLoss floor $500, maxRounds 1000, insufficientFunds "stop", 20,000 sessions, European (seed 101) and fair coin (seed 202). Asserts |EV − (−edge)| < 4 SE and prints measured, expected, SE and z. Do not change this scenario to rescue a strategy.
+- `crn.test.ts`: one `runMonteCarlo` over every registered strategy; for all 50 sample sessions, every strategy pair sees the identical W/L sequence over the rounds they both played. When you register a strategy, add its id to the expected list there.
 
 ## How to add a stat
 
@@ -170,7 +181,7 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 1. **Infrastructure (session 1):** scaffold, repo, rng/games/runner, flat reference strategy, stats plug-in layer with starter stats, montecarlo, worker with progress and cancel, schema-driven UI shell, this file.
 2. **Strategy archetypes:** Martingale, Paroli, D'Alembert, Fibonacci, each with progression tests and the per-strategy invariant test. Martingale analytic check: with bankroll B, base b, multiplier m, no tableMax, and stopWin = start + b (one cycle), P(bust) matches (1−p)^k within 4 SE, where k is the largest integer with b(m^k − 1)/(m − 1) ≤ B. Table-max check: with tableMax set, the capped bet is asserted and one-cycle recovery visibly fails.
 3. **Statistics:** p5/p25/p75/p95 final bankroll, P(profit > 0), P(bust) = ruin + insufficientFunds, P(hit stopWin), max drawdown and longest losing streak summaries, SE shown for EV per $, final-bankroll histogram, percentile bands over time (subset of ≤2000 sessions, ≤200 checkpoints, early-ending sessions carry their final bankroll forward). P(profit > 0) sits next to EV per $ because that contrast is the lesson.
-4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay.
+4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay. Sample-path downsampling must preserve extrema and the final point (e.g. min/max per bucket), never plain stride; stride hides the bust. NOTE: session 1's `pathStride` in `runner.ts`/`montecarlo.ts` IS plain stride (lossless only while maxRounds ≤ 1000); the charts session must replace it.
 5. **More strategies:** Labouchere, Oscar's Grind, Kelly.
 6. **JSON rule builder:** user-defined strategies compiled into the same Strategy contract.
 7. **URL-serialized scenarios:** encode ScenarioConfig in the URL.
@@ -199,15 +210,53 @@ Session 1 (2026-09-22). Automated checks: `npm run test` (68 tests) and `npm run
    - Run 2 (right after the cancel): typed "10" into Base bet mid-run and it updated. A `longtask` PerformanceObserver recorded **zero** main-thread tasks over 50 ms for the whole run. It completed "100,000 sessions in 75.7s" with EV per $ −2.70%, mean wagered $250,000 (the $25 snapshot × 10,000 rounds), and the table flagged as stale because Base bet changed after the click. No console errors.
    - Caveat: the automated tab reported `visibilityState: hidden`, so a setInterval monitor saw ~1s timer throttling. That is why the longtask observer, not timer gaps, is the evidence for "no freeze". Not yet checked by a human in a focused, visible tab.
 
+Session 2 (2026-09-22). `npm run test` (122 tests) and `npm run build` clean under strict. Martingale, Paroli, D'Alembert and Fibonacci were each added as one strategy file plus registry lines. `git diff 31f6e87..HEAD -- src/engine/runner.ts src/engine/montecarlo.ts src/ui/` is empty: no pipeline or UI edits were needed.
+
+10. **Exact sequences** (no runner) assert every bet in cents. Martingale: ×2, ×3, ×1.5 (fractional cents left to the runner), overflow guard. Paroli: reset at cap 3, reset on loss, caps 1, 2 and 10. D'Alembert: floor at base, unitSize 0.5 and 2. Fibonacci: fib values, two-step retreat, floor, overflow guard.
+11. **Purity:** every strategy passes `expectPure`, and a mutating fixture is shown to fail it.
+12. **EV invariant, shared scenario, stops ON** (4 SE, SE from samples):
+
+    | Strategy | European z | Fair coin z |
+    |---|---|---|
+    | flat | −0.35 | −0.40 |
+    | martingale ×2 | 0.02 | 0.56 |
+    | paroli cap 3 | −0.67 | −0.65 |
+    | d'alembert 1 | 0.23 | −0.31 |
+    | fibonacci | 0.05 | −1.13 |
+
+13. **Martingale analytic one-cycle bust** (20,000 sessions each, P(insufficientFunds) vs (1−p)^k, every other session ends in stopWin):
+
+    | Game | B, b | k | Expected | Measured | z |
+    |---|---|---|---|---|---|
+    | European | $1,000, $10 | 6 | 0.01834 | 0.01940 | 1.09 |
+    | European | $500, $1 | 8 | 0.00484 | 0.00540 | 1.09 |
+    | American | $1,000, $10 | 6 | 0.02126 | 0.02195 | 0.67 |
+    | American | $500, $1 | 8 | 0.00589 | 0.00610 | 0.38 |
+
+    All four use master seed 31337, so they share draws and are correlated, not independent confirmations.
+14. **Table max breaks recovery:** Martingale with base $1 and tableMax $8 over script L×6 then W. Placed bets were 1, 2, 4, 8, 8, 8, 8 dollars while the strategy asked for up to $64. The one win leaves the session at −$23.
+15. **CRN across real strategies:** in one `runMonteCarlo` with all five strategies, all 50 sample sessions show identical W/L sequences for every strategy pair over their overlapping rounds (141,138 pairwise rounds; all 50 sessions had different lengths across strategies).
+16. **Manual, Chrome, `npm run build` + `npm run preview`:** the production bundle `index-Dme2EcaJ.js` was served.
+    - All five strategies appeared in the picker with no UI edits. Added Martingale, Paroli, D'Alembert, Fibonacci, a second Martingale and a second Flat. Removed Flat #2, and the remaining card relabelled to "Flat".
+    - Every card's fields, help text and ranges matched its `configSchema`. Fibonacci rendered no fields.
+    - Bad input showed inline errors: Paroli 2.5 gave "Enter a whole number.", Martingale 0.5 gave "Must be at least 1.1." Run was disabled with "Fix the highlighted fields to run." After fixing (Martingale #2 = 3) the errors cleared.
+    - Six instances, European, default scenario, 100k sessions: done in 58.3s with zero main-thread long tasks. EV per $: flat −2.71%, Martingale×2 −2.67%, Paroli −2.71%, D'Alembert −2.70%, Fibonacci −2.71%, Martingale×3 −2.51%.
+    - The same run reproduced in Node gave identical results to the cent. The Martingale×3 SE is 0.16% (z = 1.17), and all six |z| < 1.2.
+    - Custom game p = 0.45, payout 1.2: displayed "House edge: 1.000%", matching 1 − 0.45 × 2.2 exactly. A 20k-session run gave EV per $ −0.94% to −1.19% across columns. That is plausible, but no SE was shown or checked.
+    - Session 1's exact run (flat, $100k, $25 base, 10,000 rounds, 100k sessions, seed 12345) took **89.3s on preview vs 75.7s on dev in session 1**, with identical results ($93,257.60 mean final). No console errors.
+    - **Caveat:** the automation tab reported `visibilityState: hidden` and `hasFocus() = false` the whole time, in both sessions. The requested focused-tab condition was NOT met, and the timing comparison is inconclusive (hidden and deprioritized in both).
+
 ### Built but not yet verified
 
-- Custom-game inputs, table-max and stop fields, and adding or removing a second strategy in the browser. These were covered by unit tests of `validateScenario` and `toSimRequest`, not clicked through.
+- Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s.
+- The custom-game EV per $ at SE level. This will be checkable once session 3 adds the SE row.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Everything in the roadmap from session 2 on.
-- The browser run is ~4× slower than Node for the same work (75.7s for 1e9 rounds vs ~17s projected). This may be the dev build or the hidden-tab state. Worth measuring in a production build during the charts session.
+- Roadmap sessions 3 on.
+- Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
+- Sample-path downsampling is plain stride (see the Charts roadmap note). It is lossless at maxRounds ≤ 1000 and hides extrema above that.
 
 ### Decisions made outside the spec
 
@@ -230,4 +279,12 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Config stays editable during a run.** Results are snapshotted with the scenario that produced them and flagged "configuration has changed since this run" when stale.
 - **Worker requests reference strategies by registry id** (`SimRequest`), since functions can't cross the worker boundary.
 - **Engine isolation is enforced by a test** (`isolation.test.ts`): no `Math.random`, React, or DOM globals in `src/engine/` (comments ignored).
+- **Session 2: progressions keep their level in State,** never derived from `ctx.lastBet` (owner directive). Tested: under a tableMax clamp the strategy keeps asking for the uncapped bet.
+- **Session 2: overflow guard** (owner-approved): Martingale and Fibonacci return `min(bet, Number.MAX_SAFE_INTEGER)`. This is not a table rule; it stops a long streak from producing Infinity, which the runner rejects.
+- **Session 2: "one registry line" is really an import line plus an array entry** in `strategies/registry.ts`. No other file changes are needed to add a strategy (verified by the empty diff above).
+- **Session 2: Fibonacci has no config** and an empty `configSchema`. `Record<string, never>` is its Config type. The UI renders the card with its description only.
+- **Session 2: D'Alembert `unitSize` is a multiple of base** (bet = base + units × unitSize × base), so it scales with the base bet like the other strategies.
+- **Session 2: the invariant scenario sets tableMax $250,** so Martingale's ladder ($5 → $320) is clamped inside the invariant test. The invariant holds under a clamp.
+- **Session 2: the Martingale analytic pairs were chosen so money is left over after k losses** ($370 and $245). If the leftover were exactly 0, the session would end in ruin (bankroll < tableMin) instead of insufficientFunds.
+- **Session 2: shared test kit in `testUtils.ts`** (`betSequence`, `expectPure`, `describeEvInvariant`, `deltasFromPath`). It imports vitest, so it is test-only. Production code never imports `testUtils`.
 - **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
