@@ -31,7 +31,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Vite + React + TypeScript (`strict: true`, `noUncheckedIndexedAccess: true`)
 - Vitest for tests, colocated as `*.test.ts`
 - Web Worker via Comlink for all simulation
-- No chart library yet (the charts session evaluates uPlot vs. raw canvas)
+- Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
 - GitHub: `iangopenbusinessai-lab/strategylab` (private). Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
@@ -330,4 +330,11 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 3: percentages display with 3 decimals** (owner-approved; `src/ui/format.ts`) so the SE row is readable (0.032%, not 0.03%).
 - **Session 3: `testCtx` lives in `testUtils.ts`**; tests never import from other test files.
 - **Session 3: `perf.bench.test.ts` is committed and skipped unless `BENCH=1`**, so later sessions can re-measure against the same scenario.
+- **Session 4: chart library = raw Canvas 2D** (timeboxed spike on a throwaway branch `spike/charts`, deleted; never pushed). Same chart for all three candidates: fan (p5–p95, p25–p75, median) + 50 sample paths, 6 strategy panels, ~1000 points per path (real worker run, 10k sessions), production build, Chrome (tab hidden, DPR 1), median of 10 full redraws of all 6 panels:
+  | Candidate | Bundle delta (gzip) | Render, 6 panels | Band fill | Per-path x arrays | Resize | Theming |
+  |---|---|---|---|---|---|---|
+  | Raw canvas | +0.80 KB JS (spike code) | 9.4 / 10.5 ms (2 passes) | yes (polygon) | native | own ResizeObserver + DPR | read CSS vars at draw, redraw on change |
+  | uPlot + paths in draw hook | +21.85 KB JS, +0.50 KB CSS | 38.6 / 47.1 ms | yes (`bands`) | yes (hook draws on u.ctx) | `setSize` + own ResizeObserver | colors fixed at creation: recreate or redraw |
+  | uPlot mode 2 (all series) | +21.79 KB JS, +0.50 KB CSS | 49.9 / 61.8 ms | yes (band series share x) | yes (mode 2) | same | same |
+  uPlot times include destroy + recreate per redraw. Chose raw canvas: 4–5× faster, ~20 KB smaller, arbitrary per-path x arrays for free, and full control of the SHARED axes rule; uPlot's extras (cursor, legend, auto ticks) are not needed. Cost: we own nice-tick generation (pure, tested in `adapters.ts`).
 - **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
