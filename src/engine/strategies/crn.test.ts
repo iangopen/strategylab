@@ -8,7 +8,7 @@ import { STRATEGIES } from "./registry";
 describe("common random numbers across every registered strategy", () => {
   it("session i sees an identical win/loss sequence in every strategy, over their overlapping rounds", () => {
     const european = GAME_PRESETS.find((g) => g.id === "european")!;
-    expect(STRATEGIES.map((s) => s.id)).toEqual(["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere"]);
+    expect(STRATEGIES.map((s) => s.id)).toEqual(["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere", "oscars"]);
     // Sample paths are min/max-downsampled; with maxRounds <= 2 x buckets (998) every bucket holds at
     // most 2 rounds, so the paths are lossless and every round's outcome is visible.
     const scenario = { ...INVARIANT_SCENARIO, maxRounds: 2 * DOWNSAMPLE_BUCKETS };
