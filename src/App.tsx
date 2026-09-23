@@ -4,6 +4,7 @@ import { defaultScenario, toSimRequest, validateScenario, type ScenarioConfig } 
 import { ChartSlot } from "./ui/ChartSlot";
 import type { ChartRefs } from "./ui/charts/adapters";
 import { FanChart } from "./ui/charts/FanChart";
+import { HistogramChart } from "./ui/charts/HistogramChart";
 import { ConfigPanel } from "./ui/ConfigPanel";
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls } from "./ui/RunControls";
@@ -130,7 +131,11 @@ export default function App() {
           ) : (
             <ChartSlot title="Bankroll over time" description="Percentile bands and the first 50 sessions of each strategy, on shared axes." />
           )}
-          <ChartSlot title="Final bankroll distribution" description="Histogram of final bankrolls across all sessions." />
+          {run ? (
+            <HistogramChart result={run.result} labels={run.labels} start={run.refs.start} />
+          ) : (
+            <ChartSlot title="Final bankroll distribution" description="Histogram of final bankrolls, on bins shared by every strategy." />
+          )}
         </div>
       </main>
       <footer className="help">Educational simulation. No real money, no casino links.</footer>
