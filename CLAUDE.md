@@ -161,14 +161,14 @@ How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fa
 
 1. Create `src/engine/strategies/<id>.ts` exporting one `Strategy<Config, State>`.
 2. Define `Config`, `State`, `defaultConfig`, and a `configSchema` covering every config key. Give each field sensible min/max bounds.
-3. Implement `init`, `nextBet`, `update` as pure functions. Return new state objects; never mutate. Do not clamp to table limits or bankroll; the runner does that.
+3. Implement `init`, `nextBet`, `update` as pure functions. Return new state objects; never mutate. Do not clamp to table limits or bankroll; the runner does that. Payout-aware sizing reads `ctx.game` (`{ winProb, netPayout, edge }`, read-only, filled by the runner — reading it never touches the RNG, so CRN is safe). Copy any config a strategy needs into State at `init`; `nextBet` gets no config.
 4. Add one line to `strategies/registry.ts`.
 5. Write `<id>.test.ts` (see "Strategy test kit" below) covering:
-   - the progression over a hand-written win/loss sequence (`betSequence`, assert the exact bet sequence in cents)
+   - the progression over a hand-written win/loss sequence (`betSequence`, assert the exact bet sequence in cents; `betSequence` carries the just-placed bet as `ctx.lastBet` and takes an optional `game` for payout-aware strategies)
    - reset behavior, caps and floors
    - purity (`expectPure`)
-   - the invariant (`describeEvInvariant(strategy, config)`): EV per $ wagered within 4 SE of `-edge` on European roulette, and within 4 SE of 0 on a fair coin, with stop conditions ON
-   - then add the id to the expected list in `strategies/crn.test.ts`
+   - the invariant (`describeEvInvariant(strategy, config)`): EV per $ wagered within 4 SE of `-edge` on European roulette, within 4 SE of 0 on a fair coin, AND within 4 SE of `-edge` on the positive-edge game (p = 0.55, even money), with stop conditions ON. The config passed here must make the strategy actually WAGER on all three games (e.g. Kelly needs a misjudged edge above 0.5), or EV per $ is 0/0.
+   - then add the id to the expected id-list assertion in `strategies/crn.test.ts` (and give it a betting config there and in `customGame.test.ts` if its default refuses to bet on a negative-edge game, as Kelly does).
 6. Run the app and confirm the strategy appears in the picker with a working config form and no UI edits.
 7. Update STATUS.
 
@@ -189,7 +189,7 @@ Every progression keeps its own level in State and computes the next bet from it
 
 - `betSequence(strategy, config, script)`: feeds a W/L script straight to init/nextBet/update (no runner) and returns every requested bet, so tests assert the exact sequence in cents.
 - `expectPure(strategy, config)`: deep-frozen config, state and ctx, plus before/after snapshots (`testUtils.test.ts` proves it rejects a mutating strategy).
-- `describeEvInvariant(strategy, config)`: THE fixed invariant scenario, shared by every strategy: $1,000 bankroll, $5 base, table $1–$250, stopWin $1,500, stopLoss floor $500, maxRounds 1000, insufficientFunds "stop", 20,000 sessions, European (seed 101) and fair coin (seed 202). Asserts |EV − (−edge)| < 4 SE and prints measured, expected, SE and z. Do not change this scenario to rescue a strategy.
+- `describeEvInvariant(strategy, config)`: THE fixed invariant scenario, shared by every strategy: $1,000 bankroll, $5 base, table $1–$250, stopWin $1,500, stopLoss floor $500, maxRounds 1000, insufficientFunds "stop", 20,000 sessions, on THREE games — European (seed 101), fair coin (seed 202), and the positive-edge game p = 0.55 / even money (seed 303, edge −0.10). Asserts |EV − (−edge)| < 4 SE and prints measured, expected, SE and z. Do not change this scenario to rescue a strategy. The passed config must wager on all three (Kelly uses a misjudged edge here).
 - `crn.test.ts`: one `runMonteCarlo` over every registered strategy; for all 50 sample sessions, every strategy pair sees the identical W/L sequence over the rounds they both played. When you register a strategy, add its id to the expected list there.
 
 ## How to add a stat
@@ -337,19 +337,45 @@ Session 4 (2026-09-23). `npm run test` (194 passed, 2 benchmark tests skipped), 
       - Worked: `form_input` for selects; element-ref clicks for Run, the Session input and Replay (after a screenshot woke the tab); a screen-position click to pick the sample path.
       - Failed: one position click on Run missed after the new header row moved the button.
 
+Session 5 (2026-09-23). `npm run test` (235 passed, 2 benchmark tests skipped), `npm run build` and `oxlint` all clean under strict. `git diff 4e214ec..HEAD -- src/engine/montecarlo.ts src/engine/stats/` is EMPTY: the pipeline and stats layer were not touched. Three strategies added (Labouchère, Oscar's Grind, Kelly), one contract change (`ctx.game`), plus replay zoom and chart hover readouts. **Ran on macOS / zsh this session, not Windows/PowerShell** (see the flag in the report) — the npm scripts are cross-platform, so build/test/lint are unaffected.
+
+33. **`ctx.game` contract change:** the runner now fills a read-only `{ winProb, netPayout, edge }` on `ctx`, computed once per session. The five existing strategies ignore it, so their exact-sequence tests pass unchanged (only the ctx fixtures gained the field). `isolation.test.ts` still passes (no RNG in the engine), confirming reading the game does not affect CRN.
+34. **Labouchère** added as one file + one registry line. Exact sequences (no runner): restart cycle `[L,W,W,W] → 500,600,600,300,500`; linear growth on a losing streak `[L,L,L] → 500,600,700,800`; onComplete **stop** `[W,W] → 500,500,"stop"` vs **restart** `[W,W] → 500,500,500`; a `2-2-2-2` preset at base $5. Purity (immutable line and preset). 
+35. **Oscar's Grind** added the same way. Exact sequences: even money `[L,L,W,W] → 100,100,100,200,100` and `[W] → 100,100`; the **cap on payout 1.2** `[W] → 84,84` (one 84¢ win pays 100.8¢ ≥ the $1 goal) and `[L,W] → 84,100,54` (the raised u=2 bet 200 is clamped to the 54¢ that closes the cycle). Purity. Profit is tracked from `ctx.lastBet` and `ctx.game.netPayout`.
+36. **Kelly** added the same way. f* ≤ 0 → `"stop"` (`[W,W] → "stop","stop","stop"` at true even money; `assumedWinProb 0.4 → "stop"`). f* > 0 stakes fraction × f* × bankroll (rounded): assumed 0.6 full → 2e8, half → 1e8; payout 2 assumed 0.5 → 2.5e8. Purity.
+37. **EV-per-$ invariant, all EIGHT strategies × THREE games** (4 SE, SE from samples), every |z| < 4:
+
+    | Strategy | European z | Fair coin z | posEdge (+10%) z |
+    |---|---|---|---|
+    | flat | −0.35 | −0.40 | 0.82 |
+    | martingale ×2 | 0.02 | 0.56 | 2.15 |
+    | paroli cap 3 | −0.67 | −0.65 | 0.06 |
+    | d'alembert 1 | 0.23 | −0.31 | 1.23 |
+    | fibonacci | 0.05 | −1.13 | 0.50 |
+    | labouchere 1-2-3-4 | −1.12 | −0.30 | 1.19 |
+    | oscars | 0.71 | −1.12 | 2.02 |
+    | kelly (assumed 0.6) | −0.56 | 1.14 | −0.30 |
+
+    The positive-edge game (edge −0.10, expected EV/$ = +0.10) is the sign check: EV per $ = −edge whether the house or the player has the edge.
+38. **Kelly growth check** (p = 0.55 even money, no stops, 200 rounds, $1M start, 4,000 sessions sharing seeds via CRN). Mean log(final/start): half = 0.76, **full = 1.02**, double = 0.011 — full Kelly highest. Paired differences: full−half mean 0.261, SE 0.011, **z = 23.0**; full−double mean 1.010, SE 0.023, **z = 43.7** (both ≫ 4). Double Kelly's median final **$972,828 < $1,000,000 start** (over-betting loses ground). No session ruined, so every log was finite.
+39. **CRN across all EIGHT strategies:** the crn test's id-list assertion and the 50-sample-path pairwise-equal check now include Labouchère, Oscar's and Kelly (Kelly given a misjudged edge so it wagers).
+40. **Chart adapters** (pure, tested): `nearestIndex` (ascending nearest, ties low, end-clamped), `firstEndingRound` (earliest strategy end, ≥ 1), `zoomFromDrag` (ordered, clamped to the full range, rejects a click-sized span). 20 adapter tests pass.
+41. **Programmatic evidence for the UI claims** (throwaway test, not committed; 10,000 sessions, European, seed 12345): Kelly default (assumed 0) → **100% strategyStop, EV per $ = NaN → "—", 0 rounds**; Kelly assumed 0.55 → it **bets** (0% strategyStop), **EV per $ = −2.690%** (≈ −edge = −2.703%), z = 0.08.
+42. **Production build serves:** `npm run build` + `npm run preview` served bundle `index-BKlqEj5h.js` (84.94 KB gzip); the JS and the worker returned 200. Not driven in a browser this session (no browser automation available) — the visual/interaction pass is owner-run (see "Built but not yet verified").
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
-- The last session 4 commit (Start label moved to the left end so it cannot overlap the win-target label) passed tests and build but was NOT re-checked visually in the browser.
+- **Session 5 browser pass (owner-run, no browser automation this session).** All eight strategies appearing in the picker with working config forms and no UI edits; Kelly's config form (assumed win probability + fraction) and its help text; the Start-label fix (session 4) no longer overlapping the win-target label; the replay drag-to-zoom, "fit to first ending" on a Martingale bust, double-click reset; and the fan/replay hover crosshair + readouts rendering. The numeric outcomes behind these (Kelly 100% strategyStop / "—" EV; Kelly assumed 0.55 EV ≈ −2.70%) ARE verified programmatically (STATUS 41); the visuals are not.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Roadmap sessions 5 on.
-- Replay x spans the longest strategy, so a strategy that ends in 11 rounds next to one that plays 1,000 is squeezed against the left edge. A zoom or brush on the replay would help (not built).
-- No hover tooltips or value readouts on charts yet.
+- Roadmap sessions 6 on (JSON rule builder, incl. custom Labouchère lines; URL scenarios; sports-odds mode).
 - Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
 - The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
+- Hover crosshair uses `--chart-axis` (theme-aware) but there is still no on-canvas tooltip box; values go to a text readout under each chart. Good enough; a floating box could be nicer later.
+- Replay zoom is x-only (no y zoom / brush) and only the bankroll strip drives it. Fine for reading a short bust; a full brush is future work.
 
 ### Decisions made outside the spec
 
@@ -409,3 +435,12 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 4: Start reference label sits at the left end of its line**, win target and floor at the right, so close values ($1,000 vs $1,100) never overlap.
 - **Session 4: the default scenario** keeps seed 12345, 10,000 sessions and table min $1 (not specified by the directive), and adds the $1,100 win target with Flat and Martingale ×2.
 - **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
+- **Session 5: `ctx.game` is `{ winProb, netPayout, edge }`** (owner directive 1), read-only, computed once per session by the runner. Reading it never touches the RNG, so CRN is unaffected. The five existing strategies were not changed; only ctx fixtures in `testUtils.ts` and `flat.test.ts` gained the field, and `betSequence` now also feeds the just-placed bet as `ctx.lastBet` (so Oscar's Grind can be driven without the runner) and takes an optional `game`.
+- **Session 5: Kelly's `assumedWinProb` uses 0 as the "use the game's true probability" sentinel** (range 0–0.99, default 0). The FieldSpec kinds are number/integer/boolean/select — there is no optional-number kind, and directive 2 forbade adding one — so a real "blank" cannot be expressed; 0 is the sentinel, and the help text states plainly that a value ABOVE the true probability models a MISJUDGED edge. This is the one place the prompt's "blank" was interpreted.
+- **Session 5: Kelly refuses to bet when f* ≤ 0** (returns `"stop"` → `strategyStop`), so on any non-positive-edge game its default config plays 0 rounds and EV per $ is 0/0 → "—". `crn.test.ts` and `customGame.test.ts` therefore give Kelly a misjudged edge (assumed 0.6) so it wagers and the CRN / custom-game checks stay meaningful; `describeEvInvariant(kelly, …)` uses the same betting config.
+- **Session 5: the invariant now covers a positive-edge game** (p = 0.55, even money, edge −0.10, seed 303) for every strategy, because the core truth "EV per $ = −edge" is sign-agnostic and testing only negative edges would hide a sign bug. `INVARIANT_SCENARIO` itself is unchanged.
+- **Session 5: Oscar's Grind tracks cycle profit from the PLACED bet** (`ctx.lastBet`) and `ctx.game.netPayout`, and caps the next bet at `ceil((goal − cycleProfit) / netPayout)` so a win closes the cycle at exactly +1 base unit; a table clamp can't skew the accounting. No overflow guard: the bet is at most `betUnits × base`, and `betUnits` only rises after wins.
+- **Session 5: Labouchère keeps the line AND the original preset in State as immutable arrays** (slice/spread only); on completing a cycle it refills from the preset (restart) or empties the line so `nextBet` returns `"stop"` (stop). No overflow guard: on a losing streak `first` is fixed and `last` grows by `first` each loss, so the bet grows linearly.
+- **Session 5: replay zoom is view-only x-window state**, reset by keying `ReplayCanvases` on `replay.session` (not a setState-in-effect). Drag selection and the hover crosshair are drawn on ONE overlay canvas over the bankroll strip, so the stacked charts are never redrawn during a drag or hover. `zoomFromDrag` rejects a span below 2 rounds (a click), and "fit to first ending" uses `firstEndingRound` (≥ 1, so a never-betting strategy does not collapse the view to 0).
+- **Session 5: chart hover values go to a text readout under each chart** (`.chart-readout`, a fixed-min-height muted line), not an on-canvas tooltip box; the overlay carries only the crosshair. This keeps the heavy draw effect off the hover path (its deps exclude hover state) while honoring "never re-render the whole chart on hover".
+- **Session 5 ran on macOS / zsh, not the documented Windows/PowerShell.** The npm scripts (`test`/`build`/`lint`) are cross-platform, so this did not affect any verification; the PowerShell-specific notes in Environment still stand for whoever is on Windows. Flagged rather than silently changed.
