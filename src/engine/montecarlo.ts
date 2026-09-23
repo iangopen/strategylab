@@ -2,6 +2,7 @@ import { edge, type Game } from "./games";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
 import { addSession, createAccumulator, type Accumulator } from "./stats/accumulator";
+import { sharedHistogram } from "./stats/histogram";
 import { STATS } from "./stats/registry";
 import type { RunContext, StatDef } from "./stats/types";
 import type { AnyStrategy, StrategyConfig } from "./strategies/types";
@@ -25,12 +26,16 @@ export interface StrategyOutcome {
   endReasonCounts: Record<EndReason, number>;
   /** Paths of sessions 0..SAMPLE_PATH_COUNT-1 (the same sessions for every strategy). */
   samplePaths: SamplePath[];
+  /** Final-bankroll counts over the run's SHARED bins (MonteCarloResult.histogram.edges). */
+  histogramCounts: Uint32Array;
 }
 
 export interface MonteCarloResult {
   nSessions: number;
   masterSeed: number;
   perStrategy: StrategyOutcome[];
+  /** ONE set of final-bankroll bin edges (cents) shared by every strategy in the run. */
+  histogram: { edges: Float64Array };
 }
 
 export interface MonteCarloOptions {
@@ -95,14 +100,24 @@ export function runMonteCarlo(
   }
 
   const ctx: RunContext = Object.freeze({ game: Object.freeze({ ...game }), edge: edge(game), config: Object.freeze({ ...config }), nSessions });
+  // After ALL strategies finish: one set of bins over [min, max] across every strategy.
+  const histogram = sharedHistogram(accs.map((a) => ({ values: a.finals, count: a.count })));
+
   return {
     nSessions,
     masterSeed,
+    histogram: { edges: histogram.edges },
     perStrategy: strategies.map((s, k) => {
       const acc = accs[k]!;
       const values: Record<string, number> = {};
       for (const stat of stats) values[stat.id] = stat.compute(acc, ctx);
-      return { strategyId: s.strategy.id, stats: values, endReasonCounts: { ...acc.endReasons }, samplePaths: paths[k]! };
+      return {
+        strategyId: s.strategy.id,
+        stats: values,
+        endReasonCounts: { ...acc.endReasons },
+        samplePaths: paths[k]!,
+        histogramCounts: histogram.counts[k]!,
+      };
     }),
   };
 }
