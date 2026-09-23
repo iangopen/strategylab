@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GAME_PRESETS } from "./games";
-import { MAX_PATH_POINTS, runMonteCarlo, SAMPLE_PATH_COUNT } from "./montecarlo";
+import { MAX_PATH_POINTS, resultTransferables, runMonteCarlo, SAMPLE_PATH_COUNT } from "./montecarlo";
 import { STATS } from "./stats/registry";
 import type { StatDef } from "./stats/types";
 import { flat } from "./strategies/flat";
@@ -31,6 +31,19 @@ describe("runMonteCarlo", () => {
     expect(Object.keys(out.stats)).toEqual(STATS.map((s) => s.id));
     expect(Object.values(out.endReasonCounts).reduce((x, y) => x + y, 0)).toBe(500);
     expect(out.samplePaths).toHaveLength(SAMPLE_PATH_COUNT);
+  });
+
+  it("lists every typed-array buffer exactly once for transfer, and exposes no per-session columns", () => {
+    const r = runMonteCarlo(european, [{ strategy: flat, config: { units: 1 } }, { strategy: flat, config: { units: 2 } }], cfg, 200, 1);
+    const buffers = resultTransferables(r);
+    expect(new Set(buffers).size).toBe(buffers.length);
+    expect(buffers).toHaveLength(2 + 2 * (1 + 5)); // edges + band rounds, then per strategy: counts + 5 bands
+    // Structured clone with transfer works (what Comlink does across the worker boundary).
+    const moved = structuredClone(r, { transfer: buffers });
+    expect(moved.perStrategy[1]!.histogramCounts.reduce((a, b) => a + b, 0)).toBe(200);
+    expect(r.histogram.edges.byteLength).toBe(0); // detached: transferred, not copied
+    // Only derived outputs: no per-session arrays of length nSessions anywhere in the result.
+    for (const s of moved.perStrategy) expect(Object.keys(s).sort()).toEqual(["bands", "endReasonCounts", "histogramCounts", "samplePaths", "stats", "strategyId"]);
   });
 
   it("reports progress about every 2%, ending at 1", () => {

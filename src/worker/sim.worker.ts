@@ -1,6 +1,6 @@
 import * as Comlink from "comlink";
 import type { Game } from "../engine/games";
-import { runMonteCarlo, type MonteCarloResult } from "../engine/montecarlo";
+import { resultTransferables, runMonteCarlo, type MonteCarloResult } from "../engine/montecarlo";
 import { getStrategy } from "../engine/strategies/registry";
 import type { StrategyConfig } from "../engine/strategies/types";
 import type { SessionConfig } from "../engine/types";
@@ -22,7 +22,9 @@ const api = {
       return { strategy, config };
     });
     // onProgress is a Comlink proxy; calls are fire-and-forget messages (~every 2%).
-    return runMonteCarlo(req.game, specs, req.session, req.nSessions, req.masterSeed, (f) => void onProgress(f));
+    const result = runMonteCarlo(req.game, specs, req.session, req.nSessions, req.masterSeed, (f) => void onProgress(f));
+    // Typed arrays (histogram, bands) are transferred, not copied. Per-session columns never leave here.
+    return Comlink.transfer(result, resultTransferables(result));
   },
 };
 

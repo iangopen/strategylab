@@ -148,3 +148,16 @@ export function runMonteCarlo(
     }),
   };
 }
+
+/**
+ * Every typed-array buffer in a result, each listed once, for Comlink.transfer. Only these
+ * derived outputs leave the worker; the accumulator's per-session columns never do.
+ */
+export function resultTransferables(result: MonteCarloResult): ArrayBuffer[] {
+  const buffers = new Set<ArrayBuffer>([result.histogram.edges.buffer as ArrayBuffer, result.bands.rounds.buffer as ArrayBuffer]);
+  for (const s of result.perStrategy) {
+    buffers.add(s.histogramCounts.buffer as ArrayBuffer);
+    for (const band of [s.bands.p5, s.bands.p25, s.bands.p50, s.bands.p75, s.bands.p95]) buffers.add(band.buffer as ArrayBuffer);
+  }
+  return [...buffers];
+}
