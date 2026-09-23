@@ -36,6 +36,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
 - GitHub: `iangopenbusinessai-lab/strategylab` (private). Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
 - Deploy: Vercel auto-deploys on push to `main`. Never run the Vercel CLI.
+- **Never create files with `echo > file` in PowerShell.** Windows PowerShell 5 writes UTF-16 LE, which git treats as binary (this happened to the first `README.md`). Use the editor/file tools, or `Set-Content -Encoding utf8`.
 
 ### Commands
 
@@ -99,12 +100,15 @@ src/
     rng.ts            mulberry32 + splitmix32
     games.ts          Game type, presets, edge, validation
     types.ts          shared engine types (SessionResult, EndReason, ...)
-    runner.ts         runSession, table rules
-    montecarlo.ts     runMonteCarlo, CRN seeding, sample paths
+    runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules
+    montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, EXTENSION POINT for bands
+    testUtils.ts      test-only helpers (scripted/counting RNG, sample-based SE)
+    isolation.test.ts guards rules 1-2 (no Math.random / React / DOM in engine)
     strategies/
       types.ts        Strategy, FieldSpec
       registry.ts     the ONE place strategies are registered
       flat.ts         reference implementation
+      validate.ts     checks a config against its configSchema
     stats/
       types.ts        StatDef
       accumulator.ts  single-pass accumulator
@@ -113,13 +117,16 @@ src/
     sim.worker.ts     Comlink-exposed runMonteCarlo
     client.ts         worker lifecycle, progress, cancel
   ui/
-    ConfigPanel.tsx
+    ConfigPanel.tsx   game, bankroll, table, stops, rounds, sessions, seed
+    NumberField.tsx   numeric input with inline errors
+    format.ts         stat formatting, strategy column labels
     StrategyPicker.tsx
     SchemaForm.tsx    renders any configSchema
     RunControls.tsx
     ResultsTable.tsx  renders any stats registry
     ChartSlot.tsx     reserved chart panels
-  scenario.ts         ScenarioConfig type, defaults, validation
+  scenario.ts         ScenarioConfig type, defaults, validation, toSimRequest (dollars -> cents)
+  App.tsx             owns the ScenarioConfig and the SimClient
 ```
 
 ---
@@ -177,16 +184,50 @@ Only record what was actually verified, and how. "Written" is not "verified."
 
 ### Real and verified
 
-_Nothing yet. Session 1 fills this in._
+Session 1 (2026-09-22). Automated checks: `npm run test` (68 tests) and `npm run build` both clean under strict.
+
+1. **Determinism:** same masterSeed gives deep-equal and JSON-identical `runMonteCarlo` output; a different seed differs (`montecarlo.test.ts`). The same holds at session level (`runner.test.ts`).
+2. **Common random numbers:** across 300 sessions, a test-only flat-2× fixture and flat see identical win/loss sequences over their overlapping rounds, and the fixture busts earlier in some of them, so the overlap case is exercised. Two identical strategy instances in one run give identical outcomes.
+3. **EV per $ wagered (flat):** European roulette, 2,000,000 rounds, no stops: −0.026893 vs −0.027027, SE 0.000699 (z = 0.19). Fair coin: −0.000520 vs 0, SE 0.000694 (z = −0.75). With stops ON (20k sessions): European z = −1.40, coin z = −0.06. The tolerance is 4 × SE computed from the samples, and the SE is printed.
+4. **Runner rules:** tableMin raise, tableMax clamp, rounding to cents, insufficientFunds stop vs allIn, fractional-payout rounding, every endReason, stopWin/stopLoss boundaries exact to the cent, and stop/ruin-before-maxRounds priority.
+5. **No draw on pre-resolution endings:** a scripted counting RNG shows draws === rounds for stopWin, stopLoss, ruin, strategyStop, insufficientFunds, and maxRounds. The same holds across 2,400 random seeded sessions.
+6. **Stats plug-in:** a throwaway StatDef appears in `runMonteCarlo` output with no other code changes. Every registered stat was checked against a hand-built accumulator. `evPerWageredSE` from running sums matches the sample SE.
+7. **Memory (test 6):** 100k sessions × 1000 rounds ran in 1.7s under Vitest with an explicit 180s timeout. Heap delta was 1.1 MB, and 50,050 path points were retained (50 paths).
+8. **Engine isolation:** a test asserts no `Math.random`, React, or DOM globals in `src/engine/`.
+9. **Manual browser check** (Chrome via Claude-in-Chrome, `npm run dev`). Settings: 100,000 sessions, maxRounds 10,000, bankroll $100,000, flat. At the default 1,000 rounds a run finishes in ~2s, too fast to interact with.
+   - Run 1: typed "25" into Base bet at ~3s. The input updated immediately, and progress advanced in 2% steps (0.02 … 0.26). Clicked Cancel at 28%. Status showed "Cancelled", and Run re-enabled.
+   - Run 2 (right after the cancel): typed "10" into Base bet mid-run and it updated. A `longtask` PerformanceObserver recorded **zero** main-thread tasks over 50 ms for the whole run. It completed "100,000 sessions in 75.7s" with EV per $ −2.70%, mean wagered $250,000 (the $25 snapshot × 10,000 rounds), and the table flagged as stale because Base bet changed after the click. No console errors.
+   - Caveat: the automated tab reported `visibilityState: hidden`, so a setInterval monitor saw ~1s timer throttling. That is why the longtask observer, not timer gaps, is the evidence for "no freeze". Not yet checked by a human in a focused, visible tab.
 
 ### Built but not yet verified
 
-_Nothing yet._
+- Custom-game inputs, table-max and stop fields, and adding or removing a second strategy in the browser. These were covered by unit tests of `validateScenario` and `toSimRequest`, not clicked through.
+- Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Everything in the roadmap.
+- Everything in the roadmap from session 2 on.
+- The browser run is ~4× slower than Node for the same work (75.7s for 1e9 rounds vs ~17s projected). This may be the dev build or the hidden-tab state. Worth measuring in a production build during the charts session.
 
 ### Decisions made outside the spec
 
 _Record any choice the session prompt didn't specify, with the reason, so later sessions don't undo it by accident._
+
+- **Repo is `strategylab`, not `betting-lab`.** The folder already had `origin` → `iangopenbusinessai-lab/strategylab`; the owner chose to keep it. Display name stays "Betting Lab (working name)".
+- **No `echo >` in PowerShell for file creation** (writes UTF-16; see Environment). Use file tools or `Set-Content -Encoding utf8`.
+- **Stop boundaries are inclusive:** stopWin fires at `bankroll >= target`, stopLoss at `bankroll <= floor`. The UI labels stopLoss as a "floor". Both boundaries are tested to the cent.
+- **Runner check order each round:** stopWin → stopLoss → ruin → maxRounds → strategy ("stop") → round/tableMin/tableMax → insufficientFunds → ONE draw. Stops and ruin come before maxRounds so a session that busts or hits a target on its last allowed round is reported as that, not as maxRounds (keeps a future P(bust) honest). None of the pre-resolution checks draws; a test asserts draws === rounds for every endReason.
+- **`update(state, won, ctx)` receives the post-round ctx:** bankroll after resolution, `lastBet` = the bet actually placed (after table rules). Progressions that need their own intended bet must keep it in State.
+- **Win payout is `Math.round(bet * netPayout)` cents.** Exact for even money; for fractional custom payouts it introduces at most half a cent of rounding per win.
+- **`runSessionWithRng`** (exported from `runner.ts`) takes an injected RNG so tests can script outcomes and count draws. Production code uses `runSession` (seeded mulberry32).
+- **Sample paths are strided** so each has at most ~1000 points (`pathStride = ceil(maxRounds / 1000)`), stored as `{ rounds[], bankroll[] }`. Reason: 50 full paths at maxRounds = 1,000,000 would be ~400 MB.
+- **Stats list is overridable:** `runMonteCarlo(..., onProgress, { stats })` defaults to the registry. Test 5 uses this to add a throwaway stat without editing any other code. The registry itself stays a static array.
+- **Accumulator stores profit-based second moments** (`sumProfitSq`, `sumWageredSq`, `sumProfitWagered`) for a delta-method SE of EV per $ (`evPerWageredSE` in `stats/registry.ts`, tested against the sample-based SE; not yet a table row).
+- **Median** sorts a copy of the `Float64Array` once at the end.
+- **Engine validation:** `runSession`/`runMonteCarlo` throw on invalid game/config, non-finite strategy bets, strategy configs outside their `configSchema`, `nSessions` outside 1..1,000,000, or a seed that isn't uint32.
+- **Units in the UI:** dollars in `ScenarioConfig`, converted to integer cents in `toSimRequest`. stopWin/stopLoss/tableMax are absolute amounts; blank = off / no limit (`null`). `baseBet` is passed in ctx; flat bets `baseBet × units`.
+- **Number inputs keep a local text draft** (`NumberField`) only while typing; every parseable value is committed to `ScenarioConfig` immediately. Unparseable text shows an inline error and is not committed.
+- **Config stays editable during a run.** Results are snapshotted with the scenario that produced them and flagged "configuration has changed since this run" when stale.
+- **Worker requests reference strategies by registry id** (`SimRequest`), since functions can't cross the worker boundary.
+- **Engine isolation is enforced by a test** (`isolation.test.ts`): no `Math.random`, React, or DOM globals in `src/engine/` (comments ignored).
+- **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
