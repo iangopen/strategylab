@@ -3,9 +3,9 @@ import { GAME_PRESETS } from "../games";
 import { sessionSeed } from "../rng";
 import { runSession } from "../runner";
 import { flat } from "../strategies/flat";
-import { evPerWageredWithSE, sessionConfig } from "../testUtils";
+import { evPerWageredWithSE, sessionConfig, testCtx } from "../testUtils";
 import type { SessionResult } from "../types";
-import { addSession, createAccumulator } from "./accumulator";
+import { addSession, createAccumulator, sortedColumn } from "./accumulator";
 import { evPerWageredSE, STATS } from "./registry";
 
 function session(finalBankroll: number, totalWagered: number, rounds: number, endReason: SessionResult["endReason"]): SessionResult {
@@ -15,8 +15,32 @@ function session(finalBankroll: number, totalWagered: number, rounds: number, en
 function computeAll(results: SessionResult[], start: number) {
   const acc = createAccumulator(results.length, start);
   for (const r of results) addSession(acc, r);
-  return { acc, values: Object.fromEntries(STATS.map((s) => [s.id, s.compute(acc)])) };
+  const ctx = testCtx(results.length, start);
+  return { acc, values: Object.fromEntries(STATS.map((s) => [s.id, s.compute(acc, ctx)])) };
 }
+
+describe("accumulator columns", () => {
+  it("stores finals, max drawdowns and longest streaks per session, in session order", () => {
+    const acc = createAccumulator(3, 1000);
+    addSession(acc, { ...session(900, 100, 1, "maxRounds"), maxDrawdown: 300, longestLosingStreak: 4 });
+    addSession(acc, { ...session(1500, 100, 1, "stopWin"), maxDrawdown: 50, longestLosingStreak: 1 });
+    expect(Array.from(acc.finals.subarray(0, acc.count))).toEqual([900, 1500]);
+    expect(Array.from(acc.maxDrawdowns.subarray(0, acc.count))).toEqual([300, 50]);
+    expect(Array.from(acc.longestStreaks.subarray(0, acc.count))).toEqual([4, 1]);
+  });
+
+  it("sorts each column once and reuses it; adding a session invalidates the cache", () => {
+    const acc = createAccumulator(3, 1000);
+    addSession(acc, session(900, 100, 1, "maxRounds"));
+    addSession(acc, session(100, 100, 1, "maxRounds"));
+    const s1 = sortedColumn(acc, "finals");
+    expect(Array.from(s1)).toEqual([100, 900]);
+    expect(sortedColumn(acc, "finals")).toBe(s1); // same object: sorted once
+    expect(Array.from(acc.finals.subarray(0, 2))).toEqual([900, 100]); // original order untouched
+    addSession(acc, session(500, 100, 1, "maxRounds"));
+    expect(Array.from(sortedColumn(acc, "finals"))).toEqual([100, 500, 900]);
+  });
+});
 
 describe("accumulator + registered stats", () => {
   it("computes every registered stat on a hand-built set of sessions", () => {

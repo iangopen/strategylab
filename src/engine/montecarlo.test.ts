@@ -52,9 +52,9 @@ describe("runMonteCarlo", () => {
   });
 
   it("stats plug-in (test 5): a throwaway StatDef appears in the output with no other code changes", () => {
-    const throwaway: StatDef = { id: "throwaway", label: "Sessions counted", format: "int", compute: (acc) => acc.count };
+    const throwaway: StatDef = { id: "throwaway", label: "Sessions counted", format: "int", compute: (acc, ctx) => acc.count + 1000 * ctx.nSessions };
     const r = runMonteCarlo(european, [{ strategy: flat, config: { units: 1 } }], cfg, 321, 1, undefined, { stats: [...STATS, throwaway] });
-    expect(r.perStrategy[0]!.stats.throwaway).toBe(321);
+    expect(r.perStrategy[0]!.stats.throwaway).toBe(321 + 1000 * 321); // uses both acc and ctx
     expect(r.perStrategy[0]!.stats.evPerWagered).toBeDefined();
   });
 

@@ -1,5 +1,6 @@
 import { END_REASONS, type EndReason } from "../types";
-import type { Accumulator } from "./accumulator";
+import { sortedColumn, type Accumulator } from "./accumulator";
+import { quantileSorted } from "./quantile";
 import type { StatDef } from "./types";
 
 /** EV per $ wagered = (meanFinal - start) / meanTotalWagered. */
@@ -21,10 +22,7 @@ export function evPerWageredSE(acc: Accumulator): number {
 }
 
 function median(acc: Accumulator): number {
-  if (acc.count === 0) return NaN;
-  const sorted = acc.finals.slice(0, acc.count).sort();
-  const mid = acc.count >> 1;
-  return acc.count % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  return quantileSorted(sortedColumn(acc, "finals"), 0.5);
 }
 
 const mean = (sum: number, acc: Accumulator) => (acc.count === 0 ? NaN : sum / acc.count);

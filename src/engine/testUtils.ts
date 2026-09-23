@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { edge, GAME_PRESETS, type Game } from "./games";
 import { sessionSeed, type Rng } from "./rng";
 import { runSession } from "./runner";
+import type { RunContext } from "./stats/types";
 import type { AnyStrategy, StrategyConfig } from "./strategies/types";
 import type { SamplePath, SessionConfig, SessionResult } from "./types";
 
@@ -167,4 +168,9 @@ export function evPerWageredWithSE(results: readonly SessionResult[], start: num
   const meanW = sw / n;
   const se = Math.sqrt(ss / (n - 1) / n) / meanW;
   return { ev, se };
+}
+
+/** A RunContext for hand-built accumulators: European roulette unless another game is given. */
+export function testCtx(nSessions: number, start: number, overrides: Partial<SessionConfig> = {}, game: Game = GAME_PRESETS.find((g) => g.id === "european")!): RunContext {
+  return { game, edge: edge(game), config: sessionConfig({ startBankroll: start, ...overrides }), nSessions };
 }

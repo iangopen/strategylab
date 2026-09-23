@@ -1,9 +1,9 @@
-import type { Game } from "./games";
+import { edge, type Game } from "./games";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
 import { addSession, createAccumulator, type Accumulator } from "./stats/accumulator";
 import { STATS } from "./stats/registry";
-import type { StatDef } from "./stats/types";
+import type { RunContext, StatDef } from "./stats/types";
 import type { AnyStrategy, StrategyConfig } from "./strategies/types";
 import { validateStrategyConfig } from "./strategies/validate";
 import type { EndReason, SamplePath, SessionConfig } from "./types";
@@ -94,13 +94,14 @@ export function runMonteCarlo(
     }
   }
 
+  const ctx: RunContext = Object.freeze({ game: Object.freeze({ ...game }), edge: edge(game), config: Object.freeze({ ...config }), nSessions });
   return {
     nSessions,
     masterSeed,
     perStrategy: strategies.map((s, k) => {
       const acc = accs[k]!;
       const values: Record<string, number> = {};
-      for (const stat of stats) values[stat.id] = stat.compute(acc);
+      for (const stat of stats) values[stat.id] = stat.compute(acc, ctx);
       return { strategyId: s.strategy.id, stats: values, endReasonCounts: { ...acc.endReasons }, samplePaths: paths[k]! };
     }),
   };
