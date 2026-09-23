@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { edge, GAME_PRESETS, type Game } from "../games";
 import { sessionSeed } from "../rng";
 import { runSession } from "../runner";
-import { evPerWageredWithSE, sessionConfig } from "../testUtils";
+import { betSequence, describeEvInvariant, evPerWageredWithSE, expectPure, L, sessionConfig, W } from "../testUtils";
 import type { SessionConfig, SessionResult } from "../types";
 import { flat } from "./flat";
 
@@ -31,6 +31,14 @@ describe("flat", () => {
     const s = flat.init({ units: 2.5 }, ctx);
     expect(flat.nextBet(s, ctx)).toBe(250);
     expect(flat.nextBet(flat.update(s, false, ctx), ctx)).toBe(250);
+  });
+
+  it("exact sequence: the same bet whatever happens", () => {
+    expect(betSequence(flat, { units: 1.5 }, [L, W, L, L, W])).toEqual([150, 150, 150, 150, 150, 150]);
+  });
+
+  it("is pure under deep-frozen inputs", () => {
+    expectPure(flat, { units: 2 });
   });
 
   it("is pure: inputs are unchanged", () => {
@@ -64,3 +72,5 @@ describe("EV per $ wagered invariant (test 3)", () => {
     checkInvariant("coin/stops", coin, stops, 20_000, 4);
   });
 });
+
+describeEvInvariant(flat, { units: 1 });
