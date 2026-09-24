@@ -90,12 +90,18 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
       if (i !== selectedSession) strokeLine(f, p, color, 1, 0.22);
     });
     strokeLine(f, series.median, color, 2.5);
+    // The selected (replayed) session: drawn after every other path and the median, thicker, on a
+    // halo in the panel color, so it stays visible even inside a dense cluster. Theme-aware.
     const sel = selectedSession === null ? undefined : series.paths[selectedSession];
-    if (sel) strokeLine(f, sel, cssColor("--text"), 1.5, 0.9);
+    const halo = cssColor("--panel", "#fff");
+    if (sel) {
+      strokeLine(f, sel, halo, 5, 1);
+      strokeLine(f, sel, cssColor("--text"), 2.5, 1);
+    }
     // Reference lines and their knocked-out labels go on top of the data, so text never sits on paths.
     const labels = drawRefLines(f, referenceLines(refs).map((r) => ({ value: r.value, label: r.label, align: r.kind === "start" ? "left" : "right" })), cssColor("--chart-ref"));
     unclip();
-    chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, paths: series.paths.length, color, theme: effectiveTheme(), refLabels: JSON.stringify(labels), selected: selectedSession });
+    chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, paths: series.paths.length, color, theme: effectiveTheme(), refLabels: JSON.stringify(labels), selected: selectedSession, highlighted: sel ? selectedSession : null, halo: sel ? halo : null });
     countDraw(c);
   }, [width, theme, series, x, y, refs, colorVar, selectedSession]);
 
