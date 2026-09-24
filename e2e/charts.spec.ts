@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { defaultScenario } from "../src/scenario";
+import { runMonteCarlo } from "../src/engine/montecarlo";
+import { defaultScenario, toSimRequest } from "../src/scenario";
+import { activeRangeEnd } from "../src/ui/charts/adapters";
+import { MARGIN } from "../src/ui/charts/canvas";
+import { resolveStrategies } from "../src/worker/resolve";
 import { encodeScenarioLink } from "../src/share/link";
 import { addStrategy, openApp, runAndWait } from "./helpers";
 
@@ -97,4 +101,104 @@ test("selected-path highlight: the replayed session is highlighted (on a theme-a
   await page.getByRole("textbox", { name: "Session", exact: true }).fill("500");
   await page.getByRole("button", { name: "Replay", exact: true }).click();
   for (let i = 0; i < 3; i++) await expect(fans.nth(i)).not.toHaveAttribute("data-highlighted", /.*/);
+});
+
+// ---------------------------------------------------------------- synchronized fan zoom
+
+/** Activity ends per strategy for the DEFAULT scenario, from the engine in Node (the exact worker code). */
+function defaultActiveEnds(): number[] {
+  const req = toSimRequest(defaultScenario());
+  const r = runMonteCarlo(req.game, resolveStrategies(req.strategies), req.session, req.nSessions, req.masterSeed);
+  return r.perStrategy.map((o) => activeRangeEnd(o.bands, r.bands.rounds));
+}
+
+async function fanState(page: import("@playwright/test").Page) {
+  const fans = page.getByTestId("fan-canvas");
+  const n = await fans.count();
+  for (let i = 0; i < n; i++) await expect(fans.nth(i)).toHaveAttribute("data-x-range", /^[\d.]+-[\d.]+$/);
+  return fans.evaluateAll((els) => els.map((e) => ({ xRange: e.dataset.xRange!, zoom: e.dataset.zoom!, yMin: e.dataset.yMin!, yMax: e.dataset.yMax! })));
+}
+
+async function expectAllPanels(page: import("@playwright/test").Page, attr: string, value: string) {
+  const fans = page.getByTestId("fan-canvas");
+  const n = await fans.count();
+  for (let i = 0; i < n; i++) await expect(fans.nth(i)).toHaveAttribute(attr, value);
+}
+
+test("zoom: a drag on the Martingale panel zooms EVERY fan panel to one identical x window; y never changes; double-click resets", async ({ page }) => {
+  await openApp(page);
+  await runAndWait(page);
+  const before = await fanState(page);
+  expect(before.map((s) => s.xRange)).toEqual(["0-1000", "0-1000"]);
+  const mart = page.getByTestId("fan-canvas").nth(1);
+  await expect(mart).toHaveAttribute("data-label", "Martingale");
+  await mart.scrollIntoViewIfNeeded();
+  const b = (await mart.boundingBox())!;
+  const y = b.y + b.height / 2;
+  await page.mouse.move(b.x + b.width * 0.3, y);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width * 0.45, y);
+  await page.mouse.move(b.x + b.width * 0.6, y);
+  await page.mouse.up();
+  await expect(mart).not.toHaveAttribute("data-zoom", "full");
+  const zoomed = await fanState(page);
+  expect(new Set(zoomed.map((s) => s.xRange)).size).toBe(1); // identical on every panel
+  expect(zoomed[0]!.zoom).toBe(zoomed[0]!.xRange);
+  const [lo, hi] = zoomed[0]!.xRange.split("-").map(Number) as [number, number];
+  expect(lo).toBeGreaterThan(0);
+  expect(hi).toBeLessThan(1000);
+  expect(zoomed.map((s) => [s.yMin, s.yMax])).toEqual(before.map((s) => [s.yMin, s.yMax])); // y untouched
+  await expect(page.getByTestId("fan-zoom-status")).toContainText(`Showing rounds ${lo.toLocaleString("en-US")}–`);
+  // The drag did not also pick a path (it was a zoom, not a click).
+  await expect(mart).not.toHaveAttribute("data-selected", /.*/);
+  await page.getByTestId("fan-canvas").first().dblclick();
+  await expectAllPanels(page, "data-zoom", "full");
+  await expectAllPanels(page, "data-x-range", "0-1000");
+});
+
+test("zoom: 'Fit to this strategy' on Martingale sets [0, its active range] (from the engine, under 100 rounds) on every panel; Reset restores", async ({ page }) => {
+  const ends = defaultActiveEnds();
+  expect(ends[1]!).toBeLessThan(100);
+  await openApp(page);
+  await runAndWait(page);
+  const fans = page.getByTestId("fan-canvas");
+  await expect(fans.nth(0)).toHaveAttribute("data-active-end", String(ends[0]));
+  await expect(fans.nth(1)).toHaveAttribute("data-active-end", String(ends[1]));
+  const before = await fanState(page);
+  await page.locator("figure.chart-panel", { has: page.locator('[data-label="Martingale"]') }).getByRole("button", { name: "Fit to this strategy" }).click();
+  await expectAllPanels(page, "data-x-range", `0-${ends[1]}`);
+  await expectAllPanels(page, "data-zoom", `0-${ends[1]}`);
+  const after = await fanState(page);
+  expect(after.map((s) => [s.yMin, s.yMax])).toEqual(before.map((s) => [s.yMin, s.yMax]));
+  // The hover readout follows the zoom: the snapped round is inside the window.
+  const flat = fans.first();
+  const fb = (await flat.boundingBox())!;
+  await flat.hover({ position: { x: fb.width * 0.7, y: fb.height * 0.5 } });
+  await expect(flat).toHaveAttribute("data-hover-round", /^\d+$/);
+  expect(Number(await flat.getAttribute("data-hover-round"))).toBeLessThanOrEqual(ends[1]!);
+  await page.getByRole("button", { name: "Show every round", exact: true }).click();
+  await expectAllPanels(page, "data-zoom", "full");
+  // Fit to Flat: its sessions run the whole way, so it is the full range.
+  await page.locator("figure.chart-panel", { has: page.locator('[data-label="Flat"]') }).getByRole("button", { name: "Fit to this strategy" }).click();
+  await expectAllPanels(page, "data-x-range", `0-${ends[0]}`);
+});
+
+test("zoom: a new run starts unzoomed, and a plain click still picks a path to replay", async ({ page }) => {
+  await openApp(page);
+  await runAndWait(page);
+  await page.locator("figure.chart-panel", { has: page.locator('[data-label="Martingale"]') }).getByRole("button", { name: "Fit to this strategy" }).click();
+  const fan = page.getByTestId("fan-canvas").first();
+  await expect(fan).not.toHaveAttribute("data-zoom", "full");
+  // While zoomed, a click (no drag) on the start point shared by all 50 paths picks a session.
+  const [xMin, xMax] = (await fan.getAttribute("data-x-range"))!.split("-").map(Number) as [number, number];
+  const yMax = Number(await fan.getAttribute("data-y-max"));
+  const b = (await fan.boundingBox())!;
+  const px = MARGIN.left + ((0 - xMin) / (xMax - xMin)) * (b.width - MARGIN.left - MARGIN.right);
+  const py = MARGIN.top + (b.height - MARGIN.top - MARGIN.bottom) * (1 - defaultScenario().startBankroll * 100 / yMax);
+  await fan.click({ position: { x: px + 2, y: py } });
+  await expect(fan).toHaveAttribute("data-selected", /^\d+$/);
+  await expect(fan).not.toHaveAttribute("data-zoom", "full"); // a click never changes the zoom
+  await page.getByRole("textbox", { name: "Seed", exact: true }).fill("99");
+  await runAndWait(page);
+  await expectAllPanels(page, "data-zoom", "full");
 });

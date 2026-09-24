@@ -202,3 +202,4 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
 .odds-readout .warn dt, .odds-readout .warn dd { color: var(--error); }
 .odds-readout .warn { flex-direction: column; gap: 0; }
 .odds-readout .warn dd { text-align: left; }
+.chart-panel figcaption .fit-strategy { margin-left: auto; font-size: 0.78rem; font-weight: normal; }
