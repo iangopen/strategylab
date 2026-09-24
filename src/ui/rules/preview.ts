@@ -48,6 +48,7 @@ export function previewRule(rule: unknown, script: string, pc: PreviewContext): 
   const game = { winProb: pc.winProb, netPayout: pc.netPayout, edge: 1 - pc.winProb * (1 + pc.netPayout) };
   let bankroll = pc.startBankroll;
   let lastBet: number | null = null;
+  let carry = 0; // the runner's sub-cent carry, so the bankroll column matches a real session
   const ctx = (round: number): StrategyContext => ({ bankroll, baseBet: pc.baseBet, round, lastBet, game });
 
   let state = strategy.init({}, ctx(0));
@@ -56,7 +57,14 @@ export function previewRule(rule: unknown, script: string, pc: PreviewContext): 
     const desired = strategy.nextBet(state, ctx(i));
     if (desired === "stop") return { ok: true, rows, next: "stop", stoppedEarly: true };
     const bet = Math.max(1, Math.round(desired));
-    bankroll += won ? Math.round(bet * pc.netPayout) : -bet;
+    if (won) {
+      const owed = bet * pc.netPayout + carry;
+      const paid = Math.round(owed);
+      carry = owed - paid;
+      bankroll += paid;
+    } else {
+      bankroll -= bet;
+    }
     lastBet = bet;
     rows.push({ round: i + 1, units: desired / pc.baseBet, bet, won, bankrollAfter: bankroll });
     state = strategy.update(state, won, ctx(i + 1));

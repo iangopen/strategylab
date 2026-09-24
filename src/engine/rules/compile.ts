@@ -86,8 +86,9 @@ function compileProgression(rule: ProgressionRule): Strategy<NoConfig, Progressi
         ...state,
         winStreak: won ? state.winStreak + 1 : 0,
         lossStreak: won ? 0 : state.lossStreak + 1,
-        // Same arithmetic as the runner's payout, so this equals the real bankroll change.
-        cycleProfit: state.cycleProfit + (won ? Math.round(placed * ctx.game.netPayout) : -placed),
+        // Exact winnings (fractional cents), as Oscar's Grind counts them. The runner pays whole cents with
+        // a sub-cent carry, so over any stretch of rounds this is within 1 cent of the real bankroll change.
+        cycleProfit: state.cycleProfit + (won ? placed * ctx.game.netPayout : -placed),
       };
       return apply(firstMatch(won ? rule.onWin : rule.onLoss, counted, ctx).then, counted, rule.startUnits);
     },

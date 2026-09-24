@@ -95,8 +95,23 @@ describe("replay: the same luck in every strategy", () => {
     const custom: Game = { id: "custom", name: "Custom", winProb: 0.45, netPayout: 1.2 };
     const rep2 = replaySession(custom, specs, cfg, 5, 3);
     rep2.strategies.forEach((s) => {
-      const d = deltasFromPath(s.bankroll);
-      d.forEach((delta, r) => expect(delta).toBe(delta > 0 ? Math.round(s.bets.bankroll[r]! * 1.2) : -s.bets.bankroll[r]!));
+      // Wins pay whole cents with the runner's per-session sub-cent carry; losses cost the bet.
+      let carry = 0;
+      let paid = 0;
+      let exact = 0;
+      deltasFromPath(s.bankroll).forEach((delta, r) => {
+        const bet = s.bets.bankroll[r]!;
+        if (delta > 0) {
+          const owed = bet * 1.2 + carry;
+          expect(delta).toBe(Math.round(owed));
+          carry = owed - delta;
+          paid += delta;
+          exact += bet * 1.2;
+        } else {
+          expect(delta).toBe(-bet);
+        }
+      });
+      expect(Math.abs(paid - exact)).toBeLessThanOrEqual(0.5 + 1e-6);
     });
   });
 

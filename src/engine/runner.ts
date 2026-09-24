@@ -39,6 +39,10 @@ export function runSession(
  *   6. bet > bankroll -> "stop" ends with insufficientFunds, "allIn" bets the bankroll
  *   7. exactly ONE uniform draw resolves the round
  * Steps 1-6 never draw, so a session that ends early leaves the RNG untouched.
+ *
+ * A win pays whole cents with a per-session sub-cent carry: owed = bet × netPayout + carry,
+ * paid = Math.round(owed), carry = owed - paid. |carry| <= 0.5, so over any session the total paid
+ * is within half a cent of the exact total. For integer payouts the carry is always exactly 0.
  */
 export function runSessionWithRng(
   game: Game,
@@ -60,6 +64,7 @@ export function runSessionWithRng(
   let losingStreak = 0;
   let longestLosingStreak = 0;
   let lastBet: number | null = null;
+  let carry = 0; // sub-cent remainder of past winnings; starts at 0 and never leaves this session
 
   // Read-only game view, computed once: strategies may size bets from the payout.
   const gameView = { winProb: game.winProb, netPayout: game.netPayout, edge: edge(game) };
@@ -86,7 +91,14 @@ export function runSessionWithRng(
     }
 
     const won = rng() < game.winProb;
-    bankroll += won ? Math.round(bet * game.netPayout) : -bet;
+    if (won) {
+      const owed = bet * game.netPayout + carry;
+      const paid = Math.round(owed);
+      carry = owed - paid;
+      bankroll += paid;
+    } else {
+      bankroll -= bet;
+    }
     rounds++;
     totalWagered += bet;
     lastBet = bet;
