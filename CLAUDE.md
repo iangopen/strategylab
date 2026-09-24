@@ -71,7 +71,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 3. **Common random numbers.** Session i's seed = `splitmix32(masterSeed ^ splitmix32(i))`. NEVER `masterSeed + i` (adjacent mulberry32 seeds are correlated). Each round consumes EXACTLY ONE uniform draw to resolve win/loss. Strategies NEVER touch the RNG. Reason: session i of every strategy sees the identical outcome sequence; this is the basis of fair comparison.
 
-4. **Integer money.** The engine works in integer cents. Bets returned by strategies are rounded to whole cents by the runner. The UI converts at the boundary. Reason: no float drift in progressions.
+4. **Integer money, with a per-session sub-cent carry.** The engine works in integer cents. Bets returned by strategies are rounded to whole cents by the runner. The UI converts at the boundary. A win pays `Math.round(bet × netPayout + carry)` cents and keeps the remainder as the session's `carry` (session 11): the bankroll is always whole cents, `|carry| ≤ 0.5`, the carry starts at 0 in every session and never crosses sessions, and it never consumes or moves a draw. For integer payouts it is always exactly 0. Reason: no float drift in progressions, and no systematic cents-rounding bias in EV per $ on non-integer payouts (see "Cents rounding").
 
 5. **Game model** (`games.ts`): `interface Game { id; name; winProb; netPayout }`. `netPayout` = profit per unit staked on a win (even money = 1). Derived: `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom, and (session 8) sports odds, which COMPILE to a Game in `odds.ts` (see "Sports odds"). Validate `0 < winProb < 1` and `netPayout > 0`.
 
@@ -123,9 +123,13 @@ src/
   engine/
     rng.ts            mulberry32 + splitmix32
     games.ts          Game type, presets, edge, validation
-    odds.ts           sports odds -> Game: conversions, proportional de-vig, estimate mode, rounding bias (pure)
+    odds.ts           sports odds -> Game: conversions, proportional de-vig, estimate mode (pure)
     types.ts          shared engine types (SessionResult, EndReason, ...)
-    runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer
+    runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer, sub-cent payout carry
+    runner.golden.test.ts + .json  pre-carry golden SessionResults on even/integer payouts (bit-identical), old-rule -110 run
+    runner.carry.test.ts          carry property test: |paid - exact| < 1 cent, exact BigInt rationals, after every round
+    runner.regression.test.ts     -110 flat $5, 100k sessions: z before (golden) vs after the carry
+    invariant.test.ts             THE full invariant table: 8 built-ins + a custom rule x 5 games (incl. two sports games)
     montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, histogram, bands, resultTransferables
     downsample.ts     streaming min/max sample-path downsampler (<= 1000 points)
     replay.ts         same-luck replay of one session for every strategy (calls runSession only)
@@ -315,7 +319,7 @@ State: `units` (starts at `startUnits`), `winStreak`, `lossStreak`, `cycleProfit
 - **nextBet:** `"stop"` if `stopped`; otherwise `min(baseBet × units, Number.MAX_SAFE_INTEGER)`. The runner rounds, applies table limits and checks the bankroll, as for every strategy.
 - **update(won, ctx)**, in this order:
   1. Streaks: a win adds 1 to `winStreak` and sets `lossStreak` to 0; a loss does the opposite.
-  2. Cycle profit: `+ round(ctx.lastBet × netPayout)` on a win, `− ctx.lastBet` on a loss. This is the PLACED bet (after table rules), the same arithmetic the runner uses, so it equals the real bankroll change.
+  2. Cycle profit: `+ ctx.lastBet × netPayout` (the EXACT winnings, fractional cents, as Oscar's Grind counts them) on a win, `− ctx.lastBet` on a loss. This is the PLACED bet (after table rules). The runner pays whole cents with a sub-cent carry, so over any stretch of rounds this is within 1 cent of the real bankroll change (session 11; it was `round(lastBet × netPayout)` before, which would drift by up to ½¢ per win against the carry).
   3. Pick the list (`onWin` or `onLoss`) and walk it TOP TO BOTTOM. The FIRST entry whose `when` holds, or that has no `when`, is the match. Conditions see the post-round bankroll (`ctx.bankroll`), the updated streaks and cycle profit, and the units of the bet just placed. `cycleProfit` compares against `atLeast × baseBet`; `bankroll` compares against `start × pct / 100`.
   4. Apply that entry's ONE action. After `set` / `multiply` / `add`, units are clamped to [0.01, `Number.MAX_SAFE_INTEGER`] (the session 2 overflow guard: units never become Infinity or ≤ 0).
 
@@ -490,29 +494,26 @@ Tone: educational. No sportsbook names, no links, no "picks", no "sharp" or "val
    - Edge = 1 − 0.55 × 21/11 = 1 − 1.05 = **−0.05, a 5% PLAYER edge**, believed, not established.
    - The invariant predicts EV per $ wagered = +0.05, and the simulation will show it: the engine honors the probability it is given.
 
-### Cents rounding bias (measured, not hidden)
+### Cents rounding (session 11: per-session sub-cent carry)
 
-The runner pays a win as `Math.round(bet × netPayout)` cents. For non-even payouts, that shifts EV per $ wagered by p × (round(b·n) − b·n) / b for a bet of b cents. The magnitude is at most 0.5 × p / b.
+The bankroll is whole cents, but `bet × netPayout` often is not (−110 at $5: 454.5454…¢). Since session 11 the runner pays each win as
 
-Flat bettor at **−110 / −110** (p = 0.5, n = 10/11), hand-computed:
+```
+owed  = bet × netPayout + carry      // fractional cents
+paid  = Math.round(owed)             // whole cents, ties toward +∞
+carry = owed − paid                  // |carry| ≤ 0.5; starts at 0 every session
+```
 
-| Base bet | Win pays exactly | Paid | Shift per win | Bias in EV per $ |
-|---|---|---|---|---|
-| $1 (100¢) | 90.909¢ | 91¢ | +0.0909¢ | **+0.0455%** |
-| $5 (500¢, the invariant scenario) | 454.545¢ | 455¢ | +0.4545¢ | **+0.0455%** |
-| $10 (1,000¢, the app default) | 909.091¢ | 909¢ | −0.0909¢ | **−0.0045%** |
-| $25 | 2,272.727¢ | 2,273¢ | +0.2727¢ | **+0.0055%** |
+- **Bound:** over any session, and at every round inside it, |total paid − total exact| = |carry| ≤ ½¢, plus float noise of at most ε × |owed| per win (~1e-4¢, and only at $10M bets on a 1,000 payout). `runner.carry.test.ts` checks it after every round of 15,000 random sessions with EXACT rational arithmetic: a float payout is a dyadic rational, so the reference total is a BigInt fraction. Measured max: −110 0.4545¢, +150 0.5¢, decimal 1.91 0.5000001¢, 1.2 0.4000004¢, 5,000 random payouts 0.50015¢.
+- **Residual effect on EV per $:** at most ½¢ per SESSION (not per win), i.e. ≤ 0.5 / totalWagered. For the invariant scenario's Flat (~$5,000 wagered per session) that is ≤ 0.0001%, about 1/100 of an SE at 100k sessions. No helper is needed to describe it: `payoutRoundingBias` was deleted in session 11.
+- **Tie rule: half-up (`Math.round`).** With a carry the tie direction cannot accumulate (a tie leaves carry −0.5, repaid by the next win), so half-even would buy nothing. Half-up keeps the FIRST win of every session paying exactly what it paid before session 11.
+- **Integer payouts** (even money, 2:1, 35:1, …): `bet × n` is an exact integer, so the carry is exactly 0 and every result is bit-identical to the pre-carry runner (`runner.golden.test.ts`: 5 games × 2 scenarios × 9 strategies, 50 stored results plus a digest over 2,000 full paths per cell).
+- **Draws:** the carry is arithmetic on the payout only. It never consumes a draw and never changes when one happens, so CRN and draws === rounds are unchanged.
+- **Same rule elsewhere:** the rule builder's live preview (`ui/rules/preview.ts`) pays with the same carry, so its bankroll column matches a real session. Rule cycle profit counts exact winnings (see "Evaluation order").
 
-**Worst case at the default $10 base bet, any price:** ±0.5¢ per win, i.e. at most **0.025% per $ at p = 0.5**. A sweep of 100,000 payouts measured 0.02475%. Examples at $10 and p = 0.5:
-- **−110:** −0.0045%.
-- **−180:** +0.0222% (1000 × 5/9 = 555.56¢ → 556¢), close to the worst case.
-- **+150 and decimal 1.91:** 0.
+**What it fixed:** before the carry, Flat at $5 on −110 was paid 455¢ per win instead of 454.545¢, a +0.0455% shift in EV per $: 2.12 SE at 20,000 sessions (session 8) and **5.29 SE at 100,000** (`runner.regression.test.ts`, same seeds: EV per $ −4.4947% vs −edge −4.5455%, SE 0.0096%). With the carry: **−4.5401%, z 0.55.** (At the app's default $10 bet the old shift was −0.0045%; at a $1 bet it could reach 0.25%.)
 
-At a $1 table-minimum bet the worst case is 0.25%. A positive bias means the simulated bettor does slightly BETTER than the price.
-
-**Measured in the invariant (session 8):** on the −110 market at the invariant scenario's $5 base, Flat's +0.0455% shift is **2.12 SE** (SE 0.021%, 20,000 sessions). Flat still passes, at z = 1.17 vs −edge and −0.95 vs the rounding-aware value. On the estimate-0.55 game, the shift is 2.32 SE (z 1.03 / −1.29). This is the closest any invariant test comes to being driven by rounding rather than sampling. If a future change makes a flat invariant fail on a non-even payout, check rounding FIRST. The test prints both z values for Flat.
-
-The invariant tests keep their 4 SE tolerance. If one fails, the rounding rule is the FIRST suspect: investigate and report, never loosen the tolerance. `odds.ts` exports `payoutRoundingBias(betCents, netPayout, p)`, and a test prints this table.
+The invariant tests keep their 4 SE tolerance. If one fails on a non-integer payout, the carry is the FIRST suspect: investigate and report, never loosen the tolerance.
 
 ### Pushes are out of scope
 
@@ -545,9 +546,7 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 
 The original roadmap is complete. Candidates beyond it (not scheduled; see STATUS "Still open"):
 
-- **Session 11 (next, confirmed): the cents-rounding carry** below.
 - **Adaptive band checkpoints (possible engine follow-up, NOT implemented):** bands have ~5-round resolution at 1,000 rounds (200 checkpoints). A strategy whose sessions end within ~30 rounds (Martingale on the default scenario) therefore gets only ~6 checkpoints when zoomed with "Fit to this strategy". Denser checkpoints early in the session (or per-strategy checkpoints) would sharpen that. It is an engine change (`stats/bands.ts`) and needs its own spec.
-- **Cents-rounding bias (owner, session 9):** at 100k sessions on −110, Flat's shift is ~4.7 SE, so the UI's "z vs theory" will look significant. (The shift is +0.0455% at a $5 base bet, 2.12 SE at 20,000 sessions, so 2.12 × √5 ≈ 4.7 SE at 100k. At the app's default $10 base bet it is only −0.0045%.) Fix: a per-session sub-cent carry in the runner. It needs its own session, with the full invariant suite re-run. E2E won't need changing: its expected numbers come from the engine.
 - **Vercel (optional later):** deploy the same build at a domain root with `VITE_BASE=/` (the default). No code change is needed.
 
 - **Pushes (three-way outcome):** a tie that returns the stake. Needs the runner to resolve a round into win / push / loss from ONE draw (so CRN still holds) and a Game with a push probability. It is the first real change to the Game abstraction, so it needs its own spec.
@@ -847,7 +846,7 @@ Session 8 (2026-09-23, Windows / PowerShell). `npm run test` (508 passed, 2 benc
 
     - Worst |z| is 2.78 on the market and 2.26 on the estimate game.
     - On the market game, Kelly uses assumed 0.6: at the fair p it refuses to bet. On the estimate game, its default (blank = 0.55) bets.
-    - Flat's cents-rounding shift and its rounding-aware z are printed; see "Cents rounding bias".
+    - Flat's cents-rounding shift and its rounding-aware z are printed; see "Cents rounding" (rewritten in session 11: the workaround and the second z were removed once the carry existed).
 67. **Rounding bias** (directive 4):
     - The CLAUDE.md table is asserted to 1e-15: −110 flat at $1 / $5 / $10 / $25 gives +0.0455% / +0.0455% / −0.0045% / +0.0055%.
     - Worst case at $10 over 100,000 payouts: 0.02475% (bound 0.025%). −180 at $10: +0.0222%.
@@ -1009,7 +1008,7 @@ Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 ben
 ### Still open
 
 - The original 8-session roadmap is complete. Next candidates are in the Roadmap: pushes, parlays, other de-vig methods.
-- Cents rounding on non-even payouts is ~2 SE for a flat $5 bettor at 20,000 sessions (STATUS 66). It is not a failure, but it is the known pressure point if invariant sample sizes grow.
+- ~~Cents rounding on non-even payouts is ~2 SE for a flat $5 bettor at 20,000 sessions (STATUS 66).~~ **Closed in session 11:** the per-session sub-cent carry (see "Cents rounding"); at 100k sessions z went from 5.29 to 0.55.
 - Sports mode stores decimal prices at full precision after a format switch. The field shows 2 decimals, so the stored price and the visible one can differ (e.g. 1.9090909090909092 vs "1.91"). The readout shows the real payout. This is by design (owner decision 6).
 - The address bar is not kept in sync while editing (owner-approved in the session 7 plan). After opening a link and then editing, a reload brings back the LINK, not the edits, until Copy link is clicked again.
 - Rule language gaps, by design for now: one action per entry (no "multiply AND cap"), no Fibonacci-style step-back, no payout-capped bet (Oscar's Grind), no bankroll-proportional stake (Kelly). Those stay built-ins.
@@ -1017,7 +1016,7 @@ Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 ben
 - Sequence rules copy the line on each loss (O(line length) per loss), like the built-in Labouchère. That is not the O(entries) bound progressions have, but it is bounded by the session's losses.
 - An unknown key inside an object hides that object's field errors until the key is fixed. Every problem is reported only once the keys are right.
 - **Account rename:** links shared with the OLD Pages address are permanently dead (GitHub Pages does not redirect across a rename). ~~The local `origin` still pointed at the old account.~~ **Closed in session 11:** `origin` is `https://github.com/iangopen/strategylab.git`.
-- **Stale help text in `src/engine/strategies/labouchere.ts`:** "Custom lines come later, with the rule builder." The rule builder has existed since session 6. It was left alone in session 10 because the session's hard rule was an empty `src/engine/` diff. It is display metadata only, so it is a one-line fix for session 11 (which touches the engine anyway).
+- ~~Stale help text in `src/engine/strategies/labouchere.ts` ("Custom lines come later…").~~ **Closed in session 11:** it now points to the rule builder's Labouchère example.
 - ~~Rules are not saved anywhere yet: a page reload loses them.~~ **Closed in session 7:** Copy link puts the scenario (rules included) in the address bar, so a reload restores it. Saving without a link (storage, accounts) is still out of scope.
 - ~~Browser vs Node speed gap (~4–5×).~~ **Resolved in session 9:** in a visible, focused tab, the browser is within ~10% of Node (STATUS 77). The gap was the hidden automation tab.
 - CI `ubuntu-latest` will move to Ubuntu 26 from 2026-10-19 (GitHub notice). Nothing to do unless a run breaks.
@@ -1035,7 +1034,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Stop boundaries are inclusive:** stopWin fires at `bankroll >= target`, stopLoss at `bankroll <= floor`. The UI labels stopLoss as a "floor". Both boundaries are tested to the cent.
 - **Runner check order each round:** stopWin → stopLoss → ruin → maxRounds → strategy ("stop") → round/tableMin/tableMax → insufficientFunds → ONE draw. Stops and ruin come before maxRounds so a session that busts or hits a target on its last allowed round is reported as that, not as maxRounds (keeps a future P(bust) honest). None of the pre-resolution checks draws; a test asserts draws === rounds for every endReason.
 - **`update(state, won, ctx)` receives the post-round ctx:** bankroll after resolution, `lastBet` = the bet actually placed (after table rules). Progressions that need their own intended bet must keep it in State.
-- **Win payout is `Math.round(bet * netPayout)` cents.** Exact for even money; for fractional custom payouts it introduces at most half a cent of rounding per win.
+- **(SUPERSEDED in session 11 by the sub-cent carry; kept for history.)** **Win payout is `Math.round(bet * netPayout)` cents.** Exact for even money; for fractional custom payouts it introduces at most half a cent of rounding per win.
 - **`runSessionWithRng`** (exported from `runner.ts`) takes an injected RNG so tests can script outcomes and count draws. Production code uses `runSession` (seeded mulberry32).
 - **Sample paths are min/max downsampled, streaming** (session 3; replaced session 1's plain `pathStride`): 499 buckets over maxRounds, each keeping its min and max point; first, final, peak and trough always kept; ≤ 1000 points, stored as `{ rounds[], bankroll[] }`. Lossless while maxRounds ≤ 998 (≤ 2 rounds per bucket), which is why `crn.test.ts` uses maxRounds 998.
 - **Stats list is overridable:** `runMonteCarlo(..., onProgress, { stats })` defaults to the registry. Test 5 uses this to add a throwaway stat without editing any other code. The registry itself stays a static array.
@@ -1097,7 +1096,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 6: one action per entry**, no compound actions (keeps the grammar small; approved).
 - **Session 6: units are clamped to [0.01, `MAX_SAFE_INTEGER`] after set/multiply/add, and the bet is capped at `MAX_SAFE_INTEGER`** (session 2's overflow guard). With ×2 this keeps Martingale bit-identical even past level 53.
 - **Session 6: only Martingale ×2 is claimed bit-identical** (repeated `×m` vs `m ** level` can differ in the last bit for other m).
-- **Session 6: cycle profit is tracked from `ctx.lastBet` (the placed bet) with the runner's own `Math.round(bet × netPayout)`**, so it equals the real bankroll change, like Oscar's Grind.
+- **Session 6: cycle profit is tracked from `ctx.lastBet` (the placed bet)**, like Oscar's Grind. (Session 11: with the EXACT `lastBet × netPayout`, no longer the runner's old `Math.round`; within 1¢ of the real bankroll change over any stretch.)
 - **Session 6: the starting bankroll is copied into State at `init`** (from `ctx.bankroll`) for bankroll conditions; no contract change was needed.
 - **Session 6: compiled rules are NOT registered.** They report id `"custom"`, label = the rule name, and have an empty `configSchema`. The crn id-list assertion stays at eight built-ins, and the custom rule is added separately.
 - **Session 6: the live preview compiles and runs the rule on the MAIN thread.** It is a fixed script of ≤ 100 rounds with no RNG and no runner, so it is not a simulation. Simulations still run only in the worker.
@@ -1134,7 +1133,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 8: ranges** American ±100 to ±100,000, decimal 1.001 to 1,001, estimate 0.01 to 0.99 (owner decision 4).
 - **Session 8: a negative overround is accepted.** The readout says it is rare and usually a data-entry error, and that the bettor has the edge as entered (owner decision 5).
 - **Session 8: the format toggle converts EXACTLY and stores the exact value; the field DISPLAYS it rounded** (owner decision 6). `NumberField` gained a `format` prop used only when the value comes from outside, so the stored value changes only when the user edits. The snapping rule (American 15 digits, decimal full precision unless near a short decimal) is in "Sports odds"; it corrects the first draft of the spec.
-- **Session 8: `payoutRoundingBias` lives in `odds.ts`** and is used by tests and docs only; the UI does not show it (owner decision 7).
+- **(Deleted in session 11.)** **Session 8: `payoutRoundingBias` lived in `odds.ts`** and was used by tests and docs only; the UI never showed it (owner decision 7). The carry removed the bias it described.
 - **Session 8: game ids.** Sports is presetId `"sports"`, and `toSimRequest` builds `{ id: "sports", name: "Sports odds", ... }`. Choosing another game drops the odds inputs. Choosing Custom keeps the current numbers as a starting point.
 - **Session 8: the default sports market is −110 / −110, side A, estimate 0.5** (a common two-way price).
 - **Session 8: sports odds errors in a link are reported as one "Game" entry** (all odds messages joined), and the game falls back to the default. A sports game in a v1/v2 link is rejected as "sports odds need a version 3 link".

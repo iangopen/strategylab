@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mulberry32 } from "./rng";
-import { marketDevig, netPayoutFromOdds, payoutRoundingBias, sportsGame, type SportsInput } from "./odds";
+import { marketDevig, sportsGame, type SportsInput } from "./odds";
 
 const market = (sideA: number, sideB: number, side: "a" | "b" = "a", format: "american" | "decimal" = "american"): SportsInput => ({ mode: "market", format, sideA, sideB, side, estimate: 0.5 });
 
@@ -83,35 +83,5 @@ describe("my-estimate mode", () => {
     expect(r.readout.edge).toBeCloseTo(-0.05, 15);
     expect(r.readout.fairP).toBeNull();
     expect(r.readout.impliedA).toBeCloseTo(11 / 21, 15);
-  });
-});
-
-describe("cents rounding bias (runner pays Math.round(bet × netPayout))", () => {
-  it("flat bettor at -110 / -110 (p = 0.5): the hand-computed table in CLAUDE.md", () => {
-    const n = 100 / 110;
-    const rows = [100, 500, 1000, 2500].map((b) => ({ bet: b, bias: payoutRoundingBias(b, n, 0.5) }));
-    for (const r of rows) console.log(`[rounding] -110, bet $${r.bet / 100}: win pays ${(r.bet * n).toFixed(4)}¢ -> ${Math.round(r.bet * n)}¢, bias ${(r.bias * 100).toFixed(4)}% per $`);
-    expect(rows[0]!.bias).toBeCloseTo((0.5 * (91 - 9000 / 99)) / 100, 15); // +0.0455%
-    expect(rows[1]!.bias).toBeCloseTo((0.5 * (455 - 50000 / 110)) / 500, 15); // +0.0455%
-    expect(rows[2]!.bias).toBeCloseTo((0.5 * (909 - 100000 / 110)) / 1000, 15); // -0.0045%
-    expect(rows[3]!.bias).toBeCloseTo((0.5 * (2273 - 250000 / 110)) / 2500, 15); // +0.0055%
-    expect(rows.map((r) => Number((r.bias * 100).toFixed(4)))).toEqual([0.0455, 0.0455, -0.0045, 0.0055]);
-  });
-
-  it("worst case at the default $10 bet, over many payouts, is within 0.5 × p / bet (0.025% per $ at p = 0.5)", () => {
-    let worst = 0;
-    // Payouts (i + 0.5) / 100,000 make 1000 × n sweep every fractional part 0.005, 0.015, ..., 0.995.
-    for (let i = 1; i <= 100_000; i++) worst = Math.max(worst, Math.abs(payoutRoundingBias(1000, (i + 0.5) / 100_000, 0.5)));
-    console.log(`[rounding] worst |bias| at a $10 bet over 100,000 payouts: ${(worst * 100).toFixed(5)}% per $ (bound 0.025%)`);
-    expect(worst).toBeLessThanOrEqual(0.5 * 0.5 / 1000);
-    expect(worst).toBeGreaterThan(0.99 * 0.5 * 0.5 / 1000); // the bound is attained (nearly)
-  });
-
-  it("the other examples at the app default $10 bet", () => {
-    for (const [format, v] of [["american", 150], ["american", -180], ["decimal", 1.91]] as const) {
-      const c = netPayoutFromOdds(format, v);
-      if (!c.ok) throw new Error(c.error);
-      console.log(`[rounding] ${format} ${v} at $10: bias ${(payoutRoundingBias(1000, c.netPayout, 0.5) * 100).toFixed(4)}% per $ at p = 0.5`);
-    }
   });
 });

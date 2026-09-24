@@ -38,7 +38,7 @@ export const labouchere: Strategy<LabouchereConfig, LabouchereState> = {
       label: "Starting line",
       kind: "select",
       options: PRESETS.map((p) => ({ value: p, label: p })),
-      help: "Units in the starting line. Bet = (first + last) × base bet. Custom lines come later, with the rule builder.",
+      help: "Units in the starting line. Bet = (first + last) × base bet. For a line of your own, add a custom rule from the strategy picker (Custom rule → Example: Labouchère 1-2-3-4 as a rule) and edit its line.",
     },
     {
       key: "onComplete",

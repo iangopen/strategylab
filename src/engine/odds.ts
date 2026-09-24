@@ -171,12 +171,3 @@ export function sportsGame(input: SportsInput): SportsResult {
   };
   return { ok: true, winProb: m.fairP, netPayout: m.netPayout, readout };
 }
-
-/**
- * Shift in EV per $ wagered caused by paying a win as Math.round(bet * netPayout) cents (the runner's
- * rule), for a flat bettor at bet `betCents` who wins with probability p. |value| <= 0.5 * p / betCents.
- */
-export function payoutRoundingBias(betCents: number, netPayout: number, p: number): number {
-  const exact = betCents * netPayout;
-  return (p * (Math.round(exact) - exact)) / betCents;
-}
