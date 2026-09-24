@@ -399,6 +399,92 @@ Opening a link never runs a simulation.
 
 **History.** The page keeps ONE loader (`ui/linkBoot.ts`) that applies each fragment at most once per page lifetime. StrictMode double effects, `hashchange` + `popstate`, and Back to an already-loaded fragment never re-fire it, and a real reload (a new page lifetime) does apply it. After loading, `replaceState` writes the canonical fragment (or strips an unreadable one); loading never adds a history entry. Copy link also uses `replaceState` (there is no separate in-app "apply" step, so no `pushState`), which is why reloading right after copying restores the scenario, custom rules included.
 
+## Sports odds
+
+Sports odds **compile to the existing `Game { winProb, netPayout }`**. Nothing downstream changes: the runner, Monte Carlo, stats, strategies, rules, replay and links all see an ordinary game. All the math lives in ONE pure file, `src/engine/odds.ts`. If sports mode ever needed a pipeline change, the Game abstraction would be wrong. Stop and explain instead.
+
+Tone: educational. No sportsbook names, no links, no "picks", no "sharp" or "value bet" language.
+
+### Conversions (net payout = profit per $1 staked on a win)
+
+| Input | Net payout | Rejected |
+|---|---|---|
+| American **+X** (X ≥ 100) | X / 100 | anything strictly between −100 and +100, including 0, NaN and ±Infinity |
+| American **−X** (X ≥ 100) | 100 / X | |
+| Decimal **d** (d > 1) | d − 1 | d ≤ 1, NaN, ±Infinity |
+
+- **Implied probability** = 1 / (1 + net payout). That is the win probability at which the price would be fair.
+- **Ranges:** American ±100 to ±100,000; decimal 1.001 to 1,001 (both give payouts 0.001 to 1,000). The estimate is 0.01 to 0.99. +100 and −100 are the same price (even money).
+- **Decimal float artifact:** `d − 1` for a typed decimal can carry one extra bit (1.91 − 1 = 0.9099999999999999 in floating point). The payout snaps to the nearest short decimal (≤ 12 significant digits) when it is within 4 × ε × max(1, d) of it: 0.9099999999999999 → 0.91. Values that are not near a short decimal (e.g. a converted 1.9090909090909092) are left exactly as they are. Reason: a 50¢ bet at 1.91 must win 46¢, not 45¢ (winnings are `Math.round(bet × payout)`, so the artifact would flip half-cent boundaries).
+
+### Two input modes
+
+**Market (default).** Odds for BOTH sides of a two-way market, and the side you bet.
+- **Overround (the vig)** = implied_A + implied_B − 1.
+- **Fair probability of the chosen side, by PROPORTIONAL de-vig** = implied_side / (implied_A + implied_B).
+- **House edge** = 1 − fair_p × (1 + net payout of the chosen side). Negative = player edge.
+- **Identity:** with proportional de-vig, the edge is the SAME on both sides and equals 1 − 1 / (implied_A + implied_B) = overround / (1 + overround). The worked examples below show it.
+- **A negative overround** (the two prices add up to less than 100%) is accepted, but the readout says plainly that this is rare in real markets and usually a data-entry error. As entered, it gives the bettor an edge.
+
+**My estimate.** One price ("Your side's odds", stored as side A) plus the user's own win probability, which becomes `winProb` directly. The help text states plainly: an estimate ABOVE the fair probability models an edge you BELIEVE you have; the simulation will honor it, but believing in an edge is not the same as having one. (This is the same principle as Kelly's `assumedWinProb`.) Side B and the chosen side are kept but ignored in this mode, so switching back loses nothing.
+
+**Other de-vig methods** (power, Shin, additive) are on the roadmap, not in the code.
+
+### Format toggle (American ↔ Decimal)
+
+- Switching format **converts the stored prices EXACTLY** (in floating point): American → decimal is d = 1 + net, and decimal → American is +100 × net when net ≥ 1, else −100 / net.
+- The result is then snapped to 15 significant digits, so a round trip returns the original exactly (−110 → 1.9090909090909092 → −110).
+- The field **DISPLAYS** the value rounded: whole numbers for American, 2 decimals for decimal. The stored value only changes when the user edits the field.
+- The readout shows the real payout, so a rounded display never hides the price. A converted price can differ from the original in the last floating-point bit (≤ 2.2e−16 relative); converting back restores it exactly.
+- Even money converts to +100 (−100 and +100 are the same price).
+
+### Worked examples
+
+1. **−110 / −110 (market, bet side A).**
+   - Net payout 100/110 = 10/11 = 0.909091. Implied 1/(1 + 10/11) = 11/21 = 0.523810 each.
+   - Sum 22/21, **overround 1/21 = 4.762%**.
+   - **Fair p = (11/21)/(22/21) = 0.5.**
+   - **House edge = 1 − 0.5 × 21/11 = 1/22 = 4.545%** (= 1 − 21/22, the identity).
+2. **+150 / −180 (market).**
+   - +150: net 1.5, implied 0.4. −180: net 100/180 = 5/9 = 0.555556, implied 9/14 = 0.642857.
+   - Sum 73/70 = 1.042857, **overround 3/70 = 4.286%**.
+   - **Fair p: 28/73 = 0.383562** for +150 and **45/73 = 0.616438** for −180.
+   - **House edge 3/73 = 4.110% on BOTH sides:** 1 − (28/73)(2.5) = 1 − (45/73)(14/9) = 1 − 70/73.
+3. **My estimate 0.55 at −110.**
+   - Edge = 1 − 0.55 × 21/11 = 1 − 1.05 = **−0.05, a 5% PLAYER edge**, believed, not established.
+   - The invariant predicts EV per $ wagered = +0.05, and the simulation will show it: the engine honors the probability it is given.
+
+### Cents rounding bias (measured, not hidden)
+
+The runner pays a win as `Math.round(bet × netPayout)` cents. For non-even payouts, that shifts EV per $ wagered by p × (round(b·n) − b·n) / b for a bet of b cents. The magnitude is at most 0.5 × p / b.
+
+Flat bettor at **−110 / −110** (p = 0.5, n = 10/11), hand-computed:
+
+| Base bet | Win pays exactly | Paid | Shift per win | Bias in EV per $ |
+|---|---|---|---|---|
+| $1 (100¢) | 90.909¢ | 91¢ | +0.0909¢ | **+0.0455%** |
+| $5 (500¢, the invariant scenario) | 454.545¢ | 455¢ | +0.4545¢ | **+0.0455%** |
+| $10 (1,000¢, the app default) | 909.091¢ | 909¢ | −0.0909¢ | **−0.0045%** |
+| $25 | 2,272.727¢ | 2,273¢ | +0.2727¢ | **+0.0055%** |
+
+**Worst case at the default $10 base bet, any price:** ±0.5¢ per win, i.e. at most **0.025% per $ at p = 0.5**. At a $1 table-minimum bet the worst case is 0.25%. A positive bias means the simulated bettor does slightly BETTER than the price.
+
+The invariant tests keep their 4 SE tolerance. If one fails, the rounding rule is the FIRST suspect: investigate and report, never loosen the tolerance. `odds.ts` exports `payoutRoundingBias(betCents, netPayout, p)`, and a test prints this table.
+
+### Pushes are out of scope
+
+The engine resolves each round with ONE uniform draw into win or loss. A push (a tie that returns the stake) needs a third outcome, so sports mode models **two-way markets without pushes**. The UI says so in one line. Pushes (three-way outcomes), parlays and other de-vig methods are on the roadmap.
+
+### Scenario and link representation
+
+- **Scenario version 3** (scenario games): `game = { presetId: "sports", winProb, netPayout, sports: { mode, format, sideA, sideB, side, estimate } }`.
+  - The odds inputs are the source of truth. `winProb` / `netPayout` are derived, re-synced on every edit and load, and checked by `validateScenario`.
+  - Errors are keyed `game.sideA`, `game.sideB` and `game.estimate`.
+  - `migrateScenario` goes v2 → v3 (version bump only; v2 games load unchanged), chained after v1 → v2.
+- **Links:**
+  - The game is `["o", mode "m"|"e", format "a"|"d", sideA, sideB, side "a"|"b", estimate]`, inputs only. The derived numbers are recomputed on load.
+  - v1 and v2 links load exactly as before, then migrate. A sports game in a v1/v2 link is rejected (it did not exist then).
+
 ---
 
 ## Roadmap
