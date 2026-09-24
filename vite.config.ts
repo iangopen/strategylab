@@ -19,5 +19,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Many tests are deterministic Monte Carlo runs (fixed seeds) taking 1-4 s on an idle machine.
+    // Vitest's 5 s default is a harness budget, not an assertion: under parallel-file CPU load it
+    // timed out the Paroli equivalence test once (5.9 s). 60 s keeps CI's smaller runners honest
+    // without touching any assertion.
+    testTimeout: 60_000,
   },
 })
