@@ -38,7 +38,11 @@ export function RunControls({ running, canRun, progress, elapsedMs, status, onRu
           </button>
         </span>
       </div>
-      {status && <div className="status">{status}</div>}
+      {status && (
+        <div className="status" data-testid="run-status">
+          {status}
+        </div>
+      )}
       {!canRun && !running && <div className="error">Fix the highlighted fields to run.</div>}
       {copyBlocker && (
         <div id="copy-link-why" className="help">

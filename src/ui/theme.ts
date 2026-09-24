@@ -25,6 +25,13 @@ export function applyThemePref(pref: ThemePref): void {
   }
 }
 
+/** The theme actually in effect: the header choice, or the OS setting under "System". */
+export function effectiveTheme(): "light" | "dark" {
+  const forced = document.documentElement.dataset.theme;
+  if (forced === "light" || forced === "dark") return forced;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 /**
  * A counter that changes whenever the effective theme may have changed (data-theme attribute
  * or the OS color scheme). Charts use it as a redraw dependency, since canvas pixels do not

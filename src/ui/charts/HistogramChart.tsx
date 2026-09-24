@@ -1,8 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MonteCarloResult } from "../../engine/montecarlo";
-import { useThemeVersion } from "../theme";
+import { effectiveTheme, useThemeVersion } from "../theme";
 import { histogramPercents, histogramScales, logSafe, logTicks, moneyTick, niceTicks, pctTick, seriesColorVar, type Range, type YMode } from "./adapters";
-import { cssColor, drawAxes, prepareFrame, refLineV, useContainerWidth } from "./canvas";
+import { chartState, countDraw, cssColor, drawAxes, prepareFrame, refLineV, useContainerWidth } from "./canvas";
 
 const PANEL_HEIGHT = 200;
 
@@ -67,15 +67,20 @@ const HistogramPanel = memo(function HistogramPanel({ index, label, edges, perce
     drawAxes(f, niceTicks(x.min, x.max, 4), log ? logTicks(y.min, y.max) : niceTicks(y.min, y.max, 4), moneyTick, pctTick);
     const heights = log ? logSafe(percents) : Array.from(percents);
     const base = f.y(y.min);
-    f.ctx.fillStyle = cssColor(colorVar);
+    const color = cssColor(colorVar);
+    f.ctx.fillStyle = color;
+    let bars = 0;
     heights.forEach((h, i) => {
       if (h === null || h <= 0) return; // empty bin: no bar (and never log 0)
+      bars++;
       const x0 = f.x(edges[i]!);
       const x1 = f.x(edges[i + 1]!);
       const top = f.y(h);
       f.ctx.fillRect(x0 + 0.5, top, Math.max(1, x1 - x0 - 1), base - top);
     });
     refLineV(f, start, "Start", cssColor("--chart-ref"));
+    chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, mode, bins: percents.length, bars, color, theme: effectiveTheme() });
+    countDraw(c);
   }, [width, theme, edges, percents, x, y, mode, start, colorVar]);
 
   return (
@@ -85,7 +90,7 @@ const HistogramPanel = memo(function HistogramPanel({ index, label, edges, perce
         {label}
       </figcaption>
       <div ref={box} className="canvas-box">
-        <canvas ref={canvas} role="img" aria-label={`${label}: histogram of final bankrolls, ${mode} y axis`} style={{ cursor: "default" }} />
+        <canvas ref={canvas} data-testid="hist-canvas" data-label={label} role="img" aria-label={`${label}: histogram of final bankrolls, ${mode} y axis`} style={{ cursor: "default" }} />
       </div>
     </figure>
   );

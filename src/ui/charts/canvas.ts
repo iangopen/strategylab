@@ -116,11 +116,20 @@ export function strokeLine(f: Frame, l: Line, color: string, width: number, alph
   ctx.restore();
 }
 
-/** Dashed horizontal reference line with a small label above it, at the left or right end. */
-export function refLineH(f: Frame, value: number, label: string, color: string, align: "left" | "right" = "right"): void {
+/** Where a reference label was drawn, in CSS pixels (exposed to tests; see chartState). */
+export interface LabelBox {
+  label: string;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/** Dashed horizontal reference line with a small label above it, at the left or right end. Returns the label's box. */
+export function refLineH(f: Frame, value: number, label: string, color: string, align: "left" | "right" = "right"): LabelBox | null {
   const { ctx } = f;
   const py = Math.round(f.y(value)) + 0.5;
-  if (py < f.top || py > f.top + f.height) return;
+  if (py < f.top || py > f.top + f.height) return null;
   ctx.save();
   ctx.setLineDash([5, 4]);
   ctx.strokeStyle = color;
@@ -134,8 +143,29 @@ export function refLineH(f: Frame, value: number, label: string, color: string, 
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "bottom";
-  ctx.fillText(label, align === "right" ? f.left + f.width - 2 : f.left + 4, py - 2);
+  const x = align === "right" ? f.left + f.width - 2 : f.left + 4;
+  ctx.fillText(label, x, py - 2);
+  const w = ctx.measureText(label).width;
   ctx.restore();
+  return { label, x0: align === "right" ? x - w : x, x1: align === "right" ? x : x + w, y0: py - 2 - 10, y1: py - 2 };
+}
+
+/**
+ * Test hook: charts write their state onto the canvas element as data-* attributes (ranges, counts,
+ * zoom, hover, theme, draw count). Specs assert this state, never pixels. Plain DOM writes, so no
+ * React re-render is involved.
+ */
+export function chartState(el: HTMLElement | null, state: Record<string, string | number | null | undefined>): void {
+  if (!el) return;
+  for (const [k, v] of Object.entries(state)) {
+    if (v === null || v === undefined) delete el.dataset[k];
+    else el.dataset[k] = String(v);
+  }
+}
+
+/** Increments the canvas's data-draws counter (a redraw happened). */
+export function countDraw(el: HTMLElement): void {
+  el.dataset.draws = String(Number(el.dataset.draws ?? "0") + 1);
 }
 
 /** Dashed vertical marker line with a label at the top. */

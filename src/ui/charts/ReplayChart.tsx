@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Replay } from "../../engine/replay";
 import { formatStat } from "../format";
-import { useThemeVersion } from "../theme";
+import { effectiveTheme, useThemeVersion } from "../theme";
 import {
   countTick,
   endText,
@@ -18,7 +18,7 @@ import {
   type Line,
   type Range,
 } from "./adapters";
-import { clipToPlot, crosshairV, cssColor, drawAxes, MARGIN, overlayCtx, prepareFrame, refLineH, strokeLine, useContainerWidth, type Frame } from "./canvas";
+import { chartState, clipToPlot, countDraw, crosshairV, cssColor, drawAxes, MARGIN, overlayCtx, prepareFrame, refLineH, strokeLine, useContainerWidth, type Frame } from "./canvas";
 
 interface Props {
   nSessions: number;
@@ -165,7 +165,11 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
       }
     }
     unclipStrip();
-  }, [width, theme, replay, layout, refs, x]);
+    chartState(bank.current, { xMin: x.min, xMax: x.max, fullXMax: layout.x.max, zoom: zoom ? `${zoom.min}-${zoom.max}` : "full", lines: layout.bankroll.length, firstEnding: firstEndingRound(replay), theme: effectiveTheme() });
+    chartState(bets.current, { yMax: layout.betY.max, lines: layout.bets.length });
+    chartState(strip.current, { cells: stripCells(replay).length });
+    countDraw(bank.current);
+  }, [width, theme, replay, layout, refs, x, zoom]);
 
   // --- Drag-select to zoom the x axis (bankroll canvas). Selection is drawn on an overlay canvas,
   //     so the charts are not re-rendered while dragging. Double-click resets.
@@ -194,10 +198,12 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
       bet: s.bets.rounds.length ? s.bets.bankroll[nearestIndex(s.bets.rounds, round)] ?? null : null,
     }));
     setHover({ round: Math.round(round), rows });
+    chartState(bank.current, { hoverRound: Math.round(round) });
     if (overlay.current) crosshairV(overlayCtx(overlay.current, width, BANK_H), toPx(round), MARGIN.top, BANK_H - MARGIN.bottom, cssColor("--chart-axis"));
   };
   const clearHover = () => {
     setHover(null);
+    chartState(bank.current, { hoverRound: null });
     if (drag.current === null) clearOverlay();
   };
 
@@ -207,6 +213,7 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
       <div style={{ position: "relative" }}>
         <canvas
           ref={bank}
+          data-testid="replay-bankroll"
           role="img"
           aria-label="Bankroll of each strategy in the replayed session"
           style={{ cursor: "ew-resize", touchAction: "none" }}
@@ -265,13 +272,13 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
         )}
       </div>
       <div className="replay-row-label">Bet size</div>
-      <canvas ref={bets} role="img" aria-label="Bet placed by each strategy in each round" style={{ cursor: "default" }} />
+      <canvas ref={bets} data-testid="replay-bets" role="img" aria-label="Bet placed by each strategy in each round" style={{ cursor: "default" }} />
       <div className="replay-row-label">
         {replay.strip.kind === "rounds"
           ? "Each round: tall bar = won, short bar = lost. The same for every strategy."
           : "Each block of rounds: bar height = share of rounds won. The same for every strategy."}
       </div>
-      <canvas ref={strip} role="img" aria-label="Win or loss of each round, shared by every strategy" style={{ cursor: "default" }} />
+      <canvas ref={strip} data-testid="replay-strip" role="img" aria-label="Win or loss of each round, shared by every strategy" style={{ cursor: "default" }} />
     </div>
   );
 });

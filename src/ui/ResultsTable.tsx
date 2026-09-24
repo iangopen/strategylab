@@ -28,7 +28,7 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
         {stale && <span className="stale"> The configuration has changed since this run.</span>}
       </p>
       <div className="table-wrap">
-        <table className="results">
+        <table className="results" data-testid="results-table">
           <thead>
             <tr>
               <th scope="col">Statistic</th>
@@ -42,10 +42,12 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
           </thead>
           <tbody>
             {STATS.map((stat) => (
-              <tr key={stat.id} className={stat.emphasis ? "emphasis" : undefined}>
+              <tr key={stat.id} data-stat={stat.id} className={stat.emphasis ? "emphasis" : undefined}>
                 <th scope="row">{stat.label}</th>
                 {columns.map((c, i) => (
-                  <td key={i}>{formatStat(stat.format, c.outcome.stats[stat.id])}</td>
+                  <td key={i} data-col={i}>
+                    {formatStat(stat.format, c.outcome.stats[stat.id])}
+                  </td>
                 ))}
               </tr>
             ))}

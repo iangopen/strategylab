@@ -1,9 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MonteCarloResult } from "../../engine/montecarlo";
 import { formatStat } from "../format";
-import { useThemeVersion } from "../theme";
+import { effectiveTheme, useThemeVersion } from "../theme";
 import { countTick, fanScales, fanSeries, moneyTick, nearestIndex, nearestPath, niceTicks, referenceLines, seriesColorVar, type ChartRefs, type FanSeries, type Range } from "./adapters";
-import { clipToPlot, crosshairV, cssColor, drawAxes, fillBand, overlayCtx, plotMapping, prepareFrame, refLineH, strokeLine, useContainerWidth } from "./canvas";
+import { chartState, clipToPlot, countDraw, crosshairV, cssColor, drawAxes, fillBand, overlayCtx, plotMapping, prepareFrame, refLineH, strokeLine, useContainerWidth, type LabelBox } from "./canvas";
 
 const PANEL_HEIGHT = 220;
 
@@ -86,7 +86,11 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
     const unclip = clipToPlot(f);
     fillBand(f, series.outer, color, 0.16);
     fillBand(f, series.inner, color, 0.32);
-    for (const r of referenceLines(refs)) refLineH(f, r.value, r.label, cssColor("--chart-ref"), r.kind === "start" ? "left" : "right");
+    const labels: LabelBox[] = [];
+    for (const r of referenceLines(refs)) {
+      const box = refLineH(f, r.value, r.label, cssColor("--chart-ref"), r.kind === "start" ? "left" : "right");
+      if (box) labels.push(box);
+    }
     series.paths.forEach((p, i) => {
       if (i !== selectedSession) strokeLine(f, p, color, 1, 0.22);
     });
@@ -94,6 +98,8 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
     const sel = selectedSession === null ? undefined : series.paths[selectedSession];
     if (sel) strokeLine(f, sel, cssColor("--text"), 1.5, 0.9);
     unclip();
+    chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, paths: series.paths.length, color, theme: effectiveTheme(), refLabels: JSON.stringify(labels), selected: selectedSession });
+    countDraw(c);
   }, [width, theme, series, x, y, refs, colorVar, selectedSession]);
 
   function onClick(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -105,6 +111,7 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
 
   function clearHover() {
     setHover(null);
+    chartState(canvas.current, { hoverRound: null });
     if (overlay.current && width > 0) overlayCtx(overlay.current, width, PANEL_HEIGHT);
   }
 
@@ -125,6 +132,7 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
       const p = series.paths[pi]!;
       path = { idx: pi, val: p.y[nearestIndex(p.x, round)]! };
     }
+    chartState(canvas.current, { hoverRound: round });
     setHover({ round, p5: series.outer.lo[idx]!, p25: series.inner.lo[idx]!, p50: series.median.y[idx]!, p75: series.inner.hi[idx]!, p95: series.outer.hi[idx]!, path });
     if (overlay.current) crosshairV(overlayCtx(overlay.current, width, PANEL_HEIGHT), m.x(round), m.top, m.top + m.height, cssColor("--chart-axis"));
   }
@@ -136,7 +144,7 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
         {label}
       </figcaption>
       <div ref={box} className="canvas-box" style={{ position: "relative" }}>
-        <canvas ref={canvas} onClick={onClick} onMouseMove={onMove} onMouseLeave={clearHover} role="img" aria-label={`${label}: bankroll over time, percentile bands and 50 sample sessions`} />
+        <canvas ref={canvas} data-testid="fan-canvas" data-label={label} onClick={onClick} onMouseMove={onMove} onMouseLeave={clearHover} role="img" aria-label={`${label}: bankroll over time, percentile bands and 50 sample sessions`} />
         <canvas ref={overlay} aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />
       </div>
       <div className="chart-readout">
