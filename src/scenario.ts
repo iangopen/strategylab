@@ -51,6 +51,8 @@ export interface ScenarioConfig {
 }
 
 export const MAX_SEED = 0xffffffff;
+/** At most this many strategy instances per scenario (one per palette color; bounds a shared link). */
+export const MAX_STRATEGIES = 8;
 
 let uidCounter = 0;
 export function newUid(): string {
@@ -127,6 +129,7 @@ export function validateScenario(s: ScenarioConfig): Record<string, string> {
   if (!Number.isInteger(s.seed) || s.seed < 0 || s.seed > MAX_SEED) e.seed = `Whole number from 0 to ${MAX_SEED}.`;
 
   if (s.strategies.length === 0) e.strategies = "Add at least one strategy.";
+  else if (s.strategies.length > MAX_STRATEGIES) e.strategies = `At most ${MAX_STRATEGIES} strategies.`;
   for (const inst of s.strategies) {
     if (inst.kind === "custom") {
       // The SAME validator the worker runs before compiling.
