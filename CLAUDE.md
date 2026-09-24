@@ -35,8 +35,8 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: **`iangopen/strategylab`** (renamed from `iangopenbusinessai-lab/strategylab` during session 10; GitHub redirects the old repo and git URLs, but NOT the old Pages URL). **Public**, intentionally, since session 9. Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
-- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/** (the old `iangopenbusinessai-lab.github.io/strategylab/` returns 404 since the rename).
+- GitHub: **`iangopen/strategylab`** (the account was renamed during session 10; `origin` points at `https://github.com/iangopen/strategylab.git` since session 11). GitHub redirects the old repo and git URLs, but NOT the old Pages address. **Public**, intentionally, since session 9. Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
+- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/**. **Links made with the pre-rename Pages address are permanently broken:** GitHub Pages does not redirect after an account rename, so they return 404 forever. Re-share such links with the new address (the `#s=` fragment is unchanged).
   - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
   - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
   - A failing test never deploys. The Pages source is "GitHub Actions" (`build_type: workflow`).
@@ -875,7 +875,7 @@ Session 8 (2026-09-23, Windows / PowerShell). `npm run test` (508 passed, 2 benc
     - The link is 209 characters and decodes to the identical game.
     - Build: `index-BlKlmlDe.js` 100.94 KB gzip.
 
-Session 9 (2026-09-24, Windows / PowerShell). `npm run test` (508 passed, 2 benchmark tests skipped), `npm run build`, `npm run lint` and **`npm run e2e` (29 passed)** all clean. **CI run [35964572482](https://github.com/iangopenbusinessai-lab/strategylab/actions/runs/35964572482) was green** (lint, unit, build, e2e, build-pages, deploy), and so was **[35964910545](https://github.com/iangopenbusinessai-lab/strategylab/actions/runs/35964910545)** after the action bump. `git diff 8e6db6f..HEAD -- src/engine/` is **EMPTY**. There are no engine changes. The app changes are the Copy link base (drop `location.search`) and `data-*` / `data-testid` test hooks.
+Session 9 (2026-09-24, Windows / PowerShell). `npm run test` (508 passed, 2 benchmark tests skipped), `npm run build`, `npm run lint` and **`npm run e2e` (29 passed)** all clean. **CI run [35964572482](https://github.com/iangopen/strategylab/actions/runs/35964572482) was green** (lint, unit, build, e2e, build-pages, deploy), and so was **[35964910545](https://github.com/iangopen/strategylab/actions/runs/35964910545)** after the action bump. `git diff 8e6db6f..HEAD -- src/engine/` is **EMPTY**. There are no engine changes. The app changes are the Copy link base (drop `location.search`) and `data-*` / `data-testid` test hooks.
 
 72. **Step zero:**
     - **Secret scan** of all 65 commits (committed env/key/credential files, and token/key patterns in every added line): **clean**.
@@ -941,8 +941,8 @@ Session 9 (2026-09-24, Windows / PowerShell). `npm run test` (508 passed, 2 benc
     - The results equal the engine's for the scenario at the click, and are correctly flagged stale.
     - This resolves the "browser 4–5× slower than Node" item from sessions 1–3: it was the hidden, unfocused automation tab.
 78. **Deploy:**
-    - Pages was already `build_type: workflow` when checked right before the push (it had been `legacy` earlier in the session, switched outside this session). `gh api -X PUT repos/iangopenbusinessai-lab/strategylab/pages -f build_type=workflow` was run anyway, as instructed, and returned HTTP 204.
-    - **Live:** `https://iangopenbusinessai-lab.github.io/strategylab/` → **200**. The HTML references `/strategylab/assets/index-*.js` and **no** `/src/main.tsx`. The worker `/strategylab/assets/sim.worker-B2nJLaBe.js` → **200** (`application/javascript`). The favicon → 200.
+    - Pages was already `build_type: workflow` when checked right before the push (it had been `legacy` earlier in the session, switched outside this session). `gh api -X PUT repos/iangopen/strategylab/pages -f build_type=workflow` (repo path updated after the rename) was run anyway, as instructed, and returned HTTP 204.
+    - **Live:** the pre-rename Pages address → **200** (that address is now permanently 404; today's site is https://iangopen.github.io/strategylab/). The HTML references `/strategylab/assets/index-*.js` and **no** `/src/main.tsx`. The worker `/strategylab/assets/sim.worker-B2nJLaBe.js` → **200** (`application/javascript`). The favicon → 200.
     - **Live run:** headless Chromium (Playwright, local) opened the live URL and ran **1,000 sessions**: "Done: 1,000 sessions in 0.0s.", with EV per $ **−2.690% | −3.308%**, exactly the engine's numbers for that scenario. The worker loaded from the sub-path, with no console errors.
 
 Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 benchmark tests skipped), `npm run build`, `npm run lint` and **`npx playwright test` (36 passed)** all clean. **CI run [35971763924](https://github.com/iangopen/strategylab/actions/runs/35971763924) was green on `ubuntu-24.04`** (every job's runner label is `ubuntu-24.04`, with no annotations), and the Pages deploy succeeded. **No engine source changed.** The only `src/engine/` diff is the test file `rules/equivalence.test.ts`: its per-file 30 s timeout is exactly what directive 5 asked for, and that test can only live there.
@@ -1016,7 +1016,7 @@ Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 ben
 - Only Martingale **×2** is proven bit-identical. A rule `multiply by m` compounds units by repeated multiplication, while the built-in computes `m ** level`, so for non-power-of-two m the last float bit can differ, which can change a rounded cent. Not tested, not claimed.
 - Sequence rules copy the line on each loss (O(line length) per loss), like the built-in Labouchère. That is not the O(entries) bound progressions have, but it is bounded by the session's losses.
 - An unknown key inside an object hides that object's field errors until the key is fixed. Every problem is reported only once the keys are right.
-- **Account rename (session 10):** the repo is now `iangopen/strategylab`. The local `origin` remote still says `iangopenbusinessai-lab/strategylab` (GitHub redirects it; update it with `git remote set-url origin https://github.com/iangopen/strategylab.git` when convenient). Links shared with the OLD Pages address are dead: GitHub Pages does not redirect across a rename.
+- **Account rename:** links shared with the OLD Pages address are permanently dead (GitHub Pages does not redirect across a rename). ~~The local `origin` still pointed at the old account.~~ **Closed in session 11:** `origin` is `https://github.com/iangopen/strategylab.git`.
 - **Stale help text in `src/engine/strategies/labouchere.ts`:** "Custom lines come later, with the rule builder." The rule builder has existed since session 6. It was left alone in session 10 because the session's hard rule was an empty `src/engine/` diff. It is display metadata only, so it is a one-line fix for session 11 (which touches the engine anyway).
 - ~~Rules are not saved anywhere yet: a page reload loses them.~~ **Closed in session 7:** Copy link puts the scenario (rules included) in the address bar, so a reload restores it. Saving without a link (storage, accounts) is still out of scope.
 - ~~Browser vs Node speed gap (~4–5×).~~ **Resolved in session 9:** in a visible, focused tab, the browser is within ~10% of Node (STATUS 77). The gap was the hidden automation tab.
@@ -1030,7 +1030,7 @@ Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 ben
 
 _Record any choice the session prompt didn't specify, with the reason, so later sessions don't undo it by accident._
 
-- **Repo is `strategylab`, not `betting-lab`.** The folder already had `origin` → `iangopenbusinessai-lab/strategylab`; the owner chose to keep it. Display name stays "Betting Lab (working name)".
+- **Repo is `strategylab`, not `betting-lab`.** The folder already had an `origin` named `strategylab` (then under the pre-rename account); the owner chose to keep it. Display name stays "Betting Lab (working name)".
 - **No `echo >` in PowerShell for file creation** (writes UTF-16; see Environment). Use file tools or `Set-Content -Encoding utf8`.
 - **Stop boundaries are inclusive:** stopWin fires at `bankroll >= target`, stopLoss at `bankroll <= floor`. The UI labels stopLoss as a "floor". Both boundaries are tested to the cent.
 - **Runner check order each round:** stopWin → stopLoss → ruin → maxRounds → strategy ("stop") → round/tableMin/tableMax → insufficientFunds → ONE draw. Stops and ruin come before maxRounds so a session that busts or hits a target on its last allowed round is reported as that, not as maxRounds (keeps a future P(bust) honest). None of the pre-resolution checks draws; a test asserts draws === rounds for every endReason.
