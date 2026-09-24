@@ -2,7 +2,7 @@ import { useState } from "react";
 import { EXAMPLE_RULES } from "../engine/rules/examples";
 import { getStrategy, STRATEGIES } from "../engine/strategies/registry";
 import type { StrategyConfig } from "../engine/strategies/types";
-import { newCustomInstance, newStrategyInstance, type StrategyInstance } from "../scenario";
+import { MAX_STRATEGIES, newCustomInstance, newStrategyInstance, type StrategyInstance } from "../scenario";
 import { seriesColorVar } from "./charts/adapters";
 import { instanceLabel } from "./format";
 import type { PreviewContext } from "./rules/preview";
@@ -28,6 +28,8 @@ export function StrategyPicker({ instances, onChange, errors, disabled, previewC
   const replace = (uid: string, next: (i: StrategyInstance) => StrategyInstance) => onChange(instances.map((i) => (i.uid === uid ? next(i) : i)));
   const setConfig = (uid: string, config: StrategyConfig) => replace(uid, (i) => (i.kind === "builtin" ? { ...i, config } : i));
   const setRule = (uid: string, rule: unknown) => replace(uid, (i) => (i.kind === "custom" ? { ...i, rule } : i));
+
+  const full = instances.length >= MAX_STRATEGIES;
 
   function add() {
     const example = toAdd.startsWith(RULE_PREFIX) ? EXAMPLE_RULES.find((e) => `${RULE_PREFIX}${e.id}` === toAdd) : undefined;
@@ -55,10 +57,11 @@ export function StrategyPicker({ instances, onChange, errors, disabled, previewC
             ))}
           </optgroup>
         </select>
-        <button type="button" disabled={disabled} onClick={add}>
+        <button type="button" disabled={disabled || full} onClick={add} title={full ? `At most ${MAX_STRATEGIES} strategies (one per chart color).` : undefined}>
           Add
         </button>
       </div>
+      {full && <p className="help">At most {MAX_STRATEGIES} strategies (one per chart color). Remove one to add another.</p>}
       {errors.strategies && <div className="error">{errors.strategies}</div>}
 
       {instances.map((inst, index) => {
