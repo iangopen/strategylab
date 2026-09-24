@@ -84,3 +84,99 @@ export function displayOdds(format: OddsFormat, value: number): string {
   }
   return value.toFixed(2);
 }
+
+// ------------------------------------------------------------------------------------ games
+
+export type OddsMode = "market" | "estimate";
+export type OddsSide = "a" | "b";
+
+/** The sports inputs, as stored in the scenario. In estimate mode, side A is "your side's odds". */
+export interface SportsInput {
+  mode: OddsMode;
+  format: OddsFormat;
+  sideA: number;
+  sideB: number;
+  side: OddsSide;
+  estimate: number;
+}
+
+export interface SportsReadout {
+  mode: OddsMode;
+  /** Implied probability of side A's price (your side in estimate mode). */
+  impliedA: number;
+  /** Market mode only. */
+  impliedB: number | null;
+  /** implied_A + implied_B - 1 (the vig). Market mode only. */
+  overround: number | null;
+  /** True when the prices add up to less than 100%: rare in real markets, usually a data-entry error. */
+  negativeOverround: boolean;
+  /** Proportional de-vig of the chosen side. Market mode only. */
+  fairP: number | null;
+  /** The user's own win probability. Estimate mode only. */
+  estimate: number | null;
+  /** The Game this compiles to. */
+  winProb: number;
+  netPayout: number;
+  /** House edge = 1 - winProb * (1 + netPayout); negative = player edge. */
+  edge: number;
+}
+
+export type SportsField = "sideA" | "sideB" | "estimate";
+export type SportsResult = { ok: true; winProb: number; netPayout: number; readout: SportsReadout } | { ok: false; errors: Partial<Record<SportsField, string>> };
+
+/**
+ * Proportional de-vig of a two-way market. With this method the edge is the same on both sides:
+ * 1 - 1 / (implied_A + implied_B) = overround / (1 + overround).
+ */
+export function marketDevig(netA: number, netB: number, side: OddsSide) {
+  const impliedA = impliedProb(netA);
+  const impliedB = impliedProb(netB);
+  const sum = impliedA + impliedB;
+  const fairP = (side === "a" ? impliedA : impliedB) / sum;
+  const netPayout = side === "a" ? netA : netB;
+  return { impliedA, impliedB, overround: sum - 1, fairP, netPayout, edge: 1 - fairP * (1 + netPayout) };
+}
+
+/** Compiles the sports inputs to a Game's winProb and netPayout, or per-field errors. Never throws. */
+export function sportsGame(input: SportsInput): SportsResult {
+  const errors: Partial<Record<SportsField, string>> = {};
+  const a = netPayoutFromOdds(input.format, input.sideA);
+  if (!a.ok) errors.sideA = a.error;
+
+  if (input.mode === "estimate") {
+    const p = input.estimate;
+    if (typeof p !== "number" || Number.isNaN(p)) errors.estimate = "Enter your estimated win probability.";
+    else if (!(p >= ODDS_LIMITS.estimateMin && p <= ODDS_LIMITS.estimateMax)) errors.estimate = `Your estimate must be between ${ODDS_LIMITS.estimateMin} and ${ODDS_LIMITS.estimateMax} (got ${fmt(p)}).`;
+    if (!a.ok || errors.estimate) return { ok: false, errors };
+    const netPayout = a.netPayout;
+    const readout: SportsReadout = { mode: "estimate", impliedA: impliedProb(netPayout), impliedB: null, overround: null, negativeOverround: false, fairP: null, estimate: p, winProb: p, netPayout, edge: 1 - p * (1 + netPayout) };
+    return { ok: true, winProb: p, netPayout, readout };
+  }
+
+  const b = netPayoutFromOdds(input.format, input.sideB);
+  if (!b.ok) errors.sideB = b.error;
+  if (!a.ok || !b.ok) return { ok: false, errors };
+  const m = marketDevig(a.netPayout, b.netPayout, input.side);
+  const readout: SportsReadout = {
+    mode: "market",
+    impliedA: m.impliedA,
+    impliedB: m.impliedB,
+    overround: m.overround,
+    negativeOverround: m.overround < 0,
+    fairP: m.fairP,
+    estimate: null,
+    winProb: m.fairP,
+    netPayout: m.netPayout,
+    edge: m.edge,
+  };
+  return { ok: true, winProb: m.fairP, netPayout: m.netPayout, readout };
+}
+
+/**
+ * Shift in EV per $ wagered caused by paying a win as Math.round(bet * netPayout) cents (the runner's
+ * rule), for a flat bettor at bet `betCents` who wins with probability p. |value| <= 0.5 * p / betCents.
+ */
+export function payoutRoundingBias(betCents: number, netPayout: number, p: number): number {
+  const exact = betCents * netPayout;
+  return (p * (Math.round(exact) - exact)) / betCents;
+}
