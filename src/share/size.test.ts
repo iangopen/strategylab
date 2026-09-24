@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { RULE_LIMITS } from "../engine/rules/limits";
 import type { Entry, ProgressionRule } from "../engine/rules/types";
 import { validateRule } from "../engine/rules/validate";
-import { defaultScenario, MAX_STRATEGIES, newCustomInstance, newStrategyInstance, validateScenario, type ScenarioConfig } from "../scenario";
+import { defaultScenario, defaultSportsInput, MAX_STRATEGIES, newCustomInstance, newStrategyInstance, sportsScenarioGame, validateScenario, type ScenarioConfig } from "../scenario";
 import { decodeScenarioLink, encodeScenarioLink } from "./link";
 import { MAX_URL_CHARS, ORIGIN_ALLOWANCE, TYPICAL_URL_BUDGET } from "./limits";
 
@@ -84,6 +84,16 @@ describe("link size budget", () => {
     if (!enc.ok) throw new Error(enc.message);
     const bytes = enc.fragment.length; // the fragment is pure ASCII: characters = bytes
     console.log(`[size] typical scenario: fragment ${bytes} chars/bytes + ${ORIGIN_ALLOWANCE} address allowance = ${enc.urlLength} (budget ${TYPICAL_URL_BUDGET})`);
+    expect(enc.urlLength).toBeLessThan(TYPICAL_URL_BUDGET);
+    const dec = decodeScenarioLink(enc.fragment);
+    expect(dec.kind === "loaded" && content(dec.scenario)).toEqual(content(s));
+  });
+
+  it(`the typical scenario on a SPORTS game (-110 / -110 market) is still under ${TYPICAL_URL_BUDGET} characters`, () => {
+    const s = { ...typicalScenario(), game: sportsScenarioGame(defaultSportsInput()) };
+    const enc = encodeScenarioLink(s, BASE);
+    if (!enc.ok) throw new Error(enc.message);
+    console.log(`[size] typical scenario, sports game: fragment ${enc.fragment.length} chars/bytes + ${ORIGIN_ALLOWANCE} address allowance = ${enc.urlLength} (budget ${TYPICAL_URL_BUDGET})`);
     expect(enc.urlLength).toBeLessThan(TYPICAL_URL_BUDGET);
     const dec = decodeScenarioLink(enc.fragment);
     expect(dec.kind === "loaded" && content(dec.scenario)).toEqual(content(s));

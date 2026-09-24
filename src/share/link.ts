@@ -151,7 +151,7 @@ export function decodeScenarioLink(hash: string): LoadResult {
   if (v === 1) {
     // Version 1 (before custom rules): built-ins only, then the EXISTING migration (e.g. Kelly's old
     // 0 sentinel becomes blank) BEFORE validation, exactly as for any older scenario.
-    x = expandPayload(payload, { rules: false });
+    x = expandPayload(payload, { rules: false, sports: false });
     const v1: ScenarioConfigV1 = {
       version: 1,
       ...fallbackValues(),
@@ -160,7 +160,7 @@ export function decodeScenarioLink(hash: string): LoadResult {
     };
     scenario = migrateScenario(v1);
   } else {
-    x = expandPayload(payload);
+    x = expandPayload(payload, { rules: true, sports: v >= 3 });
     const assembled = assemble(x.top, x.strategies.map((s) => (s.kind === "custom" ? newCustomInstance(s.rule) : builtin(s.strategyId, s.config))));
     // A version-2 link is a v2 scenario: it goes through the EXISTING migration like any older one.
     scenario = v === 2 ? migrateScenario({ ...assembled, version: 2 } as ScenarioConfigV2) : assembled;
