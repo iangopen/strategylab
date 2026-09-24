@@ -2,21 +2,37 @@
 // Money here is in DOLLARS as the user types it; toSimRequest converts to engine cents.
 import { CUSTOM_GAME_ID, findPreset, validateGame } from "./engine/games";
 import { MAX_SESSIONS } from "./engine/montecarlo";
+import { formatRuleError, validateRule } from "./engine/rules/validate";
 import { getStrategy } from "./engine/strategies/registry";
 import type { StrategyConfig } from "./engine/strategies/types";
 import { validateStrategyConfig } from "./engine/strategies/validate";
 import { DEFAULT_MAX_ROUNDS, MAX_ROUNDS_CAP } from "./engine/types";
+import type { StrategyRef } from "./worker/resolve";
 import type { SimRequest } from "./worker/sim.worker";
 
-export interface StrategyInstance {
+/** A registered strategy with its config. */
+export interface BuiltinInstance {
   /** Stable id so the same strategy can be added more than once. */
   uid: string;
+  kind: "builtin";
   strategyId: string;
   config: StrategyConfig;
 }
 
+/** A user-defined rule, stored as plain JSON DATA (see "Rule language"); compiled only in the worker. */
+export interface CustomInstance {
+  uid: string;
+  kind: "custom";
+  /** Untrusted until validated: may be anything the user pasted. */
+  rule: unknown;
+}
+
+export type StrategyInstance = BuiltinInstance | CustomInstance;
+
+export const SCENARIO_VERSION = 2;
+
 export interface ScenarioConfig {
-  version: 1;
+  version: 2;
   game: { presetId: string; winProb: number; netPayout: number };
   startBankroll: number;
   baseBet: number;
@@ -42,10 +58,15 @@ export function newUid(): string {
   return `s${Date.now().toString(36)}${uidCounter.toString(36)}`;
 }
 
-export function newStrategyInstance(strategyId: string): StrategyInstance {
+export function newStrategyInstance(strategyId: string): BuiltinInstance {
   const strategy = getStrategy(strategyId);
   if (!strategy) throw new Error(`Unknown strategy "${strategyId}"`);
-  return { uid: newUid(), strategyId, config: { ...strategy.defaultConfig } };
+  return { uid: newUid(), kind: "builtin", strategyId, config: { ...strategy.defaultConfig } };
+}
+
+/** A custom-rule instance holding a plain (unfrozen) JSON copy of the rule. */
+export function newCustomInstance(rule: unknown): CustomInstance {
+  return { uid: newUid(), kind: "custom", rule: JSON.parse(JSON.stringify(rule)) as unknown };
 }
 
 /**
@@ -55,7 +76,7 @@ export function newStrategyInstance(strategyId: string): StrategyInstance {
 export function defaultScenario(): ScenarioConfig {
   const european = findPreset("european")!;
   return {
-    version: 1,
+    version: 2,
     game: { presetId: european.id, winProb: european.winProb, netPayout: european.netPayout },
     startBankroll: 1000,
     baseBet: 10,
@@ -107,6 +128,12 @@ export function validateScenario(s: ScenarioConfig): Record<string, string> {
 
   if (s.strategies.length === 0) e.strategies = "Add at least one strategy.";
   for (const inst of s.strategies) {
+    if (inst.kind === "custom") {
+      // The SAME validator the worker runs before compiling.
+      const r = validateRule(inst.rule);
+      if (!r.ok) e[`strategy:${inst.uid}:rule`] = r.errors.map(formatRuleError).join("\n");
+      continue;
+    }
     const strategy = getStrategy(inst.strategyId);
     if (!strategy) {
       e[`strategy:${inst.uid}`] = `Unknown strategy "${inst.strategyId}".`;
@@ -124,7 +151,7 @@ export function toSimRequest(s: ScenarioConfig): SimRequest {
   const preset = findPreset(s.game.presetId);
   return {
     game: preset ?? { id: CUSTOM_GAME_ID, name: "Custom", winProb: s.game.winProb, netPayout: s.game.netPayout },
-    strategies: s.strategies.map((i) => ({ strategyId: i.strategyId, config: i.config })),
+    strategies: s.strategies.map((i): StrategyRef => (i.kind === "custom" ? { kind: "custom", rule: i.rule } : { kind: "builtin", strategyId: i.strategyId, config: i.config })),
     session: {
       startBankroll: toCents(s.startBankroll),
       baseBet: toCents(s.baseBet),
@@ -137,5 +164,25 @@ export function toSimRequest(s: ScenarioConfig): SimRequest {
     },
     nSessions: s.sessions,
     masterSeed: s.seed,
+  };
+}
+
+/** Version 1 scenarios (before custom rules): every strategy instance was a built-in, without `kind`. */
+export interface ScenarioConfigV1 extends Omit<ScenarioConfig, "version" | "strategies"> {
+  version: 1;
+  strategies: { uid: string; strategyId: string; config: StrategyConfig }[];
+}
+
+/**
+ * Upgrades an older scenario to the current version. Not a parser for untrusted input (session 7's
+ * URL loader validates first); it only reshapes known older versions.
+ *   v1 -> v2: strategy instances gain kind "builtin".
+ */
+export function migrateScenario(s: ScenarioConfigV1 | ScenarioConfig): ScenarioConfig {
+  if (s.version === SCENARIO_VERSION) return s;
+  return {
+    ...s,
+    version: 2,
+    strategies: s.strategies.map((i): BuiltinInstance => ({ uid: i.uid, kind: "builtin", strategyId: i.strategyId, config: { ...i.config } })),
   };
 }

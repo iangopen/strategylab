@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getStrategy, STRATEGIES } from "../engine/strategies/registry";
+import type { StrategyConfig } from "../engine/strategies/types";
 import { newStrategyInstance, type StrategyInstance } from "../scenario";
 import { instanceLabel } from "./format";
 import { SchemaForm } from "./SchemaForm";
@@ -15,8 +16,8 @@ export function StrategyPicker({ instances, onChange, errors, disabled }: Props)
   // Which registry entry the "Add" dropdown points at. Not scenario state.
   const [toAdd, setToAdd] = useState(STRATEGIES[0]!.id);
 
-  const update = (uid: string, patch: Partial<StrategyInstance>) =>
-    onChange(instances.map((i) => (i.uid === uid ? { ...i, ...patch } : i)));
+  const update = (uid: string, config: StrategyConfig) =>
+    onChange(instances.map((i) => (i.uid === uid && i.kind === "builtin" ? { ...i, config } : i)));
 
   return (
     <section className="panel">
@@ -37,7 +38,7 @@ export function StrategyPicker({ instances, onChange, errors, disabled }: Props)
       {errors.strategies && <div className="error">{errors.strategies}</div>}
 
       {instances.map((inst, index) => {
-        const strategy = getStrategy(inst.strategyId);
+        const strategy = inst.kind === "builtin" ? getStrategy(inst.strategyId) : undefined;
         const prefix = `strategy:${inst.uid}:`;
         const fieldErrors = Object.fromEntries(
           Object.entries(errors)
@@ -52,10 +53,15 @@ export function StrategyPicker({ instances, onChange, errors, disabled }: Props)
                 Remove
               </button>
             </div>
-            {strategy ? (
+            {inst.kind === "custom" ? (
+              <>
+                <p className="help">A custom rule.</p>
+                {fieldErrors.rule && <div className="error">{fieldErrors.rule}</div>}
+              </>
+            ) : strategy ? (
               <>
                 <p className="help">{strategy.description}</p>
-                <SchemaForm schema={strategy.configSchema} config={inst.config} errors={fieldErrors} disabled={disabled} onChange={(config) => update(inst.uid, { config })} />
+                <SchemaForm schema={strategy.configSchema} config={inst.config} errors={fieldErrors} disabled={disabled} onChange={(config) => update(inst.uid, config)} />
               </>
             ) : (
               <div className="error">{errors[`strategy:${inst.uid}`]}</div>

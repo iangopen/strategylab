@@ -2,25 +2,23 @@ import * as Comlink from "comlink";
 import type { Game } from "../engine/games";
 import { resultTransferables, runMonteCarlo, type MonteCarloResult } from "../engine/montecarlo";
 import { replaySession, replayTransferables, type Replay } from "../engine/replay";
-import { getStrategy } from "../engine/strategies/registry";
-import type { StrategyConfig } from "../engine/strategies/types";
 import type { SessionConfig } from "../engine/types";
+import { resolveStrategies, type StrategyRef } from "./resolve";
 
-/** Plain-data request: strategies are referenced by registry id, since functions can't cross the worker boundary. */
+/**
+ * Plain-data request: built-ins are referenced by registry id and custom rules travel as JSON data;
+ * both are resolved (rules validated and compiled) HERE, since functions can't cross the worker boundary.
+ */
 export interface SimRequest {
   game: Game;
-  strategies: { strategyId: string; config: StrategyConfig }[];
+  strategies: StrategyRef[];
   session: SessionConfig;
   nSessions: number;
   masterSeed: number;
 }
 
 function specsOf(req: SimRequest) {
-  return req.strategies.map(({ strategyId, config }) => {
-    const strategy = getStrategy(strategyId);
-    if (!strategy) throw new Error(`Unknown strategy "${strategyId}"`);
-    return { strategy, config };
-  });
+  return resolveStrategies(req.strategies);
 }
 
 const api = {
