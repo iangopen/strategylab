@@ -18,6 +18,8 @@ function rangeHelp(f: FieldSpec): string | undefined {
 /** Renders ANY strategy's configSchema. Adding a strategy never requires editing this file. */
 export function SchemaForm({ schema, config, onChange, errors, disabled }: Props) {
   const set = (key: string, value: number | boolean | string) => onChange({ ...config, [key]: value });
+  // Blank optional number: remove the key, so the config stays plain JSON with no undefined values.
+  const clear = (key: string) => onChange(Object.fromEntries(Object.entries(config).filter(([k]) => k !== key)));
 
   return (
     <div className="schema-form">
@@ -32,6 +34,20 @@ export function SchemaForm({ schema, config, onChange, errors, disabled }: Props
                 label={f.label}
                 value={typeof value === "number" ? value : null}
                 onChange={(v) => v !== null && set(f.key, v)}
+                error={errors[f.key]}
+                help={rangeHelp(f)}
+                disabled={disabled ?? false}
+              />
+            );
+          case "optionalNumber":
+            return (
+              <NumberField
+                key={f.key}
+                label={f.label}
+                value={typeof value === "number" ? value : null}
+                optional
+                placeholder="blank"
+                onChange={(v) => (v === null ? clear(f.key) : set(f.key, v))}
                 error={errors[f.key]}
                 help={rangeHelp(f)}
                 disabled={disabled ?? false}

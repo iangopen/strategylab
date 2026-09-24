@@ -176,13 +176,22 @@ export interface ScenarioConfigV1 extends Omit<ScenarioConfig, "version" | "stra
 /**
  * Upgrades an older scenario to the current version. Not a parser for untrusted input (session 7's
  * URL loader validates first); it only reshapes known older versions.
- *   v1 -> v2: strategy instances gain kind "builtin".
+ *   v1 -> v2: strategy instances gain kind "builtin"; Kelly's assumedWinProb 0 (the old "use the
+ *   true probability" sentinel) becomes blank, i.e. the key is removed (optionalNumber field).
  */
 export function migrateScenario(s: ScenarioConfigV1 | ScenarioConfig): ScenarioConfig {
   if (s.version === SCENARIO_VERSION) return s;
   return {
     ...s,
     version: 2,
-    strategies: s.strategies.map((i): BuiltinInstance => ({ uid: i.uid, kind: "builtin", strategyId: i.strategyId, config: { ...i.config } })),
+    strategies: s.strategies.map((i): BuiltinInstance => ({ uid: i.uid, kind: "builtin", strategyId: i.strategyId, config: migrateConfigV1(i.strategyId, i.config) })),
   };
+}
+
+function migrateConfigV1(strategyId: string, config: StrategyConfig): StrategyConfig {
+  if (strategyId === "kelly" && config.assumedWinProb === 0) {
+    const { assumedWinProb: _sentinel, ...rest } = config;
+    return rest;
+  }
+  return { ...config };
 }

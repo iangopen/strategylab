@@ -1,10 +1,12 @@
 export type ConfigValue = number | boolean | string;
-export type StrategyConfig = Record<string, ConfigValue>;
+/** Plain JSON. A blank optionalNumber field is simply absent (undefined). */
+export type StrategyConfig = Record<string, ConfigValue | undefined>;
 
 export interface FieldSpec {
   key: string;
   label: string;
-  kind: "number" | "integer" | "boolean" | "select";
+  /** optionalNumber: blank = undefined (the key is absent); otherwise a number within min/max. */
+  kind: "number" | "integer" | "optionalNumber" | "boolean" | "select";
   min?: number;
   max?: number;
   step?: number;

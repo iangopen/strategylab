@@ -8,7 +8,7 @@ import { kelly } from "./kelly";
 describe("kelly: f* and the do-not-play rule (no runner)", () => {
   it("f* <= 0 returns \"stop\" (Kelly says do not play)", () => {
     // Even money, true prob 0.5: f* = (1*0.5 - 0.5)/1 = 0. Not positive -> stop.
-    expect(betSequence(kelly, { assumedWinProb: 0, fraction: 1 }, [W, W])).toEqual(["stop", "stop", "stop"]);
+    expect(betSequence(kelly, { fraction: 1 }, [W, W])).toEqual(["stop", "stop", "stop"]);
     // A misjudged edge BELOW the true probability is still no edge: also stop.
     expect(betSequence(kelly, { assumedWinProb: 0.4, fraction: 1 }, [W])).toEqual(["stop", "stop"]);
   });
@@ -25,10 +25,35 @@ describe("kelly: f* and the do-not-play rule (no runner)", () => {
   });
 });
 
+describe("kelly: blank assumedWinProb (optionalNumber) behaves as the old 0 sentinel did", () => {
+  // The old 0 meant "use the game's true win probability", so blank must equal an explicit true p,
+  // session for session, on a game where Kelly bets and on one where it refuses to.
+  const cfg = sessionConfig({ startBankroll: 100_000, baseBet: 500, tableMin: 100, tableMax: 25_000, stopWin: 150_000, stopLoss: 50_000, maxRounds: 1000 });
+  const games: Game[] = [
+    { id: "posEdge", name: "p=0.55", winProb: 0.55, netPayout: 1 },
+    { id: "payout2", name: "p=0.4, payout 2", winProb: 0.4, netPayout: 2 },
+    { id: "european", name: "European", winProb: 18 / 37, netPayout: 1 },
+  ];
+  for (const game of games) {
+    it(`${game.id}: 2,000 sessions identical to assumedWinProb = true p`, () => {
+      let rounds = 0;
+      for (let i = 0; i < 2000; i++) {
+        const seed = sessionSeed(55, i);
+        const blank = runSession(game, kelly, { fraction: 1 }, cfg, seed);
+        const explicit = runSession(game, kelly, { assumedWinProb: game.winProb, fraction: 1 }, cfg, seed);
+        expect(blank).toEqual(explicit);
+        rounds += blank.rounds;
+      }
+      if (game.id === "european") expect(rounds).toBe(0); // f* < 0: refuses to bet, as before
+      else expect(rounds).toBeGreaterThan(2000);
+    });
+  }
+});
+
 describe("kelly: purity", () => {
   it("does not mutate deep-frozen config, state, or ctx", () => {
     expectPure(kelly, { assumedWinProb: 0.6, fraction: 1 });
-    expectPure(kelly, { assumedWinProb: 0, fraction: 0.5 });
+    expectPure(kelly, { fraction: 0.5 });
   });
 });
 
@@ -48,7 +73,7 @@ describe("kelly: full Kelly maximises long-run growth", () => {
 
   const finals = (fraction: number) => {
     const out = new Float64Array(n);
-    for (let i = 0; i < n; i++) out[i] = runSession(posEdge, kelly, { assumedWinProb: 0, fraction }, cfg, sessionSeed(master, i)).finalBankroll;
+    for (let i = 0; i < n; i++) out[i] = runSession(posEdge, kelly, { fraction }, cfg, sessionSeed(master, i)).finalBankroll;
     return out;
   };
 

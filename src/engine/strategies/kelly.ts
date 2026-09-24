@@ -1,6 +1,7 @@
 import type { Strategy } from "./types";
 
-type KellyConfig = { assumedWinProb: number; fraction: number };
+/** assumedWinProb absent (blank) = use the game's true win probability. */
+type KellyConfig = { assumedWinProb?: number; fraction: number };
 type KellyState = {
   /** Play only when the Kelly fraction is positive; otherwise the strategy says do not bet. */
   readonly play: boolean;
@@ -26,11 +27,11 @@ export const kelly: Strategy<KellyConfig, KellyState> = {
     {
       key: "assumedWinProb",
       label: "Assumed win probability",
-      kind: "number",
-      min: 0,
+      kind: "optionalNumber",
+      min: 0.01,
       max: 0.99,
       step: 0.01,
-      help: "The win probability Kelly assumes when sizing bets. 0 = use the game's true probability. Setting it ABOVE the true probability models a MISJUDGED edge, not a real one — it still loses money on a negative-edge game.",
+      help: "The win probability Kelly assumes when sizing bets. Blank = use the game's true probability. Setting it ABOVE the true probability models a MISJUDGED edge, not a real one — it still loses money on a negative-edge game.",
     },
     {
       key: "fraction",
@@ -42,11 +43,11 @@ export const kelly: Strategy<KellyConfig, KellyState> = {
       help: "Scales the Kelly stake: 1 = full Kelly, 0.5 = half Kelly (smaller swings), above 1 = over-betting.",
     },
   ],
-  defaultConfig: { assumedWinProb: 0, fraction: 1 },
+  defaultConfig: { fraction: 1 },
   init: (config, ctx) => {
     const b = ctx.game.netPayout;
-    // 0 (or any non-positive) means "use the game's true win probability".
-    const p = config.assumedWinProb > 0 ? config.assumedWinProb : ctx.game.winProb;
+    // Blank (absent) means "use the game's true win probability".
+    const p = config.assumedWinProb ?? ctx.game.winProb;
     const q = 1 - p;
     const fStar = (b * p - q) / b;
     return fStar > 0 ? { play: true, sizeFraction: config.fraction * fStar } : { play: false, sizeFraction: 0 };

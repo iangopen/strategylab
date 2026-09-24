@@ -91,4 +91,25 @@ describe("ScenarioConfig", () => {
     expect(validateScenario(m)).toEqual({});
     expect(migrateScenario(current)).toBe(current); // already current
   });
+
+  it("migrates Kelly's old 0 sentinel to blank (key removed); a real value is kept", () => {
+    const v1: ScenarioConfigV1 = {
+      ...defaultScenario(),
+      version: 1,
+      strategies: [
+        { uid: "k0", strategyId: "kelly", config: { assumedWinProb: 0, fraction: 0.5 } },
+        { uid: "k6", strategyId: "kelly", config: { assumedWinProb: 0.6, fraction: 1 } },
+        { uid: "f", strategyId: "flat", config: { units: 1 } },
+      ],
+    };
+    const m = migrateScenario(v1);
+    expect(m.strategies.map((i) => (i.kind === "builtin" ? i.config : null))).toEqual([{ fraction: 0.5 }, { assumedWinProb: 0.6, fraction: 1 }, { units: 1 }]);
+    expect("assumedWinProb" in (m.strategies[0] as { config: object }).config).toBe(false);
+    expect(validateScenario(m)).toEqual({});
+    // Unmigrated, the old 0 is out of range for the new field.
+    const unmigrated = { ...m, strategies: [{ uid: "k0", kind: "builtin" as const, strategyId: "kelly", config: { assumedWinProb: 0, fraction: 0.5 } }] };
+    expect(Object.keys(validateScenario(unmigrated))).toEqual(["strategy:k0:assumedWinProb"]);
+    // The migrated scenario is still plain JSON.
+    expect(JSON.parse(JSON.stringify(m))).toEqual(m);
+  });
 });

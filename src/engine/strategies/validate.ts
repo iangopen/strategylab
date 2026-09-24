@@ -6,6 +6,12 @@ export function validateStrategyConfig(strategy: AnyStrategy, config: StrategyCo
   for (const f of strategy.configSchema) {
     const v = config[f.key];
     switch (f.kind) {
+      case "optionalNumber":
+        if (v === undefined) break; // blank is valid
+        if (typeof v !== "number" || !Number.isFinite(v)) errors[f.key] = "Enter a number, or leave blank.";
+        else if (f.min !== undefined && v < f.min) errors[f.key] = `Must be at least ${f.min} (or blank).`;
+        else if (f.max !== undefined && v > f.max) errors[f.key] = `Must be at most ${f.max} (or blank).`;
+        break;
       case "number":
       case "integer":
         if (typeof v !== "number" || !Number.isFinite(v)) errors[f.key] = "Enter a number.";
