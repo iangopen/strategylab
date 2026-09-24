@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { checkpointRounds, DENSE_ROUNDS } from "../../engine/checkpoints";
 import { GAME_PRESETS } from "../../engine/games";
 import { runMonteCarlo, type MonteCarloResult, type StrategyOutcome } from "../../engine/montecarlo";
 import { replaySession } from "../../engine/replay";
@@ -374,5 +375,46 @@ describe("fan zoom (pure): active range and the shared window", () => {
     expect(flatEnd).toBe(1000);
     expect(martEnd).toBeLessThan(100);
     expect(martEnd).toBeGreaterThan(0);
+    // Session 12: the fit window [0, martEnd] holds EVERY round up to min(martEnd, 64) as a checkpoint.
+    const inWindow = Array.from(r.bands.rounds).filter((x) => x <= martEnd);
+    console.log(`[fan zoom] martingale fit window 0-${martEnd}: ${inWindow.length} band checkpoints`);
+    if (martEnd <= DENSE_ROUNDS) expect(inWindow).toEqual(Array.from({ length: martEnd + 1 }, (_, i) => i));
+  });
+});
+
+describe("non-uniform checkpoints (session 12): every chart path uses the real x values", () => {
+  const rounds = checkpointRounds(1000); // 0..64 every round, then 69, 74, ... 994, 999, 1000
+
+  it("hover snapping picks the nearest ACTUAL checkpoint, wherever the spacing changes", () => {
+    const at = (x: number) => rounds[nearestIndex(rounds, x)];
+    expect(at(10.4)).toBe(10); // dense part: every round
+    expect(at(66)).toBe(64); // 64 -> 69 gap: 66 is nearer 64
+    expect(at(67)).toBe(69);
+    expect(at(66.5)).toBe(64); // tie goes low
+    expect(at(502)).toBe(nearest(502));
+    expect(at(999.6)).toBe(1000); // the last gap is 1 (999 -> 1000), not 5
+    for (let x = 0; x <= 1000; x += 0.37) expect(at(x)).toBe(nearest(x));
+  });
+  function nearest(x: number): number {
+    let best = rounds[0]!;
+    for (const r of rounds) if (Math.abs(r - x) < Math.abs(best - x)) best = r;
+    return best;
+  }
+
+  it("activeRangeEnd returns an actual checkpoint round, including in the geometric/capped part", () => {
+    const k = rounds.indexOf(74);
+    const flatAfter = (i: number) => Float64Array.from(rounds, (_, j) => (j <= i ? 1000 - j : 1000 - i));
+    const b = (i: number) => ({ p5: flatAfter(i), p25: flatAfter(i), p50: flatAfter(i), p75: flatAfter(i), p95: flatAfter(i) });
+    expect(activeRangeEnd(b(k), rounds)).toBe(rounds[k + 1]); // 79, not 74 + 5 assumed
+    expect(activeRangeEnd(b(20), rounds)).toBe(21);
+    expect(activeRangeEnd(b(64), rounds)).toBe(69);
+  });
+
+  it("fanSeries hands the renderer the checkpoint rounds themselves as x (no index-based spacing)", () => {
+    const fake = { strategyId: "x", stats: {}, endReasonCounts: {}, samplePaths: [], histogramCounts: new Uint32Array(0), bands: { p5: new Float64Array(rounds.length), p25: new Float64Array(rounds.length), p50: new Float64Array(rounds.length), p75: new Float64Array(rounds.length), p95: new Float64Array(rounds.length) } } as unknown as Parameters<typeof fanSeries>[0];
+    const f = fanSeries(fake, rounds);
+    expect(f.outer.x).toBe(rounds);
+    expect(f.inner.x).toBe(rounds);
+    expect(f.median.x).toBe(rounds);
   });
 });

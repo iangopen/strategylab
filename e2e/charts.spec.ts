@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { runMonteCarlo } from "../src/engine/montecarlo";
 import { defaultScenario, toSimRequest } from "../src/scenario";
+import { DENSE_ROUNDS } from "../src/engine/checkpoints";
 import { activeRangeEnd } from "../src/ui/charts/adapters";
 import { MARGIN } from "../src/ui/charts/canvas";
 import { resolveStrategies } from "../src/worker/resolve";
@@ -105,6 +106,12 @@ test("selected-path highlight: the replayed session is highlighted (on a theme-a
 
 // ---------------------------------------------------------------- synchronized fan zoom
 
+/** The DEFAULT scenario's band checkpoint rounds, from the engine in Node (the exact worker code). */
+function defaultRounds(): Float64Array {
+  const req = toSimRequest(defaultScenario());
+  return runMonteCarlo(req.game, resolveStrategies(req.strategies), req.session, req.nSessions, req.masterSeed).bands.rounds;
+}
+
 /** Activity ends per strategy for the DEFAULT scenario, from the engine in Node (the exact worker code). */
 function defaultActiveEnds(): number[] {
   const req = toSimRequest(defaultScenario());
@@ -168,6 +175,12 @@ test("zoom: 'Fit to this strategy' on Martingale sets [0, its active range] (fro
   await page.locator("figure.chart-panel", { has: page.locator('[data-label="Martingale"]') }).getByRole("button", { name: "Fit to this strategy" }).click();
   await expectAllPanels(page, "data-x-range", `0-${ends[1]}`);
   await expectAllPanels(page, "data-zoom", `0-${ends[1]}`);
+  // Session 12: the fit window holds EVERY round up to min(window end, 64) as a band checkpoint, and
+  // the panels count exactly the engine's checkpoints inside it.
+  const inWindow = Array.from(defaultRounds()).filter((r) => r <= ends[1]!);
+  if (ends[1]! <= DENSE_ROUNDS) expect(inWindow).toEqual(Array.from({ length: ends[1]! + 1 }, (_, i) => i));
+  await expectAllPanels(page, "data-band-points", String(inWindow.length));
+  console.log(`[fit] Martingale window 0-${ends[1]}: ${inWindow.length} band checkpoints`);
   const after = await fanState(page);
   expect(after.map((s) => [s.yMin, s.yMax])).toEqual(before.map((s) => [s.yMin, s.yMax]));
   // The hover readout follows the zoom: the snapped round is inside the window.
@@ -181,6 +194,37 @@ test("zoom: 'Fit to this strategy' on Martingale sets [0, its active range] (fro
   // Fit to Flat: its sessions run the whole way, so it is the full range.
   await page.locator("figure.chart-panel", { has: page.locator('[data-label="Flat"]') }).getByRole("button", { name: "Fit to this strategy" }).click();
   await expectAllPanels(page, "data-x-range", `0-${ends[0]}`);
+});
+
+test("non-uniform checkpoints: hovering between two checkpoints snaps to the nearest ACTUAL checkpoint", async ({ page }) => {
+  const rounds = Array.from(defaultRounds());
+  await openApp(page);
+  await runAndWait(page);
+  const fan = page.getByTestId("fan-canvas").first();
+  await expect(fan).toHaveAttribute("data-band-points", String(rounds.length)); // unzoomed: every checkpoint
+  // Zoom into the capped part of the schedule (5 rounds apart at 1,000 rounds), so a pixel is a small fraction of a gap.
+  await fan.scrollIntoViewIfNeeded();
+  const b = (await fan.boundingBox())!;
+  const plotW = b.width - MARGIN.left - MARGIN.right;
+  const y = b.y + b.height / 2;
+  await page.mouse.move(b.x + MARGIN.left + plotW * 0.45, y);
+  await page.mouse.down();
+  await page.mouse.move(b.x + MARGIN.left + plotW * 0.5, y);
+  await page.mouse.move(b.x + MARGIN.left + plotW * 0.55, y);
+  await page.mouse.up();
+  await expect(fan).not.toHaveAttribute("data-zoom", "full");
+  const [xMin, xMax] = (await fan.getAttribute("data-x-range"))!.split("-").map(Number) as [number, number];
+  const inside = rounds.filter((r) => r >= xMin && r <= xMax);
+  await expect(fan).toHaveAttribute("data-band-points", String(inside.length));
+  const i = rounds.findIndex((r) => r > xMin + 10);
+  const [lo, hi] = [rounds[i]!, rounds[i + 1]!];
+  expect(hi - lo).toBeGreaterThan(1); // really between two checkpoints, not in the every-round part
+  const pxOf = (round: number) => MARGIN.left + ((round - xMin) / (xMax - xMin)) * plotW;
+  for (const [target, expected] of [[lo + 0.3 * (hi - lo), lo], [lo + 0.7 * (hi - lo), hi]] as const) {
+    await fan.hover({ position: { x: pxOf(target), y: b.height / 2 } });
+    await expect(fan).toHaveAttribute("data-hover-round", String(expected));
+  }
+  console.log(`[hover] window ${xMin}-${xMax} (${inside.length} checkpoints): rounds between ${lo} and ${hi} snap to the nearer one`);
 });
 
 test("zoom: a new run starts unzoomed, and a plain click still picks a path to replay", async ({ page }) => {

@@ -140,7 +140,10 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, fullX, zoo
     // Reference lines and their knocked-out labels go on top of the data, so text never sits on paths.
     const labels = drawRefLines(f, referenceLines(refs).map((r) => ({ value: r.value, label: r.label, align: r.kind === "start" ? "left" : "right" })), cssColor("--chart-ref"));
     unclip();
-    chartState(c, { xMin: x.min, xMax: x.max, xRange: `${x.min}-${x.max}`, zoom: zoomed ? `${x.min}-${x.max}` : "full", activeEnd, yMin: y.min, yMax: y.max, paths: series.paths.length, color, theme: effectiveTheme(), refLabels: JSON.stringify(labels), selected: selectedSession, highlighted: sel ? selectedSession : null, halo: sel ? halo : null });
+    // Test hook: how many band checkpoints fall inside the shared x window (they are unevenly spaced).
+    let bandPoints = 0;
+    for (let i = 0; i < series.outer.x.length; i++) if (series.outer.x[i]! >= x.min && series.outer.x[i]! <= x.max) bandPoints++;
+    chartState(c, { xMin: x.min, xMax: x.max, xRange: `${x.min}-${x.max}`, zoom: zoomed ? `${x.min}-${x.max}` : "full", activeEnd, bandPoints, yMin: y.min, yMax: y.max, paths: series.paths.length, color, theme: effectiveTheme(), refLabels: JSON.stringify(labels), selected: selectedSession, highlighted: sel ? selectedSession : null, halo: sel ? halo : null });
     countDraw(c);
   }, [width, theme, series, x, y, refs, colorVar, selectedSession, zoomed, activeEnd]);
 
