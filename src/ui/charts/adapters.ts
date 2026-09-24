@@ -2,6 +2,7 @@
 // Money stays in engine cents; components convert only when printing labels.
 import type { MonteCarloResult, StrategyOutcome } from "../../engine/montecarlo";
 import type { Replay } from "../../engine/replay";
+import type { Bands } from "../../engine/stats/bands";
 import type { EndReason } from "../../engine/types";
 
 export interface Range {
@@ -114,6 +115,37 @@ export function fanSeries(outcome: StrategyOutcome, rounds: Float64Array): FanSe
     median: { x: rounds, y: b.p50 },
     paths: outcome.samplePaths.map((p) => ({ x: p.rounds, y: p.bankroll })),
   };
+}
+
+/**
+ * End of a strategy's "active" x range: the round of the checkpoint AFTER the last one where any of
+ * p5..p95 still changes (sessions that ended carry their final bankroll forward, so the bands go flat
+ * once the strategy's sessions have played out). Never changes at all -> the first checkpoint;
+ * still changing at the last checkpoint -> the full range. From the existing band arrays only.
+ */
+export function activeRangeEnd(bands: Bands, rounds: ArrayLike<number>): number {
+  const n = rounds.length;
+  if (n === 0) return 0;
+  const series = [bands.p5, bands.p25, bands.p50, bands.p75, bands.p95];
+  let lastChange = 0;
+  for (let j = n - 1; j >= 1; j--) {
+    if (series.some((b) => b[j] !== b[j - 1])) {
+      lastChange = j;
+      break;
+    }
+  }
+  return rounds[Math.min(lastChange + 1, n - 1)]!;
+}
+
+/**
+ * The ONE x/y pair every fan panel uses, given the shared zoom window (or null = full). x is the
+ * window clamped to the full range; y is ALWAYS the global shared y: zooming never rescales y.
+ */
+export function zoomedFanScales(scales: { x: Range; y: Range }, zoom: Range | null): { x: Range; y: Range } {
+  if (zoom === null) return scales;
+  const min = Math.max(scales.x.min, Math.min(zoom.min, scales.x.max));
+  const max = Math.min(scales.x.max, Math.max(zoom.max, min));
+  return { x: { min, max }, y: scales.y };
 }
 
 /** Reference lines: starting bankroll always; win target and loss floor only when set. */

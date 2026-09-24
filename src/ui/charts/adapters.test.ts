@@ -27,6 +27,8 @@ import {
   seriesColorVar,
   placeLabels,
   LABEL_PAD,
+  activeRangeEnd,
+  zoomedFanScales,
 } from "./adapters";
 
 /** Minimal hand-built result: only the fields the adapters read. */
@@ -324,5 +326,53 @@ describe("placeLabels (reference labels never overlap, never leave the plot)", (
     const [a] = placeLabels([req("Start", 100, "left", 30)], plot);
     expect(a!.x1 - a!.x0).toBe(30 + 2 * LABEL_PAD);
     expect(a!.y1 - a!.y0).toBe(10 + 2 * LABEL_PAD);
+  });
+});
+
+describe("fan zoom (pure): active range and the shared window", () => {
+  const rounds = Float64Array.from([0, 5, 10, 15, 20, 25, 30]);
+  /** p5..p95 all following `vals` unless overridden. */
+  const bands = (vals: number[], p95?: number[]) => {
+    const f = (a: number[]) => Float64Array.from(a);
+    return { p5: f(vals), p25: f(vals), p50: f(vals), p75: f(vals), p95: f(p95 ?? vals) };
+  };
+
+  it("bands that stop changing at checkpoint k give checkpoint k+1", () => {
+    // Last change is at index 3 (15 rounds): 1000 -> 990 -> 1010 -> 980, then flat.
+    expect(activeRangeEnd(bands([1000, 990, 1010, 980, 980, 980, 980]), rounds)).toBe(rounds[4]); // 20
+    // Last change at index 1: end at index 2.
+    expect(activeRangeEnd(bands([1000, 900, 900, 900, 900, 900, 900]), rounds)).toBe(rounds[2]);
+  });
+
+  it("bands that never stop changing give the full range; bands that never change give the first checkpoint", () => {
+    expect(activeRangeEnd(bands([1, 2, 3, 4, 5, 6, 7]), rounds)).toBe(30);
+    expect(activeRangeEnd(bands([1, 2, 3, 4, 5, 6, 6]), rounds)).toBe(30); // last change at index 5 -> 5+1 = last
+    expect(activeRangeEnd(bands([1000, 1000, 1000, 1000, 1000, 1000, 1000]), rounds)).toBe(5);
+  });
+
+  it("any ONE percentile still changing keeps the range open (here only p95 moves late)", () => {
+    expect(activeRangeEnd(bands([1000, 990, 990, 990, 990, 990, 990], [1000, 1020, 1020, 1020, 1040, 1040, 1040]), rounds)).toBe(rounds[5]);
+  });
+
+  it("zoomedFanScales: one x window for every panel, clamped to the full range; y NEVER changes", () => {
+    const scales = { x: { min: 0, max: 1000 }, y: { min: 0, max: 200_000 } };
+    expect(zoomedFanScales(scales, null)).toBe(scales);
+    const z = zoomedFanScales(scales, { min: 100, max: 300 });
+    expect(z).toEqual({ x: { min: 100, max: 300 }, y: scales.y });
+    expect(z.y).toBe(scales.y); // the very same global y object
+    expect(zoomedFanScales(scales, { min: -50, max: 5000 })).toEqual(scales);
+    for (const w of [{ min: 0, max: 30 }, { min: 990, max: 1000 }, { min: 400, max: 401 }]) expect(zoomedFanScales(scales, w).y).toBe(scales.y);
+  });
+
+  it("on a real default-scenario run: Martingale's active range is short, Flat's is the full 1,000 rounds", () => {
+    const european = GAME_PRESETS.find((g) => g.id === "european")!;
+    const specs = STRATEGIES.slice(0, 2).map((strategy) => ({ strategy, config: { ...strategy.defaultConfig } })); // flat, martingale
+    const r = runMonteCarlo(european, specs, sessionConfig({ startBankroll: 100_000, baseBet: 1000, stopWin: 110_000, maxRounds: 1000 }), 10_000, 12345);
+    const flatEnd = activeRangeEnd(r.perStrategy[0]!.bands, r.bands.rounds);
+    const martEnd = activeRangeEnd(r.perStrategy[1]!.bands, r.bands.rounds);
+    console.log(`[fan zoom] default scenario active range: flat ${flatEnd}, martingale ${martEnd} rounds`);
+    expect(flatEnd).toBe(1000);
+    expect(martEnd).toBeLessThan(100);
+    expect(martEnd).toBeGreaterThan(0);
   });
 });
