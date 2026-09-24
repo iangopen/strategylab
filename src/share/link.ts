@@ -3,7 +3,7 @@
 // loads passes the SAME validators the app uses everywhere (validateRule, validateScenario).
 import { describeValue } from "../engine/rules/validate";
 import { getStrategy } from "../engine/strategies/registry";
-import { defaultScenario, newCustomInstance, newUid, SCENARIO_VERSION, validateScenario, type BuiltinInstance, type ScenarioConfig, type StrategyInstance } from "../scenario";
+import { defaultScenario, migrateScenario, newCustomInstance, newUid, SCENARIO_VERSION, validateScenario, type BuiltinInstance, type ScenarioConfig, type ScenarioConfigV1, type StrategyInstance } from "../scenario";
 import { base64urlToBytes, bytesToBase64url } from "./base64url";
 import { compactScenario, expandPayload, FIELD_LABELS, type Dropped, type TopField, type TopValues } from "./compact";
 import { FRAGMENT_PREFIX, MAX_FRAGMENT_CHARS, MAX_URL_CHARS } from "./limits";
@@ -118,10 +118,24 @@ export function decodeScenarioLink(hash: string): LoadResult {
   if (v > SCENARIO_VERSION) {
     return { kind: "error", message: `This link needs a newer version of the app (it is scenario version ${v}; this app reads up to version ${SCENARIO_VERSION}). Reload the page to get the latest version, then open the link again. Nothing was loaded.` };
   }
-  if (v !== SCENARIO_VERSION) return { kind: "error", message: `Scenario version ${v} links are not supported. Nothing was loaded.` };
 
-  const x = expandPayload(payload);
-  const scenario = assemble(x.top, x.strategies.map((s) => (s.kind === "custom" ? newCustomInstance(s.rule) : builtin(s.strategyId, s.config))));
+  let x: ReturnType<typeof expandPayload>;
+  let scenario: ScenarioConfig;
+  if (v === 1) {
+    // Version 1 (before custom rules): built-ins only, then the EXISTING migration (e.g. Kelly's old
+    // 0 sentinel becomes blank) BEFORE validation, exactly as for any older scenario.
+    x = expandPayload(payload, { rules: false });
+    const v1: ScenarioConfigV1 = {
+      version: 1,
+      ...fallbackValues(),
+      ...x.top,
+      strategies: x.strategies.flatMap((s) => (s.kind === "builtin" ? [{ uid: newUid(), strategyId: s.strategyId, config: s.config }] : [])),
+    };
+    scenario = migrateScenario(v1);
+  } else {
+    x = expandPayload(payload);
+    scenario = migrateScenario(assemble(x.top, x.strategies.map((s) => (s.kind === "custom" ? newCustomInstance(s.rule) : builtin(s.strategyId, s.config)))));
+  }
   const dropped = [...x.dropped, ...settle(scenario, new Set(Object.keys(x.top) as TopField[]))];
   return { kind: "loaded", scenario, dropped, fromVersion: v };
 }

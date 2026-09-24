@@ -280,7 +280,7 @@ function ruleName(raw: unknown[]): string {
  * validated by the session 6 validator), and everything dropped. Range and cross-field checks are
  * the scenario validator's job, afterwards.
  */
-export function expandPayload(obj: Obj): ExpandedPayload {
+export function expandPayload(obj: Obj, options: { rules: boolean } = { rules: true }): ExpandedPayload {
   const dropped: Dropped[] = [];
   const top: Partial<TopValues> = {};
 
@@ -339,6 +339,10 @@ export function expandPayload(obj: Obj): ExpandedPayload {
       }
       if (raw[0] === "p" || raw[0] === "q") {
         const label = `${field}${ruleName(raw)}`;
+        if (!options.rules) {
+          dropped.push({ field: label, message: "custom rules need a version 2 link; left out" });
+          continue;
+        }
         const x = expandRule(raw);
         if (!x.ok) {
           dropped.push({ field: label, message: `${x.error}; left out` });
