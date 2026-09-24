@@ -2,6 +2,7 @@
 // Money here is in DOLLARS as the user types it; toSimRequest converts to engine cents.
 import { CUSTOM_GAME_ID, findPreset, validateGame } from "./engine/games";
 import { MAX_SESSIONS } from "./engine/montecarlo";
+import { sportsGame, type SportsInput } from "./engine/odds";
 import { formatRuleError, validateRule } from "./engine/rules/validate";
 import { getStrategy } from "./engine/strategies/registry";
 import type { StrategyConfig } from "./engine/strategies/types";
@@ -29,11 +30,24 @@ export interface CustomInstance {
 
 export type StrategyInstance = BuiltinInstance | CustomInstance;
 
-export const SCENARIO_VERSION = 2;
+export const SCENARIO_VERSION = 3;
+
+/** Game preset id for sports odds (session 8). The odds inputs compile to an ordinary Game. */
+export const SPORTS_GAME_ID = "sports";
+
+export interface ScenarioGame {
+  /** A preset id, "custom", or "sports". */
+  presetId: string;
+  /** For sports games these two are DERIVED from `sports` (re-synced on every edit and load). */
+  winProb: number;
+  netPayout: number;
+  /** Sports odds inputs: present exactly when presetId is "sports". The source of truth. */
+  sports?: SportsInput;
+}
 
 export interface ScenarioConfig {
-  version: 2;
-  game: { presetId: string; winProb: number; netPayout: number };
+  version: 3;
+  game: ScenarioGame;
   startBankroll: number;
   baseBet: number;
   tableMin: number;
@@ -78,7 +92,7 @@ export function newCustomInstance(rule: unknown): CustomInstance {
 export function defaultScenario(): ScenarioConfig {
   const european = findPreset("european")!;
   return {
-    version: 2,
+    version: 3,
     game: { presetId: european.id, winProb: european.winProb, netPayout: european.netPayout },
     startBankroll: 1000,
     baseBet: 10,
@@ -96,6 +110,21 @@ export function defaultScenario(): ScenarioConfig {
 
 export const toCents = (dollars: number): number => Math.round(dollars * 100);
 
+/** The first sports market a user sees: -110 / -110 (a common two-way price), betting side A. */
+export function defaultSportsInput(): SportsInput {
+  return { mode: "market", format: "american", sideA: -110, sideB: -110, side: "a", estimate: 0.5 };
+}
+
+/**
+ * A sports game with winProb / netPayout re-derived from its odds inputs. When the inputs are
+ * invalid the previous numbers are kept (validation reports the inputs, and Run stays blocked).
+ */
+export function sportsScenarioGame(sports: SportsInput, previous?: Pick<ScenarioGame, "winProb" | "netPayout">): ScenarioGame {
+  const r = sportsGame(sports);
+  const base = previous ?? { winProb: 0.5, netPayout: 1 };
+  return r.ok ? { presetId: SPORTS_GAME_ID, winProb: r.winProb, netPayout: r.netPayout, sports } : { presetId: SPORTS_GAME_ID, winProb: base.winProb, netPayout: base.netPayout, sports };
+}
+
 /**
  * Errors keyed by field: top-level keys ("startBankroll", "game"), or
  * "strategy:<uid>:<fieldKey>" for strategy config fields. Empty object = valid.
@@ -104,9 +133,24 @@ export function validateScenario(s: ScenarioConfig): Record<string, string> {
   const e: Record<string, string> = {};
   const money = (v: number) => Number.isFinite(v) && toCents(v) >= 1;
 
-  const gameErrors = validateGame(s.game);
-  if (gameErrors.length > 0) e.game = gameErrors.join(" ");
-  if (s.game.presetId !== CUSTOM_GAME_ID && !findPreset(s.game.presetId)) e.game = "Unknown game preset.";
+  if (s.game.presetId === SPORTS_GAME_ID) {
+    // The odds inputs are the source of truth: errors are keyed per input (game.sideA, ...).
+    if (!s.game.sports) e.game = "Sports odds are missing.";
+    else {
+      const r = sportsGame(s.game.sports);
+      if (!r.ok) for (const [k, msg] of Object.entries(r.errors)) e[`game.${k}`] = msg;
+      else if (r.winProb !== s.game.winProb || r.netPayout !== s.game.netPayout) e.game = "The game's probability and payout are out of date with its odds.";
+      else {
+        const gameErrors = validateGame(s.game);
+        if (gameErrors.length > 0) e.game = gameErrors.join(" ");
+      }
+    }
+  } else {
+    const gameErrors = validateGame(s.game);
+    if (gameErrors.length > 0) e.game = gameErrors.join(" ");
+    if (s.game.presetId !== CUSTOM_GAME_ID && !findPreset(s.game.presetId)) e.game = "Unknown game preset.";
+    if (s.game.sports !== undefined) e.game = "Only a sports game has odds inputs.";
+  }
 
   if (!money(s.startBankroll)) e.startBankroll = "Must be at least $0.01.";
   if (!money(s.baseBet)) e.baseBet = "Must be at least $0.01.";
@@ -153,7 +197,12 @@ export function validateScenario(s: ScenarioConfig): Record<string, string> {
 export function toSimRequest(s: ScenarioConfig): SimRequest {
   const preset = findPreset(s.game.presetId);
   return {
-    game: preset ?? { id: CUSTOM_GAME_ID, name: "Custom", winProb: s.game.winProb, netPayout: s.game.netPayout },
+    // Sports odds compile to an ordinary Game: nothing downstream knows about odds.
+    game:
+      preset ??
+      (s.game.presetId === SPORTS_GAME_ID
+        ? { id: SPORTS_GAME_ID, name: "Sports odds", winProb: s.game.winProb, netPayout: s.game.netPayout }
+        : { id: CUSTOM_GAME_ID, name: "Custom", winProb: s.game.winProb, netPayout: s.game.netPayout }),
     strategies: s.strategies.map((i): StrategyRef => (i.kind === "custom" ? { kind: "custom", rule: i.rule } : { kind: "builtin", strategyId: i.strategyId, config: i.config })),
     session: {
       startBankroll: toCents(s.startBankroll),
@@ -170,8 +219,14 @@ export function toSimRequest(s: ScenarioConfig): SimRequest {
   };
 }
 
+/** Version 2 scenarios (custom rules, before sports odds): the game had no odds inputs. */
+export interface ScenarioConfigV2 extends Omit<ScenarioConfig, "version" | "game"> {
+  version: 2;
+  game: { presetId: string; winProb: number; netPayout: number };
+}
+
 /** Version 1 scenarios (before custom rules): every strategy instance was a built-in, without `kind`. */
-export interface ScenarioConfigV1 extends Omit<ScenarioConfig, "version" | "strategies"> {
+export interface ScenarioConfigV1 extends Omit<ScenarioConfigV2, "version" | "strategies"> {
   version: 1;
   strategies: { uid: string; strategyId: string; config: StrategyConfig }[];
 }
@@ -181,14 +236,19 @@ export interface ScenarioConfigV1 extends Omit<ScenarioConfig, "version" | "stra
  * URL loader validates first); it only reshapes known older versions.
  *   v1 -> v2: strategy instances gain kind "builtin"; Kelly's assumedWinProb 0 (the old "use the
  *   true probability" sentinel) becomes blank, i.e. the key is removed (optionalNumber field).
+ *   v2 -> v3: version only. v2 games (presets and custom) are unchanged; sports odds are new in v3.
  */
-export function migrateScenario(s: ScenarioConfigV1 | ScenarioConfig): ScenarioConfig {
+export function migrateScenario(s: ScenarioConfigV1 | ScenarioConfigV2 | ScenarioConfig): ScenarioConfig {
   if (s.version === SCENARIO_VERSION) return s;
-  return {
-    ...s,
-    version: 2,
-    strategies: s.strategies.map((i): BuiltinInstance => ({ uid: i.uid, kind: "builtin", strategyId: i.strategyId, config: migrateConfigV1(i.strategyId, i.config) })),
-  };
+  const v2: ScenarioConfigV2 =
+    s.version === 2
+      ? s
+      : {
+          ...s,
+          version: 2,
+          strategies: s.strategies.map((i): BuiltinInstance => ({ uid: i.uid, kind: "builtin", strategyId: i.strategyId, config: migrateConfigV1(i.strategyId, i.config) })),
+        };
+  return { ...v2, version: 3 };
 }
 
 function migrateConfigV1(strategyId: string, config: StrategyConfig): StrategyConfig {

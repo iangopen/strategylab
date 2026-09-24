@@ -135,7 +135,7 @@ describe("malicious links: bounded errors, no throw, no hang, bounded memory (ve
 
   it("a version field of 999999 asks for a newer app; other hostile versions are errors", () => {
     expect(errorOf(fragmentOf({ ...good, v: 999999 }))).toBe(
-      "This link needs a newer version of the app (it is scenario version 999999; this app reads up to version 2). Reload the page to get the latest version, then open the link again. Nothing was loaded.",
+      "This link needs a newer version of the app (it is scenario version 999999; this app reads up to version 3). Reload the page to get the latest version, then open the link again. Nothing was loaded.",
     );
     for (const v of [1e308, -1, 0, 2.5, "2", [2], { v: 2 }, true, null]) errorOf(fragmentOf({ ...good, v }));
   });

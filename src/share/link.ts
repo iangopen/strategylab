@@ -3,7 +3,7 @@
 // loads passes the SAME validators the app uses everywhere (validateRule, validateScenario).
 import { describeValue } from "../engine/rules/validate";
 import { getStrategy } from "../engine/strategies/registry";
-import { defaultScenario, migrateScenario, newCustomInstance, newUid, SCENARIO_VERSION, validateScenario, type BuiltinInstance, type ScenarioConfig, type ScenarioConfigV1, type StrategyInstance } from "../scenario";
+import { defaultScenario, migrateScenario, newCustomInstance, newUid, SCENARIO_VERSION, validateScenario, type BuiltinInstance, type ScenarioConfig, type ScenarioConfigV1, type ScenarioConfigV2, type StrategyInstance } from "../scenario";
 import { base64urlToBytes, bytesToBase64url } from "./base64url";
 import { compactScenario, expandPayload, FIELD_LABELS, type Dropped, type TopField, type TopValues } from "./compact";
 import { FRAGMENT_PREFIX, MAX_FRAGMENT_CHARS, MAX_JSON_DEPTH, MAX_URL_CHARS } from "./limits";
@@ -161,7 +161,9 @@ export function decodeScenarioLink(hash: string): LoadResult {
     scenario = migrateScenario(v1);
   } else {
     x = expandPayload(payload);
-    scenario = migrateScenario(assemble(x.top, x.strategies.map((s) => (s.kind === "custom" ? newCustomInstance(s.rule) : builtin(s.strategyId, s.config)))));
+    const assembled = assemble(x.top, x.strategies.map((s) => (s.kind === "custom" ? newCustomInstance(s.rule) : builtin(s.strategyId, s.config))));
+    // A version-2 link is a v2 scenario: it goes through the EXISTING migration like any older one.
+    scenario = v === 2 ? migrateScenario({ ...assembled, version: 2 } as ScenarioConfigV2) : assembled;
   }
   const dropped = [...x.dropped, ...settle(scenario, new Set(Object.keys(x.top) as TopField[]))];
   return { kind: "loaded", scenario, dropped, fromVersion: v };
@@ -173,7 +175,7 @@ function builtin(strategyId: string, config: BuiltinInstance["config"]): Builtin
 }
 
 function assemble(top: Partial<TopValues>, strategies: StrategyInstance[]): ScenarioConfig {
-  return { version: 2, ...fallbackValues(), ...top, strategies };
+  return { version: SCENARIO_VERSION, ...fallbackValues(), ...top, strategies };
 }
 
 /**

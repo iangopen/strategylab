@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { validateSessionConfig } from "./engine/types";
 import { MARTINGALE_RULE } from "./engine/rules/examples";
-import { defaultScenario, migrateScenario, newCustomInstance, newStrategyInstance, toSimRequest, validateScenario, type ScenarioConfig, type ScenarioConfigV1 } from "./scenario";
+import {
+  defaultScenario,
+  defaultSportsInput,
+  migrateScenario,
+  newCustomInstance,
+  newStrategyInstance,
+  SPORTS_GAME_ID,
+  sportsScenarioGame,
+  toSimRequest,
+  validateScenario,
+  type ScenarioConfig,
+  type ScenarioConfigV1,
+  type ScenarioConfigV2,
+} from "./scenario";
 
 const withChanges = (c: Partial<ScenarioConfig>): ScenarioConfig => ({ ...defaultScenario(), ...c });
 
@@ -82,7 +95,7 @@ describe("ScenarioConfig", () => {
       ],
     };
     const m = migrateScenario(v1);
-    expect(m.version).toBe(2);
+    expect(m.version).toBe(3); // v1 -> v2 -> v3 (session 8 bumped the version)
     expect(m.strategies).toEqual([
       { uid: "a", kind: "builtin", strategyId: "flat", config: { units: 2 } },
       { uid: "b", kind: "builtin", strategyId: "martingale", config: { multiplier: 3 } },
@@ -111,5 +124,39 @@ describe("ScenarioConfig", () => {
     expect(Object.keys(validateScenario(unmigrated))).toEqual(["strategy:k0:assumedWinProb"]);
     // The migrated scenario is still plain JSON.
     expect(JSON.parse(JSON.stringify(m))).toEqual(m);
+  });
+
+  it("sports odds (v3): the odds inputs compile to an ordinary Game and are the source of truth", () => {
+    const game = sportsScenarioGame(defaultSportsInput());
+    expect(game).toEqual({ presetId: SPORTS_GAME_ID, winProb: 0.5, netPayout: 100 / 110, sports: defaultSportsInput() });
+    const s = withChanges({ game });
+    expect(validateScenario(s)).toEqual({});
+    expect(toSimRequest(s).game).toEqual({ id: "sports", name: "Sports odds", winProb: 0.5, netPayout: 100 / 110 });
+    expect(JSON.parse(JSON.stringify(s))).toEqual(s);
+  });
+
+  it("sports odds: invalid inputs are reported per field; stale derived numbers are caught", () => {
+    const bad = sportsScenarioGame({ ...defaultSportsInput(), sideA: -50, sideB: 0 }, { winProb: 0.5, netPayout: 1 });
+    expect(bad.winProb).toBe(0.5); // previous numbers kept while the inputs are invalid
+    expect(validateScenario(withChanges({ game: bad }))).toEqual({
+      "game.sideA": "American odds must be +100 or higher, or -100 or lower (got -50).",
+      "game.sideB": "American odds must be +100 or higher, or -100 or lower (got 0).",
+    });
+    const est = sportsScenarioGame({ ...defaultSportsInput(), mode: "estimate", estimate: 2 });
+    expect(Object.keys(validateScenario(withChanges({ game: est })))).toEqual(["game.estimate"]);
+    const stale = { ...sportsScenarioGame(defaultSportsInput()), winProb: 0.6 };
+    expect(validateScenario(withChanges({ game: stale })).game).toBe("The game's probability and payout are out of date with its odds.");
+    expect(validateScenario(withChanges({ game: { presetId: SPORTS_GAME_ID, winProb: 0.5, netPayout: 1 } })).game).toBe("Sports odds are missing.");
+    expect(validateScenario(withChanges({ game: { presetId: "european", winProb: 18 / 37, netPayout: 1, sports: defaultSportsInput() } })).game).toBe("Only a sports game has odds inputs.");
+  });
+
+  it("migrates a version 2 scenario to version 3 with the game unchanged", () => {
+    const current = defaultScenario();
+    const v2: ScenarioConfigV2 = { ...current, version: 2, game: { presetId: "custom", winProb: 0.45, netPayout: 1.2 } };
+    const m = migrateScenario(v2);
+    expect(m.version).toBe(3);
+    expect(m.game).toEqual({ presetId: "custom", winProb: 0.45, netPayout: 1.2 });
+    expect({ ...m, version: 2 }).toEqual(v2);
+    expect(validateScenario(m)).toEqual({});
   });
 });

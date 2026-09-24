@@ -83,7 +83,7 @@ describe("scenario links round-trip exactly", () => {
 
   it("the four session 6 example rules, the blank rule, and the every-field rule, with every top-level field non-default", () => {
     const s: ScenarioConfig = {
-      version: 2,
+      version: 3,
       game: { presetId: "custom", winProb: 0.4712345678901234, netPayout: 1.0833333333333333 },
       startBankroll: 1234.56,
       baseBet: 2.5,
