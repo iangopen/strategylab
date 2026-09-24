@@ -200,6 +200,108 @@ Every progression keeps its own level in State and computes the next bet from it
 4. Confirm it appears in the results table with no UI edits.
 5. Update STATUS.
 
+## Rule language
+
+Users define progression strategies without code. A rule is **plain JSON data, never code**: no `eval`, no `new Function`, no dynamic `import`, no string-to-code of any kind (a static-scan test enforces this, like the `Math.random` guard). Rules are validated against the closed grammar below, and anything unrecognized (an unknown key, a wrong type, NaN, ±Infinity, a value out of range, a list that is too long) is REJECTED with a readable error. Reason: session 7 shares scenarios by URL, and a shared link must never be able to execute code.
+
+A valid rule compiles (`src/engine/rules/compile.ts`) into the SAME `Strategy` contract as the built-ins, so every stat, chart, replay and invariant applies unchanged. Compiled strategies are pure and never touch the RNG. Compilation happens in the worker. The main thread runs the SAME validator only to show errors (and compiles for the live W/L preview, which is a fixed script, not a simulation).
+
+### Grammar
+
+```ts
+type Rule = ProgressionRule | SequenceRule;
+
+interface ProgressionRule {
+  kind: "progression";
+  name: string;          // 1–40 characters, no control characters; the column label
+  startUnits: number;    // 0.01–1000 (bet = base bet × units)
+  onWin:  Entry[];       // 1–10 entries
+  onLoss: Entry[];       // 1–10 entries
+}
+
+// Every entry except the LAST must have "when". The last must NOT (it is the default).
+interface Entry { when?: Condition; then: Action }
+
+type Condition =
+  | { type: "winStreak";   atLeast: number }        // integer 1–100: consecutive wins (this round included)
+  | { type: "lossStreak";  atLeast: number }        // integer 1–100: consecutive losses (this round included)
+  | { type: "cycleProfit"; atLeast: number }        // −1000..1000 base units of profit since the cycle began
+  | { type: "bankroll";    op: ">=" | "<="; pct: number } // 0–1000: bankroll vs pct% of the starting bankroll
+  | { type: "betUnits";    atLeast: number };       // 0.01–1,000,000: units of the bet just placed (before this action)
+
+type Action =
+  | { type: "set";      units: number }             // 0.01–1,000,000
+  | { type: "multiply"; by: number }                // 0.1–10
+  | { type: "add";      units: number }             // −1000..1000 (0 keeps the units unchanged)
+  | { type: "reset" }                               // units = startUnits
+  | { type: "resetCycle" }                          // units = startUnits, cycle profit = 0, both streaks = 0
+  | { type: "stop" };                               // the next bet is "stop" (endReason strategyStop)
+
+interface SequenceRule {                            // custom Labouchère
+  kind: "sequence";
+  name: string;                                     // as above
+  line: number[];                                   // 1–20 entries, each an integer 1–100
+  onComplete: "restart" | "stop";
+}
+```
+
+Objects must be plain objects with exactly the listed keys (optional `when` aside). Numbers must be finite. Integer fields reject fractions. A non-final entry without `when` is rejected (it would make every later entry unreachable), and so is a final entry with one.
+
+### Evaluation order (progression)
+
+State: `units` (starts at `startUnits`), `winStreak`, `lossStreak`, `cycleProfit` (cents), `stopped`, and `start` (the starting bankroll, copied from `ctx.bankroll` at `init`).
+
+- **nextBet:** `"stop"` if `stopped`; otherwise `min(baseBet × units, Number.MAX_SAFE_INTEGER)`. The runner rounds, applies table limits and checks the bankroll, as for every strategy.
+- **update(won, ctx)**, in this order:
+  1. Streaks: a win adds 1 to `winStreak` and sets `lossStreak` to 0; a loss does the opposite.
+  2. Cycle profit: `+ round(ctx.lastBet × netPayout)` on a win, `− ctx.lastBet` on a loss. This is the PLACED bet (after table rules), the same arithmetic the runner uses, so it equals the real bankroll change.
+  3. Pick the list (`onWin` or `onLoss`) and walk it TOP TO BOTTOM. The FIRST entry whose `when` holds, or that has no `when`, is the match. Conditions see the post-round bankroll (`ctx.bankroll`), the updated streaks and cycle profit, and the units of the bet just placed. `cycleProfit` compares against `atLeast × baseBet`; `bankroll` compares against `start × pct / 100`.
+  4. Apply that entry's ONE action. After `set` / `multiply` / `add`, units are clamped to [0.01, `Number.MAX_SAFE_INTEGER`] (the session 2 overflow guard: units never become Infinity or ≤ 0).
+
+Work per round is O(entries) (at most 10 condition checks), with no loops over history.
+
+### Evaluation (sequence)
+
+Exactly the built-in Labouchère: bet (first + last) × base, or the single number × base. A win removes the first and last numbers. A loss appends the units just bet. An empty line either restarts from `line` or stops. The line is immutable in State. Appending on a loss copies the line, so a loss costs O(line length), as in the built-in.
+
+### Limits (enforced by the validator)
+
+At most 10 entries per list, 20 numbers per sequence line, and 40 characters per name. JSON pasted into the builder is capped at 20,000 characters. Every numeric field has the range shown above. Bet units are clamped as described, and the returned bet is capped at `MAX_SAFE_INTEGER`, the same guard Martingale and Fibonacci use.
+
+### Worked examples (base bet = 1 unit; "next" = the bet after the script)
+
+**1. Double after a loss (Martingale ×2):**
+
+```json
+{ "kind": "progression", "name": "Double after a loss", "startUnits": 1,
+  "onWin":  [ { "then": { "type": "reset" } } ],
+  "onLoss": [ { "then": { "type": "multiply", "by": 2 } } ] }
+```
+
+Script `LLLWLW` → bets 1, 2, 4, 8, 1, 2, next 1. Each loss doubles, and each win resets to 1.
+
+**2. Double after a win, three-win cap (Paroli cap 3):**
+
+```json
+{ "kind": "progression", "name": "Double after a win, cap 3", "startUnits": 1,
+  "onWin":  [ { "when": { "type": "winStreak", "atLeast": 3 }, "then": { "type": "resetCycle" } },
+              { "then": { "type": "multiply", "by": 2 } } ],
+  "onLoss": [ { "then": { "type": "reset" } } ] }
+```
+
+Script `WWWWLW` → bets 1, 2, 4, 1, 2, 1, next 2. On the third win the streak reaches 3, so the first entry matches and `resetCycle` zeroes the streak. The fourth win is then streak 1 again and doubles. If the action were plain `reset`, the streak would still read 4 and the fourth win would reset again, which is why `resetCycle` clears the streaks.
+
+**3. Flat bet, stop once 20% up** (start $100, base $10, even money):
+
+```json
+{ "kind": "progression", "name": "Flat, stop at +20%", "startUnits": 1,
+  "onWin":  [ { "when": { "type": "bankroll", "op": ">=", "pct": 120 }, "then": { "type": "stop" } },
+              { "then": { "type": "reset" } } ],
+  "onLoss": [ { "then": { "type": "reset" } } ] }
+```
+
+Script `WLWW` → bankroll 110, 100, 110, 120. Bets 1, 1, 1, 1, then "stop": after the fourth round the bankroll is 120 ≥ 120% of 100, so `stop` fires and the session ends `strategyStop`.
+
 ---
 
 ## Roadmap
