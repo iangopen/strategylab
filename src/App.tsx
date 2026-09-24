@@ -13,7 +13,7 @@ import { baseUrl, bootFromLocation, canonicalizeAddressBar, noticeOf, pageLinkLo
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls, type CopyStatus } from "./ui/RunControls";
 import { copyBlocker, encodeScenarioLink } from "./share/link";
-import { instanceLabel } from "./ui/format";
+import { formatElapsed, instanceLabel } from "./ui/format";
 import { previewContextOf } from "./ui/rules/preview";
 import { StrategyPicker } from "./ui/StrategyPicker";
 import { applyThemePref, loadThemePref, type ThemePref } from "./ui/theme";
@@ -39,7 +39,8 @@ export default function App() {
   const [copyStatus, setCopyStatus] = useState<CopyStatus | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
+  // null until the first run starts: the counter shows "—" rather than claiming a run took "<0.1s".
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [run, setRun] = useState<CompletedRun | null>(null);
   const client = useRef<SimClient | null>(null);
@@ -145,7 +146,7 @@ export default function App() {
       setSelectedSession(null);
       setReplay(null);
       setReplayStatus(null);
-      setStatus(`Done: ${result.nSessions.toLocaleString("en-US")} sessions in ${(ms / 1000).toFixed(1)}s.`);
+      setStatus(`Done: ${result.nSessions.toLocaleString("en-US")} sessions in ${formatElapsed(ms)}.`);
     } catch (err) {
       setStatus(err instanceof CancelledError ? "Cancelled. Previous results (if any) are kept." : `Error: ${(err as Error).message}`);
     } finally {

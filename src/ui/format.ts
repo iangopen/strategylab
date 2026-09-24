@@ -45,3 +45,8 @@ export function instanceLabel(instances: readonly StrategyInstance[], index: num
   const total = labels.filter((l) => l === label).length;
   return total > 1 ? `${label} #${sameBefore}` : label;
 }
+
+/** Elapsed run time for display: "<0.1s" under 100 ms (never a misleading "0.0s"), else one decimal. */
+export function formatElapsed(ms: number): string {
+  return ms < 100 ? "<0.1s" : `${(ms / 1000).toFixed(1)}s`;
+}

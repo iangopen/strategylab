@@ -1,3 +1,5 @@
+import { formatElapsed } from "./format";
+
 /** Outcome of the last "Copy link" click. View state, not scenario state. */
 export type CopyStatus =
   | { kind: "copied"; urlLength: number; leftOut: string[] }
@@ -8,7 +10,8 @@ interface Props {
   running: boolean;
   canRun: boolean;
   progress: number;
-  elapsedMs: number;
+  /** null before the first run. */
+  elapsedMs: number | null;
   status: string | null;
   onRun: () => void;
   onCancel: () => void;
@@ -30,7 +33,7 @@ export function RunControls({ running, canRun, progress, elapsedMs, status, onRu
         </button>
         <progress max={1} value={progress} aria-label="Simulation progress" />
         <span className="mono">{Math.round(progress * 100)}%</span>
-        <span className="mono">{(elapsedMs / 1000).toFixed(1)}s</span>
+        <span className="mono" data-testid="elapsed">{elapsedMs === null ? "—" : formatElapsed(elapsedMs)}</span>
         {/* Disabled buttons don't show tooltips in every browser, so the wrapper carries it too. */}
         <span className="copy-link" title={copyBlocker ?? "Copy a link to this scenario. Opening it restores these settings and strategies."}>
           <button type="button" disabled={copyBlocker !== null} onClick={onCopyLink} aria-describedby={copyBlocker ? "copy-link-why" : undefined}>
