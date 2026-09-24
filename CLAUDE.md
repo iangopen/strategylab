@@ -101,6 +101,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 ### Also non-negotiable
 
 - **All scenario state lives in one serializable `ScenarioConfig`** (`src/scenario.ts`, plain JSON). No scenario state hidden in component-local state. Reason: URL sharing must stay trivial.
+- **If an approved decision turns out wrong mid-session, STOP and ask before changing it.** (Added in session 12, after session 11 swapped an approved option for a variant and only reported it afterwards.)
 - **Statistical tests use standard-error tolerances**, never hand-picked constants. Tolerance = 4 × SE computed in the test from the samples, and the test prints the SE. Fixed seeds keep them deterministic; SE-based bounds keep them honest. Do NOT increase nSessions or loosen tolerances just to make a test pass. If an invariant test fails, the engine is presumed wrong until proven otherwise.
 
 ---
