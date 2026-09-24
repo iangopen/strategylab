@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "lint": "oxlint",
     "preview": "vite preview",
-    "build:pages": "cross-env VITE_BASE=/strategylab/ npm run build"
+    "build:pages": "cross-env VITE_BASE=/strategylab/ npm run build",
+    "preview:pages": "cross-env VITE_BASE=/strategylab/ vite preview --port 4180 --strictPort",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "comlink": "^4.4.2",
@@ -18,6 +20,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
