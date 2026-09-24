@@ -3,7 +3,8 @@ import { edge, type Game } from "./games";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
 import { addSession, createAccumulator, type Accumulator } from "./stats/accumulator";
-import { BAND_SESSIONS, BandRecorder, checkpointRounds, type Bands } from "./stats/bands";
+import { checkpointRounds } from "./checkpoints";
+import { BAND_SESSIONS, BandRecorder, type Bands } from "./stats/bands";
 import { sharedHistogram } from "./stats/histogram";
 import { STATS } from "./stats/registry";
 import type { RunContext, StatDef } from "./stats/types";
@@ -82,7 +83,8 @@ export function runMonteCarlo(
   const paths: SamplePath[][] = strategies.map(() => []);
   // Percentile bands: the first min(BAND_SESSIONS, n) session indices, the SAME for every strategy
   // (CRN), are observed round by round; only checkpoint values are kept, so memory does not
-  // depend on maxRounds. Early-ending sessions carry their final bankroll forward.
+  // depend on maxRounds. Checkpoints are adaptive (every round to 64, then geometric, capped): they
+  // change only what is recorded, never the session. Early-ending sessions carry their final bankroll forward.
   const bandSessions = Math.min(BAND_SESSIONS, nSessions);
   const bandRounds = checkpointRounds(config.maxRounds);
   const bandRecorders = strategies.map(() => new BandRecorder(bandRounds, bandSessions));

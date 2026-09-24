@@ -5,27 +5,12 @@ import { sessionSeed } from "../rng";
 import { runSession } from "../runner";
 import { STRATEGIES } from "../strategies/registry";
 import { INVARIANT_SCENARIO, sessionConfig } from "../testUtils";
-import { BAND_SESSIONS, BandRecorder, checkpointRounds } from "./bands";
+import { checkpointRounds } from "../checkpoints";
+import { BAND_SESSIONS, BandRecorder } from "./bands";
 import { quantileSorted, sortedCopy } from "./quantile";
 
 const european = GAME_PRESETS.find((g) => g.id === "european")!;
 const allSpecs = STRATEGIES.map((strategy) => ({ strategy, config: { ...strategy.defaultConfig } }));
-
-describe("checkpointRounds", () => {
-  it("round 0 plus min(200, maxRounds) evenly spaced rounds ending at maxRounds", () => {
-    const a = checkpointRounds(1000);
-    expect(a).toHaveLength(201);
-    expect([a[0], a[1], a[2], a[200]]).toEqual([0, 5, 10, 1000]);
-    expect(Array.from(checkpointRounds(5))).toEqual([0, 1, 2, 3, 4, 5]);
-    for (const m of [1, 7, 199, 200, 201, 333, 1_000_000]) {
-      const cp = checkpointRounds(m);
-      expect(cp[0]).toBe(0);
-      expect(cp[cp.length - 1]).toBe(m);
-      expect(cp.length).toBe(Math.min(200, m) + 1);
-      for (let i = 1; i < cp.length; i++) expect(cp[i]!).toBeGreaterThan(cp[i - 1]!);
-    }
-  });
-});
 
 describe("BandRecorder", () => {
   it("carries a session that ends at round 1 forward to every later checkpoint", () => {
@@ -53,7 +38,7 @@ describe("bands in runMonteCarlo", () => {
   it("first min(2000, n) sessions; p5 <= p25 <= p50 <= p75 <= p95 at every checkpoint; round 0 = start; last checkpoint = type-7 percentiles of the subset's finals", () => {
     const n = 2500; // more than BAND_SESSIONS, so the subset cap is exercised
     const r = runMonteCarlo(european, allSpecs, INVARIANT_SCENARIO, n, 7);
-    expect(r.bands.rounds).toHaveLength(201);
+    expect(Array.from(r.bands.rounds)).toEqual(Array.from(checkpointRounds(INVARIANT_SCENARIO.maxRounds))); // the adaptive schedule (253 at 1,000 rounds)
     expect(r.bands.sessions).toBe(BAND_SESSIONS);
     for (const [k, s] of r.perStrategy.entries()) {
       const b = s.bands;
@@ -90,6 +75,22 @@ describe("bands in runMonteCarlo", () => {
     const b = r.perStrategy[0]!.bands;
     for (let ci = 1; ci < r.bands.rounds.length; ci++) {
       for (const p of [b.p5, b.p25, b.p50, b.p75, b.p95]) expect(p[ci]).toBe(p[1]); // flat after round 1
+    }
+  });
+});
+
+describe("the band observer never leaks into a session", () => {
+  it("runSession with a band observer on the adaptive schedule deep-equals runSession without one (9 strategies, 300 sessions each)", () => {
+    const cfg = sessionConfig({ startBankroll: 100_000, baseBet: 1_000, tableMin: 100, stopWin: 110_000, maxRounds: 1000 });
+    const specs = [...allSpecs.map((s) => (s.strategy.id === "kelly" ? { ...s, config: { assumedWinProb: 0.6, fraction: 1 } } : s))];
+    for (const { strategy, config } of specs) {
+      const rec = new BandRecorder(checkpointRounds(cfg.maxRounds), 300);
+      for (let i = 0; i < 300; i++) {
+        const band = rec.observe(i);
+        const observed = runSession(european, strategy, config, cfg, sessionSeed(55, i), { observer: band.observer, recordPath: true });
+        band.finish(observed.finalBankroll);
+        expect(observed).toEqual(runSession(european, strategy, config, cfg, sessionSeed(55, i), { recordPath: true }));
+      }
     }
   });
 });

@@ -3,8 +3,6 @@ import { quantileSorted } from "./quantile";
 
 /** Band subset: the first min(BAND_SESSIONS, nSessions) session indices, the SAME for every strategy. */
 export const BAND_SESSIONS = 2000;
-/** Checkpoints after round 0: at most this many, evenly spaced across maxRounds. */
-export const BAND_CHECKPOINTS = 200;
 export const BAND_PERCENTILES = [0.05, 0.25, 0.5, 0.75, 0.95] as const;
 
 export interface Bands {
@@ -16,19 +14,10 @@ export interface Bands {
 }
 
 /**
- * Checkpoint rounds: 0 (the starting bankroll), then C = min(200, maxRounds) rounds
- * round(j * maxRounds / C) for j = 1..C. Strictly increasing; the last is maxRounds.
- */
-export function checkpointRounds(maxRounds: number): Float64Array {
-  const c = Math.min(BAND_CHECKPOINTS, maxRounds);
-  const out = new Float64Array(c + 1);
-  for (let j = 1; j <= c; j++) out[j] = Math.round((j * maxRounds) / c);
-  return out;
-}
-
-/**
- * Records bankroll at each checkpoint for a fixed subset of sessions, for one strategy.
- * Memory: (checkpoints + 1) × subset numbers, independent of maxRounds.
+ * Records bankroll at each checkpoint for a fixed subset of sessions, for one strategy. The checkpoint
+ * rounds come from checkpointRounds (../checkpoints.ts) and may be unevenly spaced; any strictly
+ * increasing list of rounds starting at 0 works. Memory: checkpoints × subset numbers (at most
+ * 287 × 2,000 doubles, 4.6 MB), independent of maxRounds.
  * Sessions that end early carry their final bankroll forward to every later checkpoint.
  */
 export class BandRecorder {
