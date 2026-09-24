@@ -1,6 +1,7 @@
 import { CUSTOM_GAME_ID, edge, findPreset, GAME_PRESETS } from "../engine/games";
-import { MAX_SEED, type ScenarioConfig } from "../scenario";
+import { defaultSportsInput, MAX_SEED, SPORTS_GAME_ID, sportsScenarioGame, type ScenarioConfig } from "../scenario";
 import { NumberField } from "./NumberField";
+import { SportsOddsFields } from "./SportsOddsFields";
 
 interface Props {
   scenario: ScenarioConfig;
@@ -18,11 +19,17 @@ function randomSeed(): number {
 export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) {
   const set = <K extends keyof ScenarioConfig>(key: K, value: ScenarioConfig[K]) => onChange({ ...s, [key]: value });
   const isCustom = s.game.presetId === CUSTOM_GAME_ID;
+  const sports = s.game.presetId === SPORTS_GAME_ID && s.game.sports ? { ...s.game, sports: s.game.sports } : null;
   const e = edge(s.game);
 
   function choosePreset(presetId: string) {
+    if (presetId === SPORTS_GAME_ID) {
+      set("game", sportsScenarioGame(defaultSportsInput(), s.game));
+      return;
+    }
     const preset = findPreset(presetId);
-    set("game", preset ? { presetId, winProb: preset.winProb, netPayout: preset.netPayout } : { ...s.game, presetId });
+    // Leaving sports mode drops the odds inputs; custom keeps the current numbers as a starting point.
+    set("game", preset ? { presetId, winProb: preset.winProb, netPayout: preset.netPayout } : { presetId, winProb: s.game.winProb, netPayout: s.game.netPayout });
   }
 
   return (
@@ -38,9 +45,13 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
               </option>
             ))}
             <option value={CUSTOM_GAME_ID}>Custom</option>
+            <option value={SPORTS_GAME_ID}>Sports odds</option>
           </select>
         </label>
       </div>
+      {sports ? (
+        <SportsOddsFields game={sports} onChange={(game) => set("game", game)} errors={errors} disabled={disabled} />
+      ) : (
       <div className="row">
         <NumberField
           label="Win probability"
@@ -55,9 +66,10 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
           disabled={disabled || !isCustom}
         />
       </div>
+      )}
       {errors.game ? (
         <div className="error">{errors.game}</div>
-      ) : (
+      ) : sports ? null : (
         <div className="derived">
           {e >= 0 ? "House edge" : "Player edge"}: <strong>{(Math.abs(e) * 100).toFixed(3)}%</strong> of every dollar wagered
         </div>

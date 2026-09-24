@@ -11,15 +11,21 @@ interface Props {
   help?: string | undefined;
   disabled?: boolean;
   prefix?: string;
+  /**
+   * How a value is SHOWN when it comes from outside (first render, or an external change such as an
+   * exact format conversion). The stored value is never rounded by this; it changes only when the
+   * user edits the field. Default: String(value).
+   */
+  format?: (value: number) => string;
 }
 
 /**
  * Numeric input. The raw text being typed is kept locally only as an editing draft;
  * every parseable value is committed to the ScenarioConfig immediately.
  */
-export function NumberField({ label, value, onChange, optional, placeholder, error, help, disabled, prefix }: Props) {
+export function NumberField({ label, value, onChange, optional, placeholder, error, help, disabled, prefix, format = String }: Props) {
   const id = useId();
-  const [text, setText] = useState(value === null ? "" : String(value));
+  const [text, setText] = useState(value === null ? "" : format(value));
   const [parseError, setParseError] = useState<string | null>(null);
   const [seenValue, setSeenValue] = useState(value);
 
@@ -27,7 +33,7 @@ export function NumberField({ label, value, onChange, optional, placeholder, err
   if (value !== seenValue) {
     setSeenValue(value);
     if (parse(text) !== value) {
-      setText(value === null ? "" : String(value));
+      setText(value === null ? "" : format(value));
       setParseError(null);
     }
   }
