@@ -78,8 +78,8 @@ const HistogramPanel = memo(function HistogramPanel({ index, label, edges, perce
       const top = f.y(h);
       f.ctx.fillRect(x0 + 0.5, top, Math.max(1, x1 - x0 - 1), base - top);
     });
-    refLineV(f, start, "Start", cssColor("--chart-ref"));
-    chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, mode, bins: percents.length, bars, color, theme: effectiveTheme() });
+    const startLabel = refLineV(f, start, "Start", cssColor("--chart-ref"));
+    chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, mode, bins: percents.length, bars, color, theme: effectiveTheme(), refLabels: JSON.stringify(startLabel ? [startLabel] : []) });
     countDraw(c);
   }, [width, theme, edges, percents, x, y, mode, start, colorVar]);
 

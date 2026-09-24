@@ -340,3 +340,69 @@ const END_TEXT: Record<EndReason, string> = {
 export function endText(reason: EndReason, rounds: number): string {
   return `${END_TEXT[reason]} after ${rounds.toLocaleString("en-US")} round${rounds === 1 ? "" : "s"}`;
 }
+
+// ---------------------------------------------------------------- reference-label placement
+
+/** A reference label to place: its line's pixel y, which end it sits at, and its text size. */
+export interface LabelRequest {
+  label: string;
+  /** Pixel y of the reference line. */
+  lineY: number;
+  align: "left" | "right";
+  /** Measured text width and height, px. */
+  width: number;
+  height: number;
+}
+
+/** Where a label goes: its knockout box (text + padding), in canvas CSS px. */
+export interface PlacedLabel {
+  label: string;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  /** Text anchor inside the box. */
+  textX: number;
+  textY: number;
+  /** True when it was moved off its default spot (above the line) to avoid another label or the edge. */
+  moved: boolean;
+}
+
+export const LABEL_PAD = 2;
+const LABEL_GAP = 2;
+
+const overlaps = (a: PlacedLabel, b: PlacedLabel) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+/**
+ * Places reference labels so that no two boxes overlap and none leaves the plot vertically. Each
+ * label prefers the spot just above its line, then just below it, then the nearest spot above or
+ * below the labels it collides with. Pure: the canvas layer draws what this returns.
+ */
+export function placeLabels(requests: readonly LabelRequest[], plot: { left: number; width: number; top: number; height: number }): PlacedLabel[] {
+  const placed: PlacedLabel[] = [];
+  const bottom = plot.top + plot.height;
+  for (const r of requests) {
+    const w = r.width + 2 * LABEL_PAD;
+    const h = r.height + 2 * LABEL_PAD;
+    const x0 = r.align === "right" ? plot.left + plot.width - 2 - w : plot.left + 2;
+    const at = (y0: number, moved: boolean): PlacedLabel => ({
+      label: r.label,
+      x0,
+      x1: x0 + w,
+      y0,
+      y1: y0 + h,
+      textX: r.align === "right" ? x0 + w - LABEL_PAD : x0 + LABEL_PAD,
+      textY: y0 + h - LABEL_PAD,
+      moved,
+    });
+    const fits = (c: PlacedLabel) => c.y0 >= plot.top && c.y1 <= bottom && placed.every((p) => !overlaps(c, p));
+    const candidates = [at(r.lineY - LABEL_GAP - h, false), at(r.lineY + LABEL_GAP, true)];
+    // Then just above / below every label it could collide with, nearest to the line first.
+    for (const p of placed) candidates.push(at(p.y0 - LABEL_GAP - h, true), at(p.y1 + LABEL_GAP, true));
+    const rest = candidates.slice(2).sort((a, b) => Math.abs(a.y0 - r.lineY) - Math.abs(b.y0 - r.lineY));
+    const choice = [...candidates.slice(0, 2), ...rest].find(fits);
+    // Nothing fits (more labels than the plot can hold): keep it above its line, clamped inside the plot.
+    placed.push(choice ?? at(Math.max(plot.top, Math.min(bottom - h, r.lineY - LABEL_GAP - h)), true));
+  }
+  return placed;
+}

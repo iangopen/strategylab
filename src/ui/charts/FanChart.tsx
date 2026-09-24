@@ -3,7 +3,7 @@ import type { MonteCarloResult } from "../../engine/montecarlo";
 import { formatStat } from "../format";
 import { effectiveTheme, useThemeVersion } from "../theme";
 import { countTick, fanScales, fanSeries, moneyTick, nearestIndex, nearestPath, niceTicks, referenceLines, seriesColorVar, type ChartRefs, type FanSeries, type Range } from "./adapters";
-import { chartState, clipToPlot, countDraw, crosshairV, cssColor, drawAxes, fillBand, overlayCtx, plotMapping, prepareFrame, refLineH, strokeLine, useContainerWidth, type LabelBox } from "./canvas";
+import { chartState, clipToPlot, countDraw, crosshairV, cssColor, drawAxes, drawRefLines, fillBand, overlayCtx, plotMapping, prepareFrame, strokeLine, useContainerWidth } from "./canvas";
 
 const PANEL_HEIGHT = 220;
 
@@ -86,17 +86,14 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, refs, onPi
     const unclip = clipToPlot(f);
     fillBand(f, series.outer, color, 0.16);
     fillBand(f, series.inner, color, 0.32);
-    const labels: LabelBox[] = [];
-    for (const r of referenceLines(refs)) {
-      const box = refLineH(f, r.value, r.label, cssColor("--chart-ref"), r.kind === "start" ? "left" : "right");
-      if (box) labels.push(box);
-    }
     series.paths.forEach((p, i) => {
       if (i !== selectedSession) strokeLine(f, p, color, 1, 0.22);
     });
     strokeLine(f, series.median, color, 2.5);
     const sel = selectedSession === null ? undefined : series.paths[selectedSession];
     if (sel) strokeLine(f, sel, cssColor("--text"), 1.5, 0.9);
+    // Reference lines and their knocked-out labels go on top of the data, so text never sits on paths.
+    const labels = drawRefLines(f, referenceLines(refs).map((r) => ({ value: r.value, label: r.label, align: r.kind === "start" ? "left" : "right" })), cssColor("--chart-ref"));
     unclip();
     chartState(c, { xMin: x.min, xMax: x.max, yMin: y.min, yMax: y.max, paths: series.paths.length, color, theme: effectiveTheme(), refLabels: JSON.stringify(labels), selected: selectedSession });
     countDraw(c);

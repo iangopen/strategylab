@@ -1,6 +1,6 @@
 // Thin Canvas 2D drawing layer. Components call these; all data shaping happens in adapters.ts.
 import { useEffect, useRef, useState } from "react";
-import type { Band, Line, Range } from "./adapters";
+import { placeLabels, type Band, type Line, type Range } from "./adapters";
 
 /** Reads a CSS custom property at draw time, so charts follow the current theme. */
 export function cssColor(name: string, fallback = "#888"): string {
@@ -116,38 +116,68 @@ export function strokeLine(f: Frame, l: Line, color: string, width: number, alph
   ctx.restore();
 }
 
-/** Where a reference label was drawn, in CSS pixels (exposed to tests; see chartState). */
+/** Where a reference label was drawn (its knockout box), in CSS pixels. Exposed to tests via chartState. */
 export interface LabelBox {
   label: string;
   x0: number;
   x1: number;
   y0: number;
   y1: number;
+  /** A background knockout was painted behind the text, so it never sits directly on data. */
+  knockout: boolean;
+  /** Moved off its default spot to avoid another label or the plot edge. */
+  moved: boolean;
 }
 
-/** Dashed horizontal reference line with a small label above it, at the left or right end. Returns the label's box. */
-export function refLineH(f: Frame, value: number, label: string, color: string, align: "left" | "right" = "right"): LabelBox | null {
+const LABEL_FONT = "10px system-ui, sans-serif";
+const LABEL_HEIGHT = 10;
+
+/** Paints a knockout (the panel background, theme-aware) and then the label text on top of it. */
+function knockoutText(ctx: CanvasRenderingContext2D, text: string, box: { x0: number; x1: number; y0: number; y1: number }, textX: number, textY: number, align: CanvasTextAlign, color: string): void {
+  ctx.save();
+  ctx.fillStyle = cssColor("--panel", "#fff");
+  ctx.globalAlpha = 0.92;
+  ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+  ctx.globalAlpha = 1;
+  ctx.font = LABEL_FONT;
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = "bottom";
+  ctx.fillText(text, textX, textY);
+  ctx.restore();
+}
+
+export interface RefLine {
+  value: number;
+  label: string;
+  align: "left" | "right";
+}
+
+/**
+ * Horizontal reference lines (dashed) with their labels placed by placeLabels (never overlapping,
+ * never leaving the plot) and drawn on a knockout, AFTER the data, so text never sits on paths.
+ * Returns the drawn label boxes.
+ */
+export function drawRefLines(f: Frame, lines: readonly RefLine[], color: string): LabelBox[] {
   const { ctx } = f;
-  const py = Math.round(f.y(value)) + 0.5;
-  if (py < f.top || py > f.top + f.height) return null;
+  const visible = lines.map((l) => ({ ...l, py: Math.round(f.y(l.value)) + 0.5 })).filter((l) => l.py >= f.top && l.py <= f.top + f.height);
   ctx.save();
   ctx.setLineDash([5, 4]);
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(f.left, py);
-  ctx.lineTo(f.left + f.width, py);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.font = "10px system-ui, sans-serif";
-  ctx.fillStyle = color;
-  ctx.textAlign = align;
-  ctx.textBaseline = "bottom";
-  const x = align === "right" ? f.left + f.width - 2 : f.left + 4;
-  ctx.fillText(label, x, py - 2);
-  const w = ctx.measureText(label).width;
+  for (const l of visible) {
+    ctx.beginPath();
+    ctx.moveTo(f.left, l.py);
+    ctx.lineTo(f.left + f.width, l.py);
+    ctx.stroke();
+  }
+  ctx.font = LABEL_FONT;
+  const requests = visible.map((l) => ({ label: l.label, lineY: l.py, align: l.align, width: ctx.measureText(l.label).width, height: LABEL_HEIGHT }));
   ctx.restore();
-  return { label, x0: align === "right" ? x - w : x, x1: align === "right" ? x : x + w, y0: py - 2 - 10, y1: py - 2 };
+  return placeLabels(requests, f).map((p, i) => {
+    knockoutText(ctx, p.label, p, p.textX, p.textY, visible[i]!.align, color);
+    return { label: p.label, x0: p.x0, x1: p.x1, y0: p.y0, y1: p.y1, knockout: true, moved: p.moved };
+  });
 }
 
 /**
@@ -168,11 +198,11 @@ export function countDraw(el: HTMLElement): void {
   el.dataset.draws = String(Number(el.dataset.draws ?? "0") + 1);
 }
 
-/** Dashed vertical marker line with a label at the top. */
-export function refLineV(f: Frame, value: number, label: string, color: string): void {
+/** Dashed vertical marker line with a label (on a knockout) at the top. Returns the label box. */
+export function refLineV(f: Frame, value: number, label: string, color: string): LabelBox | null {
   const { ctx } = f;
   const px = Math.round(f.x(value)) + 0.5;
-  if (px < f.left || px > f.left + f.width) return;
+  if (px < f.left || px > f.left + f.width) return null;
   ctx.save();
   ctx.setLineDash([5, 4]);
   ctx.strokeStyle = color;
@@ -180,13 +210,14 @@ export function refLineV(f: Frame, value: number, label: string, color: string):
   ctx.moveTo(px, f.top);
   ctx.lineTo(px, f.top + f.height);
   ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.font = "10px system-ui, sans-serif";
-  ctx.fillStyle = color;
-  ctx.textAlign = px > f.left + f.width - 60 ? "right" : "left";
-  ctx.textBaseline = "top";
-  ctx.fillText(label, px + (ctx.textAlign === "left" ? 3 : -3), f.top + 2);
+  ctx.font = LABEL_FONT;
+  const w = ctx.measureText(label).width;
   ctx.restore();
+  const right = px > f.left + f.width - 60;
+  const x0 = right ? px - 3 - w - 2 : px + 3 - 2;
+  const box = { x0, x1: x0 + w + 4, y0: f.top + 1, y1: f.top + 1 + LABEL_HEIGHT + 4 };
+  knockoutText(ctx, label, box, right ? box.x1 - 2 : box.x0 + 2, box.y1 - 2, right ? "right" : "left", color);
+  return { label, ...box, knockout: true, moved: false };
 }
 
 /** Sizes an overlay canvas for the device pixel ratio, clears it, and returns its 2D context. */

@@ -18,7 +18,7 @@ import {
   type Line,
   type Range,
 } from "./adapters";
-import { chartState, clipToPlot, countDraw, crosshairV, cssColor, drawAxes, MARGIN, overlayCtx, prepareFrame, refLineH, strokeLine, useContainerWidth, type Frame } from "./canvas";
+import { chartState, clipToPlot, countDraw, crosshairV, cssColor, drawAxes, MARGIN, overlayCtx, prepareFrame, drawRefLines, strokeLine, useContainerWidth, type Frame } from "./canvas";
 
 interface Props {
   nSessions: number;
@@ -127,8 +127,9 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
     // 1. Bankroll, one line per strategy, with end markers.
     const fb = prepareFrame(bank.current, width, BANK_H, x, layout.bankrollY);
     drawAxes(fb, xTicks, niceTicks(0, layout.bankrollY.max, 4), countTick, moneyTick);
-    for (const r of referenceLines(refs)) refLineH(fb, r.value, r.label, cssColor("--chart-ref"), r.kind === "start" ? "left" : "right");
     drawLines(fb, layout.bankroll);
+    // Reference lines and knocked-out labels on top of the bankroll lines.
+    const refLabels = drawRefLines(fb, referenceLines(refs).map((r) => ({ value: r.value, label: r.label, align: r.kind === "start" ? "left" : "right" })), cssColor("--chart-ref"));
     layout.bankroll.forEach((l, k) => {
       const n = l.x.length;
       if (n === 0) return;
@@ -165,7 +166,7 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
       }
     }
     unclipStrip();
-    chartState(bank.current, { xMin: x.min, xMax: x.max, fullXMax: layout.x.max, zoom: zoom ? `${zoom.min}-${zoom.max}` : "full", lines: layout.bankroll.length, firstEnding: firstEndingRound(replay), theme: effectiveTheme() });
+    chartState(bank.current, { xMin: x.min, xMax: x.max, fullXMax: layout.x.max, zoom: zoom ? `${zoom.min}-${zoom.max}` : "full", lines: layout.bankroll.length, refLabels: JSON.stringify(refLabels), firstEnding: firstEndingRound(replay), theme: effectiveTheme() });
     chartState(bets.current, { yMax: layout.betY.max, lines: layout.bets.length });
     chartState(strip.current, { cells: stripCells(replay).length });
     countDraw(bank.current);

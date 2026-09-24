@@ -25,6 +25,8 @@ import {
   niceTicks,
   referenceLines,
   seriesColorVar,
+  placeLabels,
+  LABEL_PAD,
 } from "./adapters";
 
 /** Minimal hand-built result: only the fields the adapters read. */
@@ -272,5 +274,55 @@ describe("replay zoom (pure)", () => {
     expect(zoomFromDrag(300, 100, full)).toEqual({ min: 100, max: 300 }); // reversed drag
     expect(zoomFromDrag(-50, 2000, full)).toEqual({ min: 0, max: 1000 }); // clamped to full
     expect(zoomFromDrag(100, 100.5, full)).toBeNull(); // span < 2 rounds
+  });
+});
+
+describe("placeLabels (reference labels never overlap, never leave the plot)", () => {
+  const plot = { left: 58, width: 300, top: 10, height: 186 };
+  const req = (label: string, lineY: number, align: "left" | "right", width = 40) => ({ label, lineY, align, width, height: 10 });
+  const overlap = (a: { x0: number; x1: number; y0: number; y1: number }, b: typeof a) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+  it("the default spot is just above the line, at its end; left and right labels on the same line both stay above", () => {
+    const [start, target] = placeLabels([req("Start", 100, "left"), req("Win target", 100, "right")], plot);
+    expect(start!.moved).toBe(false);
+    expect(target!.moved).toBe(false);
+    expect(start!.y1).toBeLessThanOrEqual(100);
+    expect(start!.x0).toBe(plot.left + 2);
+    expect(target!.x1).toBe(plot.left + plot.width - 2);
+  });
+
+  it("two labels at the same end on nearby lines: the second moves (below its line) instead of overlapping", () => {
+    const [a, b] = placeLabels([req("Win target", 100, "right"), req("Loss floor", 103, "right")], plot);
+    expect(a!.moved).toBe(false);
+    expect(b!.moved).toBe(true);
+    expect(overlap(a!, b!)).toBe(false);
+  });
+
+  it("a line at the very top of the plot puts its label below the line, inside the plot", () => {
+    const [a] = placeLabels([req("Win target", plot.top + 3, "right")], plot);
+    expect(a!.moved).toBe(true);
+    expect(a!.y0).toBeGreaterThanOrEqual(plot.top);
+    expect(a!.y0).toBeGreaterThan(plot.top + 3);
+  });
+
+  it("property: 2,000 random sets of up to 5 labels never overlap and stay inside the plot", () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32);
+    for (let t = 0; t < 2000; t++) {
+      const n = 1 + Math.floor(rnd() * 5);
+      const reqs = Array.from({ length: n }, (_, i) => req(`L${i}`, plot.top + rnd() * plot.height, rnd() < 0.5 ? "left" : "right", 20 + rnd() * 60));
+      const placed = placeLabels(reqs, plot);
+      for (const p of placed) {
+        expect(p.y0).toBeGreaterThanOrEqual(plot.top);
+        expect(p.y1).toBeLessThanOrEqual(plot.top + plot.height);
+      }
+      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) expect(overlap(placed[i]!, placed[j]!), JSON.stringify(reqs)).toBe(false);
+    }
+  });
+
+  it("the knockout box pads the text on every side", () => {
+    const [a] = placeLabels([req("Start", 100, "left", 30)], plot);
+    expect(a!.x1 - a!.x0).toBe(30 + 2 * LABEL_PAD);
+    expect(a!.y1 - a!.y0).toBe(10 + 2 * LABEL_PAD);
   });
 });
