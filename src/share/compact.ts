@@ -251,11 +251,12 @@ function expandBuiltin(raw: unknown[], field: string, dropped: Dropped[]): Expan
     return { kind: "builtin", strategyId: strategy.id, config };
   }
   if (isPlainObject(rawConfig)) {
+    let unknownKeys = 0;
     for (const key of Object.keys(rawConfig)) {
       const f = strategy.configSchema.find((x) => x.key === key);
       const v = own(rawConfig, key);
       if (!f) {
-        dropped.push({ field: label, message: `unknown setting ${describeValue(key)} ignored` });
+        if (++unknownKeys <= MAX_REPORTED_UNKNOWN_KEYS) dropped.push({ field: label, message: `unknown setting ${describeValue(key)} ignored` });
       } else if (v === null) {
         if (f.kind === "optionalNumber") delete config[key];
         else dropped.push({ field: `${label}: ${f.label}`, message: "can't be blank; using the default" });
@@ -265,6 +266,7 @@ function expandBuiltin(raw: unknown[], field: string, dropped: Dropped[]): Expan
         dropped.push({ field: `${label}: ${f.label}`, message: `unsupported value ${describeValue(v)}; using the default` });
       }
     }
+    if (unknownKeys > MAX_REPORTED_UNKNOWN_KEYS) dropped.push({ field: label, message: `${unknownKeys - MAX_REPORTED_UNKNOWN_KEYS} more unknown settings ignored` });
   }
   return { kind: "builtin", strategyId: strategy.id, config };
 }

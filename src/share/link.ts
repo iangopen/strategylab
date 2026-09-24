@@ -6,7 +6,7 @@ import { getStrategy } from "../engine/strategies/registry";
 import { defaultScenario, migrateScenario, newCustomInstance, newUid, SCENARIO_VERSION, validateScenario, type BuiltinInstance, type ScenarioConfig, type ScenarioConfigV1, type StrategyInstance } from "../scenario";
 import { base64urlToBytes, bytesToBase64url } from "./base64url";
 import { compactScenario, expandPayload, FIELD_LABELS, type Dropped, type TopField, type TopValues } from "./compact";
-import { FRAGMENT_PREFIX, MAX_FRAGMENT_CHARS, MAX_URL_CHARS } from "./limits";
+import { FRAGMENT_PREFIX, MAX_FRAGMENT_CHARS, MAX_JSON_DEPTH, MAX_URL_CHARS } from "./limits";
 
 export type LoadResult =
   | { kind: "none" }
@@ -74,6 +74,30 @@ function show(field: TopField, v: unknown): string {
   return describeValue(v);
 }
 
+/**
+ * True when brackets nest deeper than `max` (strings and escapes skipped). One linear pass over
+ * already length-capped text, run BEFORE JSON.parse so no hostile nesting ever reaches the parser.
+ */
+export function jsonDepthExceeds(text: string, max: number): boolean {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === 92) escaped = true; // backslash
+      else if (c === 34) inString = false; // quote
+      continue;
+    }
+    if (c === 34) inString = true;
+    else if (c === 91 || c === 123) {
+      if (++depth > max) return true;
+    } else if (c === 93 || c === 125) depth--;
+  }
+  return false;
+}
+
 /** Parses the fragment into a plain object, or a readable error. Bounded and never throws. */
 export function parseFragment(hash: string): { ok: true; payload: Record<string, unknown> } | { ok: false; message: string } | { ok: "none" } {
   if (!hash.startsWith(FRAGMENT_PREFIX)) return { ok: "none" };
@@ -87,6 +111,9 @@ export function parseFragment(hash: string): { ok: true; payload: Record<string,
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.bytes);
   } catch {
     return { ok: false, message: "This link's data is not valid text. It may be damaged; copy the whole link again. Nothing was loaded." };
+  }
+  if (jsonDepthExceeds(text, MAX_JSON_DEPTH)) {
+    return { ok: false, message: `This link's data is nested too deeply to be a scenario (more than ${MAX_JSON_DEPTH} levels). Nothing was loaded.` };
   }
   let value: unknown;
   try {
