@@ -216,7 +216,10 @@ export default function App() {
           {run ? (
             <FanChart result={run.result} labels={run.labels} refs={run.refs} onPickSession={setSelectedSession} selectedSession={selectedSession} />
           ) : (
-            <ChartSlot title="Bankroll over time" description="Percentile bands and the first 50 sessions of each strategy, on shared axes." />
+            <ChartSlot
+              title="Bankroll over time"
+              description="How each strategy's bankroll evolves over the rounds: the middle 50% and 90% of sessions, the median, and the first 50 sessions, one panel per strategy on shared axes."
+            />
           )}
           {run && (
             <ReplayChart
@@ -232,7 +235,10 @@ export default function App() {
           {run ? (
             <HistogramChart result={run.result} labels={run.labels} start={run.refs.start} />
           ) : (
-            <ChartSlot title="Final bankroll distribution" description="Histogram of final bankrolls, on bins shared by every strategy." />
+            <ChartSlot
+              title="Final bankroll distribution"
+              description="Where each strategy's sessions end: the share of sessions finishing in each bankroll range, on bins shared by every strategy."
+            />
           )}
         </div>
       </main>
