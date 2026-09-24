@@ -35,8 +35,8 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: `iangopenbusinessai-lab/strategylab` (**public**, intentionally, since session 9). Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
-- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopenbusinessai-lab.github.io/strategylab/**.
+- GitHub: **`iangopen/strategylab`** (renamed from `iangopenbusinessai-lab/strategylab` during session 10; GitHub redirects the old repo and git URLs, but NOT the old Pages URL). **Public**, intentionally, since session 9. Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
+- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/** (the old `iangopenbusinessai-lab.github.io/strategylab/` returns 404 since the rename).
   - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
   - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
   - A failing test never deploys. The Pages source is "GitHub Actions" (`build_type: workflow`).
@@ -208,7 +208,13 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 
 **ONE COLOR PER STRATEGY INSTANCE**, used everywhere: results table header, every chart panel, replay lines. Colorblind-safe palette, and every panel also carries a text label (NEVER color alone). Theme-aware via CSS variables for light and dark.
 
-How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fanScales`, `histogramScales`, `replayLayout`), each computed over ALL strategies of the run and tested. The color of instance k is `var(--series-k mod 8)` (`seriesColorVar`), defined for light and dark in `index.css`, and it is always paired with the instance's text label. Components only draw. Charts redraw on new results, resize, or theme change, never on keystrokes.
+**ZOOM IS ALWAYS SHARED ACROSS PANELS; Y NEVER RESCALES** (session 10). One x window applies to every panel of a chart; nothing zooms a single panel. The y range is always the global shared range, whatever the zoom.
+
+How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fanScales`, `histogramScales`, `replayLayout`), each computed over ALL strategies of the run and tested.
+- **Fan zoom (session 10):** `zoomedFanScales(scales, zoom)` returns ONE `{x, y}` for every fan panel. x is the shared window, clamped to the full range. y is the very same global y object, and a test asserts that identity.
+  - The window is set by a drag on any panel (`zoomFromDrag`, the same adapter as the replay), by "Fit to this strategy" (`[0, activeRangeEnd(bands)]`), or cleared by double-click or "Show every round".
+  - Panels expose `data-x-range`, `data-zoom` and `data-active-end`.
+- **Reference labels:** `placeLabels` keeps them apart and inside the plot. `drawRefLines` / `refLineV` paint each label on a `--panel` knockout AFTER the data. Boxes are exposed as `data-ref-labels` with `knockout: true`. The color of instance k is `var(--series-k mod 8)` (`seriesColorVar`), defined for light and dark in `index.css`, and it is always paired with the instance's text label. Components only draw. Charts redraw on new results, resize, or theme change, never on keystrokes.
 
 ## How to add a strategy
 
@@ -539,6 +545,8 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 
 The original roadmap is complete. Candidates beyond it (not scheduled; see STATUS "Still open"):
 
+- **Session 11 (next, confirmed): the cents-rounding carry** below.
+- **Adaptive band checkpoints (possible engine follow-up, NOT implemented):** bands have ~5-round resolution at 1,000 rounds (200 checkpoints). A strategy whose sessions end within ~30 rounds (Martingale on the default scenario) therefore gets only ~6 checkpoints when zoomed with "Fit to this strategy". Denser checkpoints early in the session (or per-strategy checkpoints) would sharpen that. It is an engine change (`stats/bands.ts`) and needs its own spec.
 - **Cents-rounding bias (owner, session 9):** at 100k sessions on −110, Flat's shift is ~4.7 SE, so the UI's "z vs theory" will look significant. (The shift is +0.0455% at a $5 base bet, 2.12 SE at 20,000 sessions, so 2.12 × √5 ≈ 4.7 SE at 100k. At the app's default $10 base bet it is only −0.0045%.) Fix: a per-session sub-cent carry in the runner. It needs its own session, with the full invariant suite re-run. E2E won't need changing: its expected numbers come from the engine.
 - **Vercel (optional later):** deploy the same build at a domain root with `VITE_BASE=/` (the default). No code change is needed.
 
@@ -937,6 +945,33 @@ Session 9 (2026-09-24, Windows / PowerShell). `npm run test` (508 passed, 2 benc
     - **Live:** `https://iangopenbusinessai-lab.github.io/strategylab/` → **200**. The HTML references `/strategylab/assets/index-*.js` and **no** `/src/main.tsx`. The worker `/strategylab/assets/sim.worker-B2nJLaBe.js` → **200** (`application/javascript`). The favicon → 200.
     - **Live run:** headless Chromium (Playwright, local) opened the live URL and ran **1,000 sessions**: "Done: 1,000 sessions in 0.0s.", with EV per $ **−2.690% | −3.308%**, exactly the engine's numbers for that scenario. The worker loaded from the sub-path, with no console errors.
 
+Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 benchmark tests skipped), `npm run build`, `npm run lint` and **`npx playwright test` (36 passed)** all clean. **CI run [35971763924](https://github.com/iangopen/strategylab/actions/runs/35971763924) was green on `ubuntu-24.04`** (every job's runner label is `ubuntu-24.04`, with no annotations), and the Pages deploy succeeded. **No engine source changed.** The only `src/engine/` diff is the test file `rules/equivalence.test.ts`: its per-file 30 s timeout is exactly what directive 5 asked for, and that test can only live there.
+
+79. **CI hygiene:**
+    - Every job runs on `ubuntu-24.04`.
+    - The suite-wide `testTimeout: 60_000` is gone. Only `equivalence.test.ts` has `{ timeout: 30_000 }`, with the reason in a comment. All 519 unit tests pass on the 5 s default.
+    - `formatElapsed`: "<0.1s" under 100 ms (tested at 0, 1, 49 and 99.9 ms, plus 100 ms → "0.1s"). The counter shows "—" before the first run.
+80. **Placeholder copy:**
+    - `ChartSlot` now says what each chart will show and "Press **Run** above to simulate: this chart appears here."
+    - No `later version` / `coming soon` string remains in `src/ui`. `charts.spec.ts` asserts the page has none before or after a run, and the live bundle has none.
+81. **Reference labels:**
+    - `placeLabels` is tested with the default spots, a same-end collision (it moves), a top-edge flip, padding, and a **2,000-case seeded property test** (never overlapping, always inside the plot).
+    - E2E: every fan, replay and histogram label reports `knockout: true` and no pairwise overlap. That includes a crowded $995 / $1,000 / $1,005 case at 360 px, where a label is moved.
+82. **Selected-path highlight:**
+    - The replayed session is drawn last, 2.5 px `--text` on a 5 px `--panel` halo.
+    - E2E: sessions 7 (light) and 31 (dark) report `data-highlighted` and the theme's `data-halo` on **every** panel. Session 500 (no sample path) highlights nothing.
+83. **Fan zoom:**
+    - **Adapters:** `activeRangeEnd` returns k+1 for bands that stop changing at k, the full range when they never stop, the first checkpoint when they never change, and responds to a single late-moving percentile. `zoomedFanScales` gives one x window and the SAME y object for any zoom.
+    - **Real run** (default scenario): active range **Flat 1,000, Martingale 30 rounds**.
+    - **E2E:**
+      - A drag on the Martingale panel gives an identical `data-x-range` on every panel, with y unchanged, and the drag doesn't pick a path.
+      - "Fit to this strategy" on Martingale gives `0-30` on every panel, equal to `activeRangeEnd` computed in Node from the same engine run.
+      - The hover round stays inside the window. Reset and double-click restore `0-1000`. Fit on Flat gives the full range.
+      - A new run starts unzoomed, and a click still picks a path while zoomed.
+    - **Bug found by the existing replay spec while adding the zoom:** the new fan button was also named "Reset zoom", so the page had two same-named buttons (ambiguous for screen readers too). It was renamed "Show every round" before the commit was pushed.
+84. **Live** (after the rename): `https://iangopen.github.io/strategylab/` → 200, with built assets only (0 references to `/src/main.tsx`), the worker → 200, and no stale copy in the bundle.
+    - Headless Chromium against the live URL: the default run ("Done: 10,000 sessions in 1.0s."), then "Fit to this strategy" on Martingale → windows `0-30, 0-30`, labels with knockout, and no errors.
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -981,6 +1016,8 @@ Session 9 (2026-09-24, Windows / PowerShell). `npm run test` (508 passed, 2 benc
 - Only Martingale **×2** is proven bit-identical. A rule `multiply by m` compounds units by repeated multiplication, while the built-in computes `m ** level`, so for non-power-of-two m the last float bit can differ, which can change a rounded cent. Not tested, not claimed.
 - Sequence rules copy the line on each loss (O(line length) per loss), like the built-in Labouchère. That is not the O(entries) bound progressions have, but it is bounded by the session's losses.
 - An unknown key inside an object hides that object's field errors until the key is fixed. Every problem is reported only once the keys are right.
+- **Account rename (session 10):** the repo is now `iangopen/strategylab`. The local `origin` remote still says `iangopenbusinessai-lab/strategylab` (GitHub redirects it; update it with `git remote set-url origin https://github.com/iangopen/strategylab.git` when convenient). Links shared with the OLD Pages address are dead: GitHub Pages does not redirect across a rename.
+- **Stale help text in `src/engine/strategies/labouchere.ts`:** "Custom lines come later, with the rule builder." The rule builder has existed since session 6. It was left alone in session 10 because the session's hard rule was an empty `src/engine/` diff. It is display metadata only, so it is a one-line fix for session 11 (which touches the engine anyway).
 - ~~Rules are not saved anywhere yet: a page reload loses them.~~ **Closed in session 7:** Copy link puts the scenario (rules included) in the address bar, so a reload restores it. Saving without a link (storage, accounts) is still out of scope.
 - ~~Browser vs Node speed gap (~4–5×).~~ **Resolved in session 9:** in a visible, focused tab, the browser is within ~10% of Node (STATUS 77). The gap was the hidden automation tab.
 - CI `ubuntu-latest` will move to Ubuntu 26 from 2026-10-19 (GitHub notice). Nothing to do unless a run breaks.
@@ -1123,3 +1160,15 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 9: the live-site check used local headless Playwright against the live URL** (owner decision 5); the Chrome extension never connected.
 - **Session 9: commits are chained after `npm run test &&`.** One early session 9 commit went in while a test had failed (the timeout above); the chain prevents that.
 - **Session 9 ran on Windows / PowerShell.**
+- **Session 10: the fan zoom is view state in FanChart,** tied to the result object, so a new run starts unzoomed (no effect). It is not in `ScenarioConfig` or links (owner-approved plan).
+- **Session 10: a strategy whose bands never change** (e.g. Kelly refusing to bet) fits to [0, first checkpoint]. Every window spans at least 2 rounds (`zoomFromDrag`'s rule).
+- **Session 10: 4 px or less of pointer travel is a click** (it picks a path); more is a zoom drag. The click that ends a drag is suppressed. The second click of a double-click never picks a path.
+- **Session 10: the fan's reset button is "Show every round",** not "Reset zoom": the replay chart already has "Reset zoom", and two same-named buttons are ambiguous (the existing replay spec caught it).
+- **Session 10: the halo and the label knockouts use `--panel`,** the background the charts sit on. Knockouts are 92% opaque, with 2 px padding. The histogram's and the replay chart's labels get knockouts and hooks too.
+- **Session 10: labels are drawn AFTER the data** (including over the highlighted path), so text never sits on paths. A label that can't fit anywhere (more labels than the plot can hold) is clamped inside the plot; the property test never hit that case.
+- **Session 10: the hover readout snaps to the nearest band checkpoint INSIDE the zoom window.** If the window is narrower than one checkpoint, the readout clears.
+- **Session 10: the elapsed counter shows "—" before the first run**, so "<0.1s" never claims a run happened.
+- **Session 10: the equivalence test's timeout is 30 s** (per file, `describe(..., { timeout: 30_000 })`); every other test uses Vitest's 5 s default.
+- **Session 10: the Labouchère help text was NOT changed** (option (b)): the owner's bare "yes" did not clearly override the hard "src/engine/ diff is EMPTY" rule. It is listed under Still open for session 11.
+- **Session 10: the commit gate now runs with `set -o pipefail`.** Piping Playwright's output through `grep | head` hid one failing E2E run; that commit was fixed and amended before any push. Every earlier session 10 commit's captured output shows all specs passing.
+- **Session 10 ran on Windows / PowerShell.**
