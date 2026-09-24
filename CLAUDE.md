@@ -61,7 +61,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 4. **Integer money.** The engine works in integer cents. Bets returned by strategies are rounded to whole cents by the runner. The UI converts at the boundary. Reason: no float drift in progressions.
 
-5. **Game model** (`games.ts`): `interface Game { id; name; winProb; netPayout }`. `netPayout` = profit per unit staked on a win (even money = 1). Derived: `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom. Validate `0 < winProb < 1` and `netPayout > 0`.
+5. **Game model** (`games.ts`): `interface Game { id; name; winProb; netPayout }`. `netPayout` = profit per unit staked on a win (even money = 1). Derived: `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom, and (session 8) sports odds, which COMPILE to a Game in `odds.ts` (see "Sports odds"). Validate `0 < winProb < 1` and `netPayout > 0`.
 
 6. **Strategy contract** (`strategies/types.ts`), registered in ONE place (`strategies/registry.ts`):
    ```ts
@@ -100,6 +100,7 @@ src/
   engine/
     rng.ts            mulberry32 + splitmix32
     games.ts          Game type, presets, edge, validation
+    odds.ts           sports odds -> Game: conversions, proportional de-vig, estimate mode, rounding bias (pure)
     types.ts          shared engine types (SessionResult, EndReason, ...)
     runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer
     montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, histogram, bands, resultTransferables
@@ -150,6 +151,8 @@ src/
       preview.ts      pure preview adapter over the COMPILED rule (tested)
     RunControls.tsx   Run / Cancel / progress, and Copy link (tooltip + reason when blocked)
     LinkBanner.tsx    outcome of opening a link: loaded, loaded except N items, or not loaded
+    SportsOddsFields.tsx  sports odds inputs (mode, format, sides, estimate) + always-visible readout
+    sportsReadout.ts  readout lines (pure, tested) + the push note; tone test scans sports sources
     linkBoot.ts       browser glue: one page loader, initial load, replaceState canonicalization
     ResultsTable.tsx  renders any stats registry
     ChartSlot.tsx     placeholder panels shown before the first run
@@ -433,9 +436,13 @@ Tone: educational. No sportsbook names, no links, no "picks", no "sharp" or "val
 ### Format toggle (American ↔ Decimal)
 
 - Switching format **converts the stored prices EXACTLY** (in floating point): American → decimal is d = 1 + net, and decimal → American is +100 × net when net ≥ 1, else −100 / net.
-- The result is then snapped to 15 significant digits, so a round trip returns the original exactly (−110 → 1.9090909090909092 → −110).
+- **Snapping (corrected in session 8 while implementing; the first draft said "snap everything to 15 digits"):**
+  - **American** results are snapped to 15 significant digits.
+  - **Decimal** results keep full precision and snap only when within 4ε of a short (≤ 12-digit) decimal.
+  - Why: snapping a converted DECIMAL to 15 digits breaks −180 → decimal → American, which came back as −179.999999999999.
+  - With this rule, American → decimal → American returns the original exactly (tested for −110, +150, −180, +100, −250, +333, −105, +10,000, −100,000), and so does decimal → American → decimal for typed decimals (1.91, 2.5, 1.5, 3.75, 1.001, 1,001).
 - The field **DISPLAYS** the value rounded: whole numbers for American, 2 decimals for decimal. The stored value only changes when the user edits the field.
-- The readout shows the real payout, so a rounded display never hides the price. A converted price can differ from the original in the last floating-point bit (≤ 2.2e−16 relative); converting back restores it exactly.
+- The readout shows the real payout, so a rounded display never hides the price. A converted decimal pays the same as the American price to within 2 ε (tested). For −110 it is bit-identical: edge 0.045454545454545414 in both formats.
 - Even money converts to +100 (−100 and +100 are the same price).
 
 ### Worked examples
@@ -467,7 +474,14 @@ Flat bettor at **−110 / −110** (p = 0.5, n = 10/11), hand-computed:
 | $10 (1,000¢, the app default) | 909.091¢ | 909¢ | −0.0909¢ | **−0.0045%** |
 | $25 | 2,272.727¢ | 2,273¢ | +0.2727¢ | **+0.0055%** |
 
-**Worst case at the default $10 base bet, any price:** ±0.5¢ per win, i.e. at most **0.025% per $ at p = 0.5**. At a $1 table-minimum bet the worst case is 0.25%. A positive bias means the simulated bettor does slightly BETTER than the price.
+**Worst case at the default $10 base bet, any price:** ±0.5¢ per win, i.e. at most **0.025% per $ at p = 0.5**. A sweep of 100,000 payouts measured 0.02475%. Examples at $10 and p = 0.5:
+- **−110:** −0.0045%.
+- **−180:** +0.0222% (1000 × 5/9 = 555.56¢ → 556¢), close to the worst case.
+- **+150 and decimal 1.91:** 0.
+
+At a $1 table-minimum bet the worst case is 0.25%. A positive bias means the simulated bettor does slightly BETTER than the price.
+
+**Measured in the invariant (session 8):** on the −110 market at the invariant scenario's $5 base, Flat's +0.0455% shift is **2.12 SE** (SE 0.021%, 20,000 sessions). Flat still passes, at z = 1.17 vs −edge and −0.95 vs the rounding-aware value. On the estimate-0.55 game, the shift is 2.32 SE (z 1.03 / −1.29). This is the closest any invariant test comes to being driven by rounding rather than sampling. If a future change makes a flat invariant fail on a non-even payout, check rounding FIRST. The test prints both z values for Flat.
 
 The invariant tests keep their 4 SE tolerance. If one fails, the rounding rule is the FIRST suspect: investigate and report, never loosen the tolerance. `odds.ts` exports `payoutRoundingBias(betCents, netPayout, p)`, and a test prints this table.
 
@@ -498,7 +512,13 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 5. **More strategies:** Labouchere, Oscar's Grind, Kelly. (Also adds `ctx.game` to the strategy contract, and the replay zoom + chart hover readouts.)
 6. **JSON rule builder:** user-defined strategies compiled into the same Strategy contract. Custom Labouchere sequences (beyond the presets) belong here.
 7. **URL-serialized scenarios:** encode ScenarioConfig in the URL. (Done in session 7; see "URL scenario format".)
-8. **Sports-odds mode:** American/decimal odds input, vig, derived winProb and netPayout.
+8. **Sports-odds mode:** American/decimal odds input, vig, derived winProb and netPayout. (Done in session 8; see "Sports odds".)
+
+The original roadmap is complete. Candidates beyond it (not scheduled; see STATUS "Still open"):
+
+- **Pushes (three-way outcome):** a tie that returns the stake. Needs the runner to resolve a round into win / push / loss from ONE draw (so CRN still holds) and a Game with a push probability. It is the first real change to the Game abstraction, so it needs its own spec.
+- **Parlays:** multi-leg bets whose legs all must win. Out of the two-way model; needs a spec for leg correlation (independent legs only?).
+- **Other de-vig methods:** power, Shin, additive. Each gives a different fair p for the same prices. They would be alternatives to proportional de-vig in `odds.ts`, with hand-computed tests like the proportional ones.
 
 ---
 
@@ -757,6 +777,70 @@ Session 7 (2026-09-23, Windows / PowerShell). `npm run test` (452 passed, 2 benc
 61. **No code evaluation** (verification 6): `rules/noEval.test.ts` now also scans `src/share/**`, `ui/linkBoot.ts`, `ui/LinkBanner.tsx` and `ui/RunControls.tsx`. All are clean.
 62. **Production build serves:** `npm run build` + `npm run preview` served `index-BBX1ndXj.js` (98.14 KB gzip) and the worker, both 200. The bundle contains "Copy link" and the newer-version and nesting messages. **Not driven in a browser:** the Chrome extension was not connected (3 attempts this session).
 
+Session 8 (2026-09-23, Windows / PowerShell). `npm run test` (508 passed, 2 benchmark tests skipped), `npm run build` and `npm run lint` all clean under strict. `git diff 76a284f..HEAD -- src/engine/runner.ts src/engine/montecarlo.ts src/engine/stats/ src/engine/strategies/ src/engine/rules/compile.ts src/engine/rules/validate.ts` is **EMPTY**, and `games.ts` is untouched. The only engine changes are the new `odds.ts` and its three test files. **Sports odds compile to an ordinary Game; nothing downstream changed.** The spec was committed before any code (`ff25aae`).
+
+63. **Conversions** (`odds.test.ts`, hand-computed):
+    - American: +150 → 1.5; −110 → 100/110; −180 → 100/180; +100 and −100 → 1.
+    - Decimal: 1.91 → 0.91 (the float artifact 0.9099999999999999 is removed); 2.50 → 1.5.
+    - Implied probabilities: 0.4, 11/21, 9/14, 0.5, 1/1.91, 0.4.
+    - Rejected with exact messages: −50, +99, 0, −99.99, NaN, ±Infinity, −100,001; decimal 1.0, 0.5, NaN, −Infinity, 1.0005, 1002.
+    - The limits are inclusive (payouts 0.001 and 1,000 in both formats).
+64. **Format toggle** (owner decision 6):
+    - **American → decimal → American returns the original exactly** for −110, +150, −180, +100 (plus −250, 333, −105, 10,000, −100,000). −100 comes back as +100 (the same price).
+    - Decimal → American → decimal round-trips for 1.91, 2.5, 1.5, 3.75, 1.001, 1,001.
+    - A converted −110 is stored as 1.9090909090909092 and displayed "1.91". Its payout is within 2 ε of the American price.
+    - Display rounding: whole American with a sign, 2-decimal decimals.
+65. **De-vig** (`odds.devig.test.ts`, to 1e-15):
+    - **−110 / −110:** implied 11/21 each, **overround 1/21 (4.762%)**, **fair p 0.5**, **house edge 1/22 (4.545%)** on both sides.
+    - **+150 / −180:** implied 0.4 and 9/14, **overround 3/70 (4.286%)**, **fair p 28/73 (0.383562) and 45/73 (0.616438)**, **edge 3/73 (4.110%) on both sides**.
+    - The identity edge = 1 − 1/sum holds on 2,000 random markets.
+    - Decimal 1.91 / 1.91 gives p 0.5 and an edge of 4.5%.
+    - +110 / +110 gives overround −4.762%, flagged as negative, with a player edge of 5%.
+    - Errors are per field, and side B is ignored in estimate mode.
+66. **Invariant** (`odds.invariant.test.ts`: 8 built-ins + a custom rule, the shared invariant scenario, 20,000 sessions each, 4 SE):
+
+    | Strategy | −110 / −110 market: EV per $ (−edge −4.545%) | z | Estimate 0.55: EV per $ (−edge +5.000%) | z |
+    |---|---|---|---|---|
+    | flat | −4.520% | 1.17 | +5.022% | 1.03 |
+    | martingale | −4.681% | −1.50 | +4.800% | −2.26 |
+    | paroli | −4.558% | −0.48 | +4.996% | −0.15 |
+    | dalembert | −4.509% | 0.69 | +4.970% | −0.59 |
+    | fibonacci | −4.531% | 0.25 | +4.994% | −0.10 |
+    | labouchere | −4.455% | 0.93 | +4.867% | −1.37 |
+    | oscars | −4.561% | −0.26 | +4.969% | −0.56 |
+    | kelly | −5.051% | −2.78 | +5.001% | 0.01 |
+    | custom rule | −4.515% | 0.54 | +4.969% | −0.52 |
+
+    - Worst |z| is 2.78 on the market and 2.26 on the estimate game.
+    - On the market game, Kelly uses assumed 0.6: at the fair p it refuses to bet. On the estimate game, its default (blank = 0.55) bets.
+    - Flat's cents-rounding shift and its rounding-aware z are printed; see "Cents rounding bias".
+67. **Rounding bias** (directive 4):
+    - The CLAUDE.md table is asserted to 1e-15: −110 flat at $1 / $5 / $10 / $25 gives +0.0455% / +0.0455% / −0.0045% / +0.0055%.
+    - Worst case at $10 over 100,000 payouts: 0.02475% (bound 0.025%). −180 at $10: +0.0222%.
+    - No invariant failed; the tolerance was not touched.
+68. **Scenario v3** (`scenario.test.ts`):
+    - A sports game compiles to `{ id: "sports", name: "Sports odds", winProb 0.5, netPayout 100/110 }` and is plain JSON.
+    - Invalid odds give per-field errors (`game.sideA`, `game.sideB`, `game.estimate`), and the previous numbers are kept.
+    - Stale derived numbers, missing inputs, and odds on a non-sports game are each caught.
+    - **v2 → v3 migration leaves the game unchanged.** v1 → v3 chains.
+69. **Links** (`sportslink.test.ts`, `size.test.ts`):
+    - **7 sports scenarios round-trip bit-exactly**, inputs AND derived numbers: market American and decimal, side B, exact converted decimals, negative overround, and two estimate cases.
+    - The link carries only the inputs `["o","m","a",-110,-110,"a",0.5]`.
+    - **Golden:** the three session 7 links recorded in CLAUDE.md (v2 with a rule, v2 partial, v1 with Kelly 0) decode to EXACTLY what the session 7 decoder returned. That output was captured by running commit `76a284f` in a temporary worktree, since removed. Only the version (3) differs.
+    - A sports game in a v1 or v2 link, invalid odds in a v3 link, and malformed sports arrays each fall back to the default game, reported.
+    - **Typical scenario on a sports game: 590 characters** (budget 2,000).
+70. **UI:**
+    - `sportsReadout.test.ts`: the −110 / −110 lines read exactly 52.381% / 52.381% / 4.762% / 50.000% / 0.9091 / 4.545%.
+    - A negative overround reads "rare in real markets and is usually a data-entry error".
+    - A believed edge reads "believing you have an edge is not the same as having one". The push note is one line.
+    - **Tone test:** no bookmaker names, links, "pick(s)", "sharp", "value bet", "guarantee", or "winning system" in the sports UI, readout, ConfigPanel or `odds.ts`. It caught my own comment listing the banned words, which was reworded.
+71. **The manual scenario, run through the app's own code path** (throwaway test, not committed): default scenario on −110 / −110 with Flat + Martingale → `toSimRequest` → `resolveStrategies` → `runMonteCarlo`.
+    - Readout as above. The decimal switch shows 1.91 / 1.91, stores 1.9090909090909092, and gives a bit-identical edge.
+    - −50 gives the +100/−100 error.
+    - **Flat EV per $ −4.590% (SE 0.036%, z −1.25), P(profit) 34.600%. Martingale −4.635% (SE 0.352%, z −0.25), P(profit) 79.610%, P(bust) 20.390%.**
+    - The link is 209 characters and decodes to the identical game.
+    - Build: `index-BlKlmlDe.js` 100.94 KB gzip.
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -781,12 +865,21 @@ Session 7 (2026-09-23, Windows / PowerShell). `npm run test` (452 passed, 2 benc
      - a partially valid link: `#s=eyJ2IjoyLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6OTAwLCJyIjoxMDAwLCJuIjoxMDAwMCwic2QiOjEyMzQ1LCJzdCI6W1siZmxhdCJdLFsiZG91YmxlVXBTeXN0ZW0iXSxbImtlbGx5Iix7ImFzc3VtZWRXaW5Qcm9iIjo1fV1dfQ` -> loaded except 3 items (win target, unknown strategy, Kelly setting);
      - a newer-version link: `#s=eyJ2Ijo5OTk5OTksInN0IjpbXX0` -> "needs a newer version of the app".
   7. **Back button:** after step 3, press Back to the earlier `#s=` entry. It must not reload the scenario a second time.
-- **Sessions 4-6 checklists above are STILL owner-run** (replay zoom/hover, rule builder form, dark theme, phone width, Kelly blank, Start label): browser automation was unavailable in sessions 5, 6 and 7.
+- **Session 8 browser pass (owner-run: the Chrome extension was not connected; 1 attempt).** `npm run build; npm run preview`, open `http://localhost:4173/`:
+  1. **Market readout:** Game → **Sports odds**. The defaults are −110 / −110, side A. The readout should show implied 52.381% / 52.381%, overround 4.762%, fair probability 50.000%, net payout 0.9091, house edge 4.545%, and the push note.
+  2. **Decimal:** switch format to **Decimal**. The fields show 1.91 / 1.91 and the readout is unchanged. Switch back to American: the fields show −110 / −110 (exact round trip).
+  3. **Invalid odds:** type −50 in Side A. An inline error ("+100 or higher, or -100 or lower"), "Fix the odds above…", and Run blocked. Try +110 / +110: the readout warns that it is rare and usually a data-entry error.
+  4. **My estimate:** switch to "One side + my estimate". The field is labeled "Your side's odds", and the estimate field and help appear. At 0.55 the readout shows a player edge of 5.000% and the believed-edge line.
+  5. **Run:** back to −110 / −110 market, and Run with Flat + Martingale (the default). Expect the numbers in STATUS 71: Flat −4.590%, Martingale −4.635%.
+  6. **Link:** Copy link, open it in a new tab, and confirm the game shows Sports odds with the same inputs and readout.
+- **Sessions 4-6 checklists above are STILL owner-run** (replay zoom/hover, rule builder form, dark theme, phone width, Kelly blank, Start label): browser automation was unavailable in sessions 5, 6, 7 and 8.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Roadmap session 8 on (sports-odds mode). When sports mode adds scenario fields, bump `ScenarioConfig.version` to 3, extend the link key map, and add a v2 -> v3 migration (links follow the scenario version).
+- The original 8-session roadmap is complete. Next candidates are in the Roadmap: pushes, parlays, other de-vig methods.
+- Cents rounding on non-even payouts is ~2 SE for a flat $5 bettor at 20,000 sessions (STATUS 66). It is not a failure, but it is the known pressure point if invariant sample sizes grow.
+- Sports mode stores decimal prices at full precision after a format switch. The field shows 2 decimals, so the stored price and the visible one can differ (e.g. 1.9090909090909092 vs "1.91"). The readout shows the real payout. This is by design (owner decision 6).
 - The address bar is not kept in sync while editing (owner-approved in the session 7 plan). After opening a link and then editing, a reload brings back the LINK, not the edits, until Copy link is clicked again.
 - Rule language gaps, by design for now: one action per entry (no "multiply AND cap"), no Fibonacci-style step-back, no payout-capped bet (Oscar's Grind), no bankroll-proportional stake (Kelly). Those stay built-ins.
 - Only Martingale **×2** is proven bit-identical. A rule `multiply by m` compounds units by repeated multiplication, while the built-in computes `m ** level`, so for non-power-of-two m the last float bit can differ, which can change a rounded cent. Not tested, not claimed.
@@ -900,3 +993,22 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 7: unknown keys are reported at most 5 by name per object, then summarized,** so a hostile link can't produce an unbounded error list.
 - **Session 7: the size-budget test counts a 60-character address allowance,** since the real site address is unknown in tests.
 - **Session 7 ran on Windows / PowerShell.**
+- **Session 8: estimate mode uses side A as "Your side's odds"** (owner decision 1). Side B and the chosen side are kept but ignored, so switching back loses nothing.
+- **Session 8: the scenario stores derived `winProb` / `netPayout` next to the odds inputs** (owner decision 2). They are re-synced on every edit and load, `validateScenario` checks they match, and links carry only the inputs. While the inputs are invalid, the previous numbers are kept and Run is blocked.
+- **Session 8: decimal payouts snap float artifacts** (`snapShortDecimal`: a value within 4ε × max(1, d) of a ≤ 12-significant-digit decimal becomes that decimal; owner decision 3, refined). A typed 1.91 pays 0.91 exactly. A converted 1.9090909090909092 is left alone.
+- **Session 8: ranges** American ±100 to ±100,000, decimal 1.001 to 1,001, estimate 0.01 to 0.99 (owner decision 4).
+- **Session 8: a negative overround is accepted.** The readout says it is rare and usually a data-entry error, and that the bettor has the edge as entered (owner decision 5).
+- **Session 8: the format toggle converts EXACTLY and stores the exact value; the field DISPLAYS it rounded** (owner decision 6). `NumberField` gained a `format` prop used only when the value comes from outside, so the stored value changes only when the user edits. The snapping rule (American 15 digits, decimal full precision unless near a short decimal) is in "Sports odds"; it corrects the first draft of the spec.
+- **Session 8: `payoutRoundingBias` lives in `odds.ts`** and is used by tests and docs only; the UI does not show it (owner decision 7).
+- **Session 8: game ids.** Sports is presetId `"sports"`, and `toSimRequest` builds `{ id: "sports", name: "Sports odds", ... }`. Choosing another game drops the odds inputs. Choosing Custom keeps the current numbers as a starting point.
+- **Session 8: the default sports market is −110 / −110, side A, estimate 0.5** (a common two-way price).
+- **Session 8: sports odds errors in a link are reported as one "Game" entry** (all odds messages joined), and the game falls back to the default. A sports game in a v1/v2 link is rejected as "sports odds need a version 3 link".
+- **Session 8: the Kelly config in the sports invariant.** Assumed 0.6 on the market (at the fair p Kelly refuses to bet, 0/0), default (blank) on the estimate game, where it bets.
+- **Session 8: version-bump test edits** (expected, owner-approved):
+  - `scenario.test.ts`: v1 migrates to 3, not 2.
+  - `load.test.ts`: the "newer version" example is now v4, since 3 is current.
+  - `malicious.test.ts`: the message says "reads up to version 3".
+  - `roundtrip.test.ts`: a literal `version: 2` became 3.
+- **Session 8: golden v1/v2 link outputs were captured from the session 7 code itself** (commit `76a284f` in a temporary git worktree with a node_modules junction, removed afterwards; the junction was deleted without touching its target). This way "loads exactly as before" is compared against real session 7 output, not against my memory of it.
+- **Session 8: a tone test** (`sportsReadout.test.ts`) scans the sports UI, readout, ConfigPanel and `odds.ts` for bookmaker names, URLs and tipster vocabulary, comments included.
+- **Session 8 ran on Windows / PowerShell.**
