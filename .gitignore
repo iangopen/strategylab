@@ -12,6 +12,16 @@ dist
 dist-ssr
 *.local
 
+# Secrets never belong in the repo
+.env
+.env.*
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -15,9 +15,13 @@ export function noticeOf(r: AppliedResult): LinkNotice {
   return r.kind === "error" ? { kind: "error", message: r.message } : { kind: "loaded", dropped: r.dropped, fromVersion: r.fromVersion };
 }
 
-/** Origin + path + query of the current page: everything a link keeps except the fragment. */
+/**
+ * Origin + path of the current page: a share link is exactly this + "#s=...". The path carries any
+ * deploy sub-path (e.g. /strategylab/ on GitHub Pages); a query string is deliberately NOT carried
+ * into shared links.
+ */
 export function baseUrl(): string {
-  return window.location.origin + window.location.pathname + window.location.search;
+  return window.location.origin + window.location.pathname;
 }
 
 /** Puts `fragment` in the address bar WITHOUT a new history entry, and marks it as already applied. */
