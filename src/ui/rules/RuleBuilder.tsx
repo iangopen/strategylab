@@ -1,17 +1,21 @@
 import { useMemo, useState } from "react";
 import { formatRuleError, validateRule } from "../../engine/rules/validate";
+import type { PreviewContext } from "./preview";
 import { RuleForm } from "./RuleForm";
 import { RuleJson } from "./RuleJson";
+import { RulePreview } from "./RulePreview";
 
 interface Props {
   /** The instance's rule as stored in the ScenarioConfig: plain JSON, possibly invalid. */
   rule: unknown;
   onChange: (rule: unknown) => void;
   disabled: boolean;
+  /** Base bet, start and payout for the live preview. */
+  previewContext: PreviewContext;
 }
 
 /** Form + JSON editor for one custom rule. Validation uses the SAME validator the worker runs. */
-export function RuleBuilder({ rule, onChange, disabled }: Props) {
+export function RuleBuilder({ rule, onChange, disabled, previewContext }: Props) {
   // Which tab is showing: view state, not scenario state.
   const [tab, setTab] = useState<"form" | "json">("form");
   const full = useMemo(() => validateRule(rule), [rule]);
@@ -57,6 +61,7 @@ export function RuleBuilder({ rule, onChange, disabled }: Props) {
           {errorList}
         </>
       )}
+      <RulePreview rule={rule} context={previewContext} />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { ConfigPanel } from "./ui/ConfigPanel";
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls } from "./ui/RunControls";
 import { instanceLabel } from "./ui/format";
+import { previewContextOf } from "./ui/rules/preview";
 import { StrategyPicker } from "./ui/StrategyPicker";
 import { applyThemePref, loadThemePref, type ThemePref } from "./ui/theme";
 import { CancelledError, SimClient } from "./worker/client";
@@ -64,6 +65,8 @@ export default function App() {
 
   const errors = useMemo(() => validateScenario(scenario), [scenario]);
   const canRun = Object.keys(errors).length === 0;
+  const { baseBet, startBankroll, game } = scenario;
+  const previewContext = useMemo(() => previewContextOf({ baseBet, startBankroll, game }), [baseBet, startBankroll, game]);
 
   async function handleRun() {
     const c = client.current;
@@ -139,7 +142,7 @@ export default function App() {
       <main className="layout">
         <div className="left">
           <ConfigPanel scenario={scenario} onChange={setScenario} errors={errors} />
-          <StrategyPicker instances={scenario.strategies} onChange={(strategies) => setScenario({ ...scenario, strategies })} errors={errors} />
+          <StrategyPicker instances={scenario.strategies} onChange={(strategies) => setScenario({ ...scenario, strategies })} errors={errors} previewContext={previewContext} />
         </div>
         <div className="right">
           <RunControls

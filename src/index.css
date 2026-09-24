@@ -180,3 +180,8 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
 .has-error .rule-json { border-color: var(--error); }
 .rule-json-tools { display: flex; align-items: center; gap: 8px; }
 .rule-errors ul { margin: 4px 0 0; padding-left: 18px; }
+.rule-preview { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
+.rule-ladder { font-variant-numeric: tabular-nums; font-size: 0.9rem; margin: 4px 0 6px; line-height: 1.6; overflow-wrap: anywhere; }
+.rule-ladder sub { color: var(--muted); font-size: 0.7rem; margin-left: 1px; }
+.rule-preview-table { max-height: 220px; overflow: auto; margin-bottom: 6px; }
+.rule-preview-table table.results th, .rule-preview-table table.results td { padding: 3px 6px; font-size: 0.8rem; }

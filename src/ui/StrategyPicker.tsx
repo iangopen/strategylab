@@ -5,6 +5,7 @@ import type { StrategyConfig } from "../engine/strategies/types";
 import { newCustomInstance, newStrategyInstance, type StrategyInstance } from "../scenario";
 import { seriesColorVar } from "./charts/adapters";
 import { instanceLabel } from "./format";
+import type { PreviewContext } from "./rules/preview";
 import { RuleBuilder } from "./rules/RuleBuilder";
 import { SchemaForm } from "./SchemaForm";
 
@@ -13,12 +14,14 @@ interface Props {
   onChange: (instances: StrategyInstance[]) => void;
   errors: Record<string, string>;
   disabled?: boolean;
+  /** For custom rules' live preview. */
+  previewContext: PreviewContext;
 }
 
 /** "Add" dropdown values: a registry id, or "rule:<example id>" for a custom rule. */
 const RULE_PREFIX = "rule:";
 
-export function StrategyPicker({ instances, onChange, errors, disabled }: Props) {
+export function StrategyPicker({ instances, onChange, errors, disabled, previewContext }: Props) {
   // Which entry the "Add" dropdown points at. Not scenario state.
   const [toAdd, setToAdd] = useState(STRATEGIES[0]!.id);
 
@@ -79,8 +82,8 @@ export function StrategyPicker({ instances, onChange, errors, disabled }: Props)
             </div>
             {inst.kind === "custom" ? (
               <>
-                <p className="help">Custom rule. Bet = base bet × units. Like every strategy, it cannot change the expected loss per dollar wagered; it only changes how results spread out.</p>
-                <RuleBuilder rule={inst.rule} onChange={(rule) => setRule(inst.uid, rule)} disabled={disabled ?? false} />
+                <p className="help">Custom rule. Bet = base bet × units. Like every strategy, it cannot change the expected result per dollar wagered; it only changes how results spread out.</p>
+                <RuleBuilder rule={inst.rule} onChange={(rule) => setRule(inst.uid, rule)} disabled={disabled ?? false} previewContext={previewContext} />
               </>
             ) : strategy ? (
               <>
