@@ -191,3 +191,5 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
 .link-banner.is-partial, .link-banner.is-error { border-left-color: var(--error); }
 .link-banner-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .link-banner p { margin: 4px 0 0; }
+.copy-link { margin-left: auto; }
+.run-controls .status input { margin-top: 4px; }

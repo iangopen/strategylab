@@ -9,9 +9,10 @@ import { HistogramChart } from "./ui/charts/HistogramChart";
 import { ReplayChart } from "./ui/charts/ReplayChart";
 import { ConfigPanel } from "./ui/ConfigPanel";
 import { LinkBanner } from "./ui/LinkBanner";
-import { bootFromLocation, canonicalizeAddressBar, noticeOf, pageLinkLoader, type LinkNotice } from "./ui/linkBoot";
+import { baseUrl, bootFromLocation, canonicalizeAddressBar, noticeOf, pageLinkLoader, showInAddressBar, type LinkNotice } from "./ui/linkBoot";
 import { ResultsTable } from "./ui/ResultsTable";
-import { RunControls } from "./ui/RunControls";
+import { RunControls, type CopyStatus } from "./ui/RunControls";
+import { copyBlocker, encodeScenarioLink } from "./share/link";
 import { instanceLabel } from "./ui/format";
 import { previewContextOf } from "./ui/rules/preview";
 import { StrategyPicker } from "./ui/StrategyPicker";
@@ -35,6 +36,7 @@ export default function App() {
   const [scenario, setScenario] = useState<ScenarioConfig>(() => bootFromLocation().scenario);
   // What happened when a link was opened. View state, not scenario state.
   const [linkNotice, setLinkNotice] = useState<LinkNotice | null>(() => bootFromLocation().notice);
+  const [copyStatus, setCopyStatus] = useState<CopyStatus | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -90,6 +92,32 @@ export default function App() {
 
   const errors = useMemo(() => validateScenario(scenario), [scenario]);
   const canRun = Object.keys(errors).length === 0;
+  const linkBlocker = useMemo(() => copyBlocker(scenario), [scenario]);
+
+  // A plain "copied" confirmation is brief; errors and left-out warnings stay until the next copy.
+  useEffect(() => {
+    if (copyStatus?.kind !== "copied" || copyStatus.leftOut.length > 0) return;
+    const id = setTimeout(() => setCopyStatus(null), 5000);
+    return () => clearTimeout(id);
+  }, [copyStatus]);
+
+  /** Encodes the valid part of the scenario, puts it in the address bar (replaceState) and copies it. */
+  async function handleCopyLink() {
+    const enc = encodeScenarioLink(scenario, baseUrl());
+    if (!enc.ok) {
+      setCopyStatus({ kind: "error", message: enc.message });
+      return;
+    }
+    const url = baseUrl() + enc.fragment;
+    const leftOut = enc.leftOut.map((i) => instanceLabel(scenario.strategies, i));
+    showInAddressBar(enc.fragment); // a reload now restores this scenario, custom rules included
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyStatus({ kind: "copied", urlLength: enc.urlLength, leftOut });
+    } catch {
+      setCopyStatus({ kind: "manual", url, leftOut });
+    }
+  }
   const { baseBet, startBankroll, game } = scenario;
   const previewContext = useMemo(() => previewContextOf({ baseBet, startBankroll, game }), [baseBet, startBankroll, game]);
 
@@ -179,6 +207,9 @@ export default function App() {
             status={status}
             onRun={() => void handleRun()}
             onCancel={() => client.current?.cancel()}
+            copyBlocker={linkBlocker}
+            copyStatus={copyStatus}
+            onCopyLink={() => void handleCopyLink()}
           />
           <ResultsTable columns={columns} nSessions={run?.result.nSessions ?? 0} stale={run !== null && run.scenarioJson !== JSON.stringify(scenario)} />
           {run ? (
