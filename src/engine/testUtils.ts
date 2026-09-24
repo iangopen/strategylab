@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { edge, GAME_PRESETS, type Game } from "./games";
 import { sessionSeed, type Rng } from "./rng";
 import { runSession } from "./runner";
+import type { SportsInput } from "./odds";
 import type { RunContext } from "./stats/types";
 import type { AnyStrategy, StrategyConfig, StrategyContext } from "./strategies/types";
 import type { SamplePath, SessionConfig, SessionResult } from "./types";
@@ -136,6 +137,11 @@ export const INVARIANT_SCENARIO: SessionConfig = sessionConfig({
   insufficientFunds: "stop",
 });
 export const INVARIANT_SESSIONS = 20_000;
+
+/** The session 11 regression scenario: Flat on this market at the invariant scenario, 100k sessions, this seed. */
+export const REGRESSION_MARKET: SportsInput = { mode: "market", format: "american", sideA: -110, sideB: -110, side: "a", estimate: 0.5 };
+export const REGRESSION_SESSIONS = 100_000;
+export const REGRESSION_MASTER = 1110;
 
 /**
  * Declares the EV-per-$-wagered invariant tests for a strategy: within 4 SE of -edge on

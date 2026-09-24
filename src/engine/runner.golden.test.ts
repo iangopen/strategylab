@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import golden from "./runner.golden.json";
 import { edge, GAME_PRESETS, type Game } from "./games";
-import { sportsGame, type SportsInput } from "./odds";
+import { sportsGame } from "./odds";
 import { sessionSeed } from "./rng";
 import { compileRule } from "./rules/compile";
 import { runSession } from "./runner";
@@ -13,11 +13,7 @@ import { flat } from "./strategies/flat";
 import { STRATEGIES } from "./strategies/registry";
 import type { AnyStrategy, StrategyConfig } from "./strategies/types";
 import { END_REASONS, type SessionConfig, type SessionResult } from "./types";
-import { evPerWageredWithSE, INVARIANT_SCENARIO, sessionConfig } from "./testUtils";
-
-export const REGRESSION_MARKET: SportsInput = { mode: "market", format: "american", sideA: -110, sideB: -110, side: "a", estimate: 0.5 };
-export const REGRESSION_SESSIONS = 100_000;
-export const REGRESSION_MASTER = 1110;
+import { evPerWageredWithSE, INVARIANT_SCENARIO, REGRESSION_MARKET, REGRESSION_MASTER, REGRESSION_SESSIONS, sessionConfig } from "./testUtils";
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 
