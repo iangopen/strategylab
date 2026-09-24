@@ -971,6 +971,73 @@ Session 10 (2026-09-24, Windows / PowerShell). `npm run test` (519 passed, 2 ben
 84. **Live** (after the rename): `https://iangopen.github.io/strategylab/` → 200, with built assets only (0 references to `/src/main.tsx`), the worker → 200, and no stale copy in the bundle.
     - Headless Chromium against the live URL: the default run ("Done: 10,000 sessions in 1.0s."), then "Fit to this strategy" on Martingale → windows `0-30, 0-30`, labels with knockout, and no errors.
 
+Session 11 (2026-09-24, Windows / PowerShell). `npm run test` (619 passed, 3 skipped: 2 benchmark tests + the golden writer), `npm run build`, `npm run lint` and **`npx playwright test` (36 passed, no spec edits)** all clean. **CI run [36057827693](https://github.com/iangopen/strategylab/actions/runs/36057827693) was green**: lint, unit, build, e2e, build-pages and deploy, every job on `ubuntu-24.04`. Delivered: the account rename (`origin` = `iangopen/strategylab`) and the **per-session sub-cent carry** on win payouts (see "Cents rounding").
+
+85. **Rename:** `git remote set-url origin https://github.com/iangopen/strategylab.git`. `git remote -v` showed the new URL, and the push of `5d01387` succeeded. There are no old-account URLs left in the repo; the one remaining pre-rename reference is the Pages address, described in words as permanently dead.
+86. **Golden bit-identity on even and integer payouts** (`runner.golden.test.ts`, 90 cells). Captured from the PRE-carry runner in commit `9d0cc24`, before `runner.ts` changed:
+    - Games: European, American, fair coin, single number 35:1, dozen 2:1.
+    - Scenarios: the invariant scenario (tableMax clamp, stops) and an all-in scenario.
+    - Strategies: all 8 built-ins plus a custom rule.
+    - Stored per cell: 50 full SessionResults plus an FNV-1a digest over 2,000 sessions with full paths.
+    - **All 90 cells are identical after the carry.** The even-money columns of the invariant table (STATUS 90) also reproduce the session 5 z values exactly.
+87. **Property test** (`runner.carry.test.ts`): 15,000 seeded sessions of random bets (up to $10M) and outcomes, checked after EVERY round against the exact rational total (BigInt). Named payouts, 2,500 sessions each:
+
+    | Payout | Max \|paid − exact\| |
+    |---|---|
+    | −110 | 0.4545¢ |
+    | +150 | 0.5000¢ |
+    | decimal 1.91 | 0.5000001¢ |
+    | 1.2 | 0.4000004¢ |
+    | 5,000 random payouts (American, decimal, raw) | **0.50015¢** |
+
+    - Every one is under the required 1¢.
+    - Each round is also held to ½¢ plus ε × |owed| per win (float noise; the 0.00015¢ excess is at $10M bets on payouts near 1,000).
+    - Also tested: the first win of every session pays `Math.round(bet × n)`, so no carry crosses sessions; and −110 at $5 pays 455, 454, 455, 454…, with 22 wins totaling exactly $100.
+88. **Draws and CRN unchanged:** `runner.test.ts` (draws === rounds for every end reason plus 2,400 random sessions) and `strategies/crn.test.ts` have an EMPTY diff and pass.
+89. **Regression** (`runner.regression.test.ts`): Flat, −110 / −110, $5 base, invariant scenario (stops on), 100,000 sessions, seed 1110. "Before" is the pre-carry runner on the same seeds (stored in the golden file).
+
+    | Rule | EV per $ | SE | z vs −edge (−4.5455%) |
+    |---|---|---|---|
+    | before: `Math.round` per win | −4.4947% | 0.0096% | **5.29** |
+    | after: sub-cent carry | −4.5401% | 0.0096% | **0.55** |
+
+90. **Full invariant table** (`invariant.test.ts`: 20,000 sessions per cell, 4 SE; seeds 101 / 202 / 303 / 808 / 809). Every |z| < 4; the worst is Kelly on the market at −2.78, the same as session 8.
+
+    | Strategy | European | Fair coin | p = 0.55 | −110 market | Estimate 0.55 |
+    |---|---|---|---|---|---|
+    | flat | −0.35 | −0.40 | 0.82 | −0.94 | −1.28 |
+    | martingale | 0.02 | 0.56 | 2.15 | −1.55 | −2.31 |
+    | paroli | −0.67 | −0.65 | 0.06 | −0.92 | −0.54 |
+    | dalembert | 0.23 | −0.31 | 1.23 | 0.69 | −0.65 |
+    | fibonacci | 0.05 | −1.13 | 0.50 | 0.06 | −0.41 |
+    | labouchere | −1.12 | −0.30 | 1.19 | 0.91 | −1.39 |
+    | oscars | 0.71 | −1.12 | 2.02 | −0.27 | −0.69 |
+    | kelly | −0.56 | 1.14 | −0.30 | −2.78 | 0.01 |
+    | custom rule | −0.16 | 0.12 | 1.07 | 0.42 | −0.64 |
+
+    - It replaces `odds.invariant.test.ts`, and Flat's "rounding-aware" second z is gone: with the carry there is no shift to allow for.
+    - The per-strategy `describeEvInvariant` tests and `customGame.test.ts` (payout 1.2, numbers changed) still pass unchanged.
+91. **Tests that asserted the OLD rule, changed:**
+    - `replay.test.ts` "exact on a 1.2 payout" now asserts each win equals the carry rule exactly, and Σ paid within ½¢ of exact.
+    - The `payoutRoundingBias` tests in `odds.devig.test.ts` were deleted along with the helper.
+    - No tolerance was loosened.
+92. **Performance** (committed benchmark, `BENCH=1`, European 100k × 6, median of 3):
+    - **Before 9.64 s** (9.62 / 9.64 / 9.72); **after 9.85 s** (9.78 / 9.85 / 9.93), so **+2.2%** (budget 5%).
+    - Observer cost: plain 26.9 → 27.2 µs per 1,000-round session.
+93. **Live** (headless Chromium, local Playwright, against `https://iangopen.github.io/strategylab/`, bundle `index-DO2qU1in.js`). The scenario was a `#s=` link: −110 / −110 market, $5 base, $1,000 bankroll, table $1–$250, win target $1,500, floor $500, Flat + Martingale, 100,000 sessions, seed 1110.
+    - "Done: 100,000 sessions in 4.5s."
+    - **z vs theory: Flat 0.55, Martingale −0.37.** EV per $ −4.540% / −4.560%, SE 0.010% / 0.040%.
+    - **Every row of the results table equals the engine in Node**, and there were 0 console errors.
+    - Flat's 0.55 is the regression test's number (same seed), so the deployed engine is the carry one.
+94. **`src/engine/` diff since `5d01387`**, file by file:
+    - `runner.ts`: the carry.
+    - `odds.ts`: `payoutRoundingBias` deleted.
+    - `rules/compile.ts`: cycle profit counts exact winnings (owner-approved option A, variant explained in Decisions).
+    - `strategies/labouchere.ts`: help text.
+    - `testUtils.ts`: the regression constants.
+    - Test files: `runner.golden.test.ts` + `.json`, `runner.carry.test.ts`, `runner.regression.test.ts`, `invariant.test.ts` (renamed from `odds.invariant.test.ts`), `odds.devig.test.ts`, `replay.test.ts`.
+    - Outside the engine: `src/ui/rules/preview.ts` pays with the same carry (option B).
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -1171,3 +1238,13 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 10: the Labouchère help text was NOT changed** (option (b)): the owner's bare "yes" did not clearly override the hard "src/engine/ diff is EMPTY" rule. It is listed under Still open for session 11.
 - **Session 10: the commit gate now runs with `set -o pipefail`.** Piping Playwright's output through `grep | head` hid one failing E2E run; that commit was fixed and amended before any push. Every earlier session 10 commit's captured output shows all specs passing.
 - **Session 10 ran on Windows / PowerShell.**
+- **Session 11: tie rule half-up (`Math.round`)** for the carry, not half-even: with a carry the tie direction cannot accumulate, and half-up keeps the first win of every session bit-identical to before.
+- **Session 11: the carry is one float of loop state in `runSessionWithRng`.** `SessionConfig`, `SessionResult`, `RunOptions` and the Strategy contract are unchanged; strategies never see it.
+- **Session 11: rule cycle profit = exact winnings `lastBet × netPayout`** (owner-approved option A). The plan proposed counting the real bankroll change (`ctx.bankroll` − previous), but the strategy test kit's `betSequence` keeps the bankroll fixed at 1e9 (Kelly's exact sequences depend on that), so bankroll deltas would read 0 there. Exact winnings give the same guarantee as the carry (within 1¢ of the real change over any stretch), need no extra State field, and are identical on integer payouts, so the equivalence tests are unaffected.
+- **Session 11: the rule preview pays with the same carry** (option B), so its bankroll column matches a real session.
+- **Session 11: `payoutRoundingBias` deleted, not repurposed.** The residual is one bound (≤ ½¢ per session), proven by the property test; a helper would only restate it.
+- **Session 11: the golden fixture is committed** (`runner.golden.json`, ~160 KB; regenerate only on purpose with `GOLDEN=write`). It stores 50 results per cell plus a digest over 2,000 full paths, instead of every result, to stay small. It also holds the old-rule 100k −110 run, so "before" in the regression test comes from the real old runner, not a re-implementation.
+- **Session 11: one invariant table test** (`invariant.test.ts`) covers the 3 classic games and the 2 sports games for all 9 strategies. The classic columns duplicate the per-strategy `describeEvInvariant` runs (same seeds, same numbers), which stay because the "add a strategy" recipe relies on them.
+- **Session 11: the property test's per-round bound is ½¢ + Σ ε × |owed|,** not a hand-picked 1e-6: at $10M bets on a 1,000 payout, float noise is about 1e-4¢, measured at 0.50015¢ worst.
+- **Session 11: the live check was a temporary Playwright spec** (not committed) comparing the live table to `engineTable` in Node, as in session 9.
+- **Session 11 ran on Windows / PowerShell.**
