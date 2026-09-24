@@ -30,21 +30,33 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 
 - Vite + React + TypeScript (`strict: true`, `noUncheckedIndexedAccess: true`)
 - Vitest for tests, colocated as `*.test.ts`
+- Playwright (Chromium only) for E2E, in `e2e/*.spec.ts`, against the PRODUCTION build served under `/strategylab/` (session 9)
 - Web Worker via Comlink for all simulation
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: `iangopenbusinessai-lab/strategylab` (private). Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
-- Deploy: Vercel auto-deploys on push to `main`. Never run the Vercel CLI.
-- **Background dev/preview servers:** stopping the task that ran `npx vite preview` (or `vite`) can leave vite's `node` child alive and holding the port. Before starting a server, check the port; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
+- GitHub: `iangopenbusinessai-lab/strategylab` (**public**, intentionally, since session 9). Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
+- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopenbusinessai-lab.github.io/strategylab/**.
+  - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
+  - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
+  - A failing test never deploys. The Pages source is "GitHub Actions" (`build_type: workflow`).
+- **Base path:** `vite.config.ts` reads `VITE_BASE` (default `/`; it must start and end with `/`). The Pages build and E2E use `/strategylab/`.
+  - Never hardcode a base path in app code. Assets and the worker resolve via `new URL(..., import.meta.url)`. Share links are built from `location.origin + location.pathname`.
+  - `#s=` links need no 404 fallback: a fragment never reaches the server, and the app has no client-side routes.
+- **Line endings:** `.gitattributes` enforces LF (`text=auto eol=lf`) in the repo and working copies (session 9).
+- **Background dev/preview servers:** stopping the task that ran `npx vite preview` (or `vite`) can leave vite's `node` child alive and holding the port. E2E uses port 4180 (`npm run preview:pages`). Before starting a server, check the port; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
 - **Never create files with `echo > file` in PowerShell.** Windows PowerShell 5 writes UTF-16 LE, which git treats as binary (this happened to the first `README.md`). Use the editor/file tools, or `Set-Content -Encoding utf8`.
 
 ### Commands
 
 ```powershell
-npm run dev     # local dev server
-npm run test    # Vitest, must be clean before any commit
-npm run build   # strict type check + production build, must be clean before any push
+npm run dev           # local dev server (base "/")
+npm run test          # Vitest, must be clean before any commit (chain commits after it: npm run test && git commit ...)
+npm run build         # strict type check (app, config, E2E specs) + production build, must be clean before any push
+npm run lint          # oxlint
+npm run e2e           # Playwright: builds with VITE_BASE=/strategylab/, serves on :4180, runs e2e/*.spec.ts
+npm run build:pages   # the GitHub Pages build (VITE_BASE=/strategylab/)
+npx playwright install chromium   # once per machine, before the first e2e run
 ```
 
 ---
@@ -96,6 +108,17 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 ## Folder map
 
 ```
+.github/workflows/ci.yml  CI (lint, unit, build, e2e) + GitHub Pages deploy after all pass
+playwright.config.ts      E2E: production build under /strategylab/ on :4180, Chromium, clipboard permissions
+e2e/
+  helpers.ts          engineTable (same scenario through the engine in Node), watchPage, canvas-not-blank, dataNum
+  app.spec.ts         sub-path load, all strategies' forms, default run = engine, shared axes, labels, fan hover
+  replay.spec.ts      replay legend, fit to first ending (Martingale bust), drag-zoom, dblclick reset, hover, click a path
+  rules.spec.ts       rule builder form, reorder/delete, preview = previewRule, run beside built-ins, JSON errors, Kelly blank
+  links.spec.ts       SUB-PATH copy link, reload, garbage/cut-off fragments, too large, blocked copy, ready-made links, Back
+  sports.spec.ts      readout = sportsReadoutLines, decimal round trip, invalid odds, estimate mode, run + link
+  layout.spec.ts      dark/light theme redraws (data-theme, data-color), 360 px without horizontal scroll
+  responsiveness.spec.ts  100k x 6: typing mid-run, cancel, fresh run, long tasks
 src/
   engine/
     rng.ts            mulberry32 + splitmix32
@@ -516,6 +539,9 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 
 The original roadmap is complete. Candidates beyond it (not scheduled; see STATUS "Still open"):
 
+- **Cents-rounding bias (owner, session 9):** at 100k sessions on −110, Flat's shift is ~4.7 SE, so the UI's "z vs theory" will look significant. (The shift is +0.0455% at a $5 base bet, 2.12 SE at 20,000 sessions, so 2.12 × √5 ≈ 4.7 SE at 100k. At the app's default $10 base bet it is only −0.0045%.) Fix: a per-session sub-cent carry in the runner. It needs its own session, with the full invariant suite re-run. E2E won't need changing: its expected numbers come from the engine.
+- **Vercel (optional later):** deploy the same build at a domain root with `VITE_BASE=/` (the default). No code change is needed.
+
 - **Pushes (three-way outcome):** a tie that returns the stake. Needs the runner to resolve a round into win / push / loss from ONE draw (so CRN still holds) and a Game with a push probability. It is the first real change to the Game abstraction, so it needs its own spec.
 - **Parlays:** multi-leg bets whose legs all must win. Out of the two-way model; needs a spec for leg correlation (independent legs only?).
 - **Other de-vig methods:** power, Shin, additive. Each gives a different fair p for the same prices. They would be alternatives to proportional de-vig in `odds.ts`, with hand-computed tests like the proportional ones.
@@ -841,9 +867,80 @@ Session 8 (2026-09-23, Windows / PowerShell). `npm run test` (508 passed, 2 benc
     - The link is 209 characters and decodes to the identical game.
     - Build: `index-BlKlmlDe.js` 100.94 KB gzip.
 
+Session 9 (2026-09-24, Windows / PowerShell). `npm run test` (508 passed, 2 benchmark tests skipped), `npm run build`, `npm run lint` and **`npm run e2e` (29 passed)** all clean. **CI run [35964572482](https://github.com/iangopenbusinessai-lab/strategylab/actions/runs/35964572482) was green** (lint, unit, build, e2e, build-pages, deploy), and so was **[35964910545](https://github.com/iangopenbusinessai-lab/strategylab/actions/runs/35964910545)** after the action bump. `git diff 8e6db6f..HEAD -- src/engine/` is **EMPTY**. There are no engine changes. The app changes are the Copy link base (drop `location.search`) and `data-*` / `data-testid` test hooks.
+
+72. **Step zero:**
+    - **Secret scan** of all 65 commits (committed env/key/credential files, and token/key patterns in every added line): **clean**.
+    - **CLAUDE.md "binary" report:** not reproduced. The file is valid UTF-8 with no BOM and no NUL bytes, and git diffs it as text. The only file ever stored as binary is `README.md`, in the first two commits (the session 1 UTF-16 incident, fixed then).
+    - `.gitattributes` (`text=auto eol=lf`) was added. `git add --renormalize .` changed no content.
+73. **Base path:**
+    - `VITE_BASE` is read in `vite.config.ts`. The Pages build rewrites every URL: `/strategylab/favicon.svg`, `/strategylab/assets/index-*.js`, and the worker as `new URL("/strategylab/assets/sim.worker-*.js", import.meta.url)`.
+    - Copy link now uses `origin + pathname` only.
+    - Test: `links.spec.ts` "SUB-PATH". A `#s=` link opened at `/strategylab/` loads the rule, runs with numbers equal to the engine's, and Copy link yields a URL containing `/strategylab/#s=`. That URL equals the address bar and loads the identical scenario in a new page, which runs to the engine's numbers.
+    - `app.spec.ts` asserts that every request stays under `/strategylab/` and that nothing asks for `/src/`.
+74. **E2E design (owner rules):**
+    - Expected numbers are computed by running the same scenario through the engine in Node (`engineTable`), never hardcoded.
+    - Specs assert state: text, and `data-*` attributes the canvases write (ranges, counts, zoom, hover round, theme, color, label boxes, draw count). There is also a canvas-not-blank pixel count.
+    - No screenshot baselines, web-first assertions only, no sleeps, no skips.
+    - `tsc -b` type-checks the specs, so a type error in a spec stops the E2E server from starting.
+75. **Owner checklists → specs** (every item of sessions 1–8; nothing dropped):
+
+    | Checklist item | Spec | Result |
+    |---|---|---|
+    | S1–3: speed in a focused, visible tab | `responsiveness.spec.ts` + a one-off run of the session 1 scenario | **visible + focused**. Session 1's flat 100k × 10,000: **30.0 s browser vs 28.0 s Node** (was 75.7–89.3 s hidden); mean final $93,257.60, identical to session 1 |
+    | S5: all 8 strategies in the picker, forms from `configSchema` | `app.spec` "session 5: all eight…" | pass |
+    | S5: Kelly form + help text | `app.spec` same test | pass |
+    | S5: Kelly default 100% strategyStop → EV "—" | `app.spec` "default run…" | pass (the whole table equals the engine) |
+    | S5: Start label doesn't overlap the win-target label | `app.spec` "charts…" (label boxes from `refLineH`) | pass |
+    | S5: replay drag-to-zoom | `replay.spec` "drag-to-zoom…" | pass |
+    | S5: "fit to first ending" on a Martingale bust | `replay.spec` (bust found by replaying in Node) | pass |
+    | S5: double-click reset | `replay.spec` drag + fit tests | pass |
+    | S5: fan + replay hover crosshair and readouts | `app.spec` "fan hover", `replay.spec` "hover" | pass |
+    | S4: shared x/y ranges across panels | `app.spec` "charts…" (fan and histogram, linear and log) | pass |
+    | S6.1: blank rule, swatch, Form/JSON tabs | `rules.spec` (1-3) | pass |
+    | S6.2: build a rule, rename, ↑/↓/Delete | `rules.spec` (1-3) | pass |
+    | S6.3: preview follows edits, `LLX` error, a stop | `rules.spec` (1-3) (preview = `previewRule` in Node) | pass |
+    | S6.4: run beside Martingale: column, color, panels, numbers | `rules.spec` (4-5) | pass |
+    | S6.5: replay includes the rule | `rules.spec` (4-5) | pass |
+    | S6.6: pasted JSON: unknown key, not-JSON, fix → form returns | `rules.spec` (6) | pass |
+    | S6.7: Kelly assumed probability blank | `rules.spec` (7) | pass |
+    | S6.8: narrow width + dark theme | `layout.spec` (both tests) | pass |
+    | S7.1: copy and reopen in a new tab; nothing auto-runs | `links.spec` SUB-PATH | pass |
+    | S7.2: reload after copy keeps the rule | `links.spec` (2) | pass |
+    | S7.3: garbage and cut-off fragments | `links.spec` (3) | pass |
+    | S7.4: too large → error, nothing copied | `links.spec` (4) (6 adversarial rules; clipboard untouched) | pass |
+    | S7.5: blocked copy + reason; Add disabled at 8 | `links.spec` (5) | pass. **Checklist wording corrected:** "clear Starting bankroll" does NOT block copying, because `NumberField` never commits unparseable text (session 1 design) and the scenario keeps its last valid value. The spec uses an invalid committed value (0). |
+    | S7.5: "hovering shows the reason" | `links.spec` (5): the wrapper's `title` + the visible help line | pass. The browser's native tooltip rendering isn't inspectable, so the `title` attribute is asserted instead |
+    | S7.6: v1 / partial / newer-version links | `links.spec` (6) | pass |
+    | S7.7: Back doesn't re-apply a loaded link | `links.spec` (7) | pass |
+    | S8.1–6: readout, decimal round trip, invalid odds, estimate, run, link | `sports.spec` (readout = `sportsReadoutLines` in Node) | pass |
+    | "Vercel deploy: not connected" | dropped | Vercel is no longer the deploy target (Roadmap: optional later) |
+
+76. **Bugs found:**
+    - **App bugs found by E2E: none.**
+    - One **test-infrastructure bug:** the Vitest default 5 s timeout. Commit `6f08221`: the equivalence test "Paroli cap 3, invariant" timed out once at 5,868 ms under parallel-file load (normally about 1.8 s). Its fixed-seed bit-identity assertion is deterministic, so it was the harness budget, not the engine. The fix is a suite-wide `testTimeout: 60_000`; no assertion changed.
+    - Every E2E failure while writing the specs was a spec mistake, fixed in the spec before its first commit:
+      - headless Chromium doesn't fetch favicons;
+      - `getByLabel` on a `<select>` nested in its label matches the options' text, so specs query by role instead;
+      - a raw mouse move missed an off-screen canvas;
+      - locating a card by its name broke when the rule was renamed;
+      - an over-broad error selector;
+      - a data-attribute read before the first draw (`dataNum` now waits).
+77. **Responsiveness** (`responsiveness.spec.ts`: 100k × 6, the Node benchmark scenario):
+    - **Run 1:** typing into Base bet mid-run updated immediately while progress kept advancing. Cancel gave "Cancelled…".
+    - **Run 2** (fresh worker): typing into Seed mid-run also updated. It finished in **20.4 s** (tab visible and focused), against **18.8 s for the same scenario in Node** in the test process, measured back to back.
+    - **Long tasks: 0** during the run and 0 over the whole page life.
+    - The results equal the engine's for the scenario at the click, and are correctly flagged stale.
+    - This resolves the "browser 4–5× slower than Node" item from sessions 1–3: it was the hidden, unfocused automation tab.
+78. **Deploy:**
+    - Pages was already `build_type: workflow` when checked right before the push (it had been `legacy` earlier in the session, switched outside this session). `gh api -X PUT repos/iangopenbusinessai-lab/strategylab/pages -f build_type=workflow` was run anyway, as instructed, and returned HTTP 204.
+    - **Live:** `https://iangopenbusinessai-lab.github.io/strategylab/` → **200**. The HTML references `/strategylab/assets/index-*.js` and **no** `/src/main.tsx`. The worker `/strategylab/assets/sim.worker-B2nJLaBe.js` → **200** (`application/javascript`). The favicon → 200.
+    - **Live run:** headless Chromium (Playwright, local) opened the live URL and ran **1,000 sessions**: "Done: 1,000 sessions in 0.0s.", with EV per $ **−2.690% | −3.308%**, exactly the engine's numbers for that scenario. The worker loaded from the sub-path, with no console errors.
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
+- **ALL owner checklists below (sessions 5–8) are now covered by E2E and pass in CI: see STATUS 75 for the item-by-item mapping.** The lists stay here for history only; nothing in them still needs a human.
 - **Session 5 browser pass (owner-run, no browser automation this session).** All eight strategies appearing in the picker with working config forms and no UI edits; Kelly's config form (assumed win probability + fraction) and its help text; the Start-label fix (session 4) no longer overlapping the win-target label; the replay drag-to-zoom, "fit to first ending" on a Martingale bust, double-click reset; and the fan/replay hover crosshair + readouts rendering. The numeric outcomes behind these (Kelly 100% strategyStop / "—" EV; Kelly assumed 0.55 EV ≈ −2.70%) ARE verified programmatically (STATUS 41); the visuals are not.
 - **Session 6 browser pass (owner-run: the Chrome extension was not connected).** `npm run build; npm run preview`, then:
   1. In "Strategies to compare", pick **Custom rule (start from…) → Blank rule** and click Add. The card shows a colored swatch, the name "My rule", and Form / JSON tabs.
@@ -873,7 +970,6 @@ Session 8 (2026-09-23, Windows / PowerShell). `npm run test` (508 passed, 2 benc
   5. **Run:** back to −110 / −110 market, and Run with Flat + Martingale (the default). Expect the numbers in STATUS 71: Flat −4.590%, Martingale −4.635%.
   6. **Link:** Copy link, open it in a new tab, and confirm the game shows Sports odds with the same inputs and readout.
 - **Sessions 4-6 checklists above are STILL owner-run** (replay zoom/hover, rule builder form, dark theme, phone width, Kelly blank, Start label): browser automation was unavailable in sessions 5, 6, 7 and 8.
-- Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
@@ -886,8 +982,10 @@ Session 8 (2026-09-23, Windows / PowerShell). `npm run test` (508 passed, 2 benc
 - Sequence rules copy the line on each loss (O(line length) per loss), like the built-in Labouchère. That is not the O(entries) bound progressions have, but it is bounded by the session's losses.
 - An unknown key inside an object hides that object's field errors until the key is fixed. Every problem is reported only once the keys are right.
 - ~~Rules are not saved anywhere yet: a page reload loses them.~~ **Closed in session 7:** Copy link puts the scenario (rules included) in the address bar, so a reload restores it. Saving without a link (storage, accounts) is still out of scope.
-- Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
-- The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
+- ~~Browser vs Node speed gap (~4–5×).~~ **Resolved in session 9:** in a visible, focused tab, the browser is within ~10% of Node (STATUS 77). The gap was the hidden automation tab.
+- CI `ubuntu-latest` will move to Ubuntu 26 from 2026-10-19 (GitHub notice). Nothing to do unless a run breaks.
+- A 1,000-session run reports "in 0.0s": it genuinely takes under 50 ms, and the status shows one decimal. Cosmetic only.
+- (Obsolete since session 9: Playwright's headless tab is visible and focused.) The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
 - Hover crosshair uses `--chart-axis` (theme-aware) but there is still no on-canvas tooltip box; values go to a text readout under each chart. Good enough; a floating box could be nicer later.
 - Replay zoom is x-only (no y zoom / brush) and only the bankroll strip drives it. Fine for reading a short bust; a full brush is future work.
 
@@ -1012,3 +1110,16 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 8: golden v1/v2 link outputs were captured from the session 7 code itself** (commit `76a284f` in a temporary git worktree with a node_modules junction, removed afterwards; the junction was deleted without touching its target). This way "loads exactly as before" is compared against real session 7 output, not against my memory of it.
 - **Session 8: a tone test** (`sportsReadout.test.ts`) scans the sports UI, readout, ConfigPanel and `odds.ts` for bookmaker names, URLs and tipster vocabulary, comments included.
 - **Session 8 ran on Windows / PowerShell.**
+- **Session 9: the repo is public** (owner: intentional). Deploy moved from Vercel to **GitHub Pages via Actions, after CI passes**; Vercel is on the roadmap as optional (`VITE_BASE=/`).
+- **Session 9: `VITE_BASE` defaults to `/`;** the Pages build and E2E set `/strategylab/`. `npm run build:pages` uses `cross-env` (a new dev dependency) so it also works from PowerShell and cmd.
+- **Session 9: Copy link builds from `location.origin + location.pathname` only** (owner decision 1). A query string is no longer carried into links. The same base is used when the address bar is canonicalized.
+- **Session 9: Playwright runs Chromium only** (owner decision 3), 1 worker in CI and 2 locally, with no retries (a flaky spec is a bug, not something to retry).
+- **Session 9: E2E expected numbers come from the engine in Node, never hardcoded** (owner change to decision 4), so the planned cents-rounding fix won't break E2E.
+- **Session 9: charts expose their state through `data-*` attributes** written by the draw effect (`chartState`, `countDraw` in `canvas.ts`). `refLineH` returns its label box so specs can prove labels don't overlap. No screenshot baselines.
+- **Session 9: the Pages deploy is two jobs.** `build-pages` (contents: read, checks out and builds) and `deploy` (only `pages: write` + `id-token: write`, no checkout), so the deploy job has exactly the owner's minimum permissions. The workflow default is `contents: read`.
+- **Session 9: actions pinned to their Node 24 majors** (checkout v7, setup-node v7, upload-artifact v7, upload-pages-artifact v5, deploy-pages v5) after the first run's Node 20 deprecation warnings (owner decision 6).
+- **Session 9: Vitest `testTimeout: 60_000` suite-wide** (see STATUS 76): Monte Carlo tests are CPU-bound and deterministic, and the 5 s default is a harness budget, not an assertion.
+- **Session 9: `tsconfig.e2e.json`** (referenced from `tsconfig.json`) type-checks `e2e/` and `playwright.config.ts` with bundler resolution, so `npm run build` (and therefore the E2E server and CI) fails on a type error in a spec.
+- **Session 9: the live-site check used local headless Playwright against the live URL** (owner decision 5); the Chrome extension never connected.
+- **Session 9: commits are chained after `npm run test &&`.** One early session 9 commit went in while a test had failed (the timeout above); the chain prevents that.
+- **Session 9 ran on Windows / PowerShell.**
