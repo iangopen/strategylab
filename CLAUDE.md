@@ -148,7 +148,9 @@ src/
       RulePreview.tsx W/L script -> bet ladder table
       edit.ts         pure form-editing helpers (tested)
       preview.ts      pure preview adapter over the COMPILED rule (tested)
-    RunControls.tsx
+    RunControls.tsx   Run / Cancel / progress, and Copy link (tooltip + reason when blocked)
+    LinkBanner.tsx    outcome of opening a link: loaded, loaded except N items, or not loaded
+    linkBoot.ts       browser glue: one page loader, initial load, replaceState canonicalization
     ResultsTable.tsx  renders any stats registry
     ChartSlot.tsx     placeholder panels shown before the first run
     theme.ts          System / Light / Dark preference (data-theme; not scenario state)
@@ -158,7 +160,15 @@ src/
       FanChart.tsx    fan + spaghetti small multiples (click a path to replay)
       HistogramChart.tsx  final-bankroll histograms, shared bins, linear/log
       ReplayChart.tsx stacked replay: bankroll, bet size, ONE win/loss strip
-  scenario.ts         ScenarioConfig (v2: builtin | custom instances), defaults, validation, toSimRequest (dollars -> cents), migrateScenario (v1 -> v2)
+  scenario.ts         ScenarioConfig (v2: builtin | custom instances, at most MAX_STRATEGIES = 8), defaults, validation, toSimRequest (dollars -> cents), migrateScenario (v1 -> v2)
+  share/              scenario links (see "URL scenario format"): UNTRUSTED input, no React, no DOM
+    limits.ts         prefix, 8,000-character cap, depth limit, size budget
+    base64url.ts      strict hand-written base64url (never throws, errors carry a position)
+    compact.ts        key map, rule/config compaction, type-level expansion of untrusted payloads
+    link.ts           encodeScenarioLink / decodeScenarioLink, copyBlocker, partial loading (settle)
+    linkLoader.ts     applies each fragment at most once per page lifetime (pure, tested)
+    testLinks.ts      test-only: fragmentOf(payload)
+    *.test.ts         round trip, size budget, load, save, migration, malicious input
   App.tsx             owns the ScenarioConfig and the SimClient
 ```
 
@@ -331,6 +341,64 @@ Script `WWWWLW` → bets 1, 2, 4, 1, 2, 1, next 2. On the third win the streak r
 
 Script `WLWW` → bankroll 110, 100, 110, 120. Bets 1, 1, 1, 1, then "stop": after the fourth round the bankroll is 120 ≥ 120% of 100, so `stop` fires and the session ends `strategyStop`.
 
+## URL scenario format
+
+A scenario travels in the URL **fragment**: `#s=<base64url(UTF-8(compact JSON))>`. It is never in the query string: the fragment never reaches a server, so there are no request-size limits and no server logs of scenario data. A link is **untrusted input**, handled like pasted rule JSON:
+- **Decoding** (`src/share/link.ts`) never throws and never evaluates anything. Every stage is bounded by the length cap.
+- **Custom rules** go through the session 6 `validateRule`.
+- **The rebuilt scenario** goes through `validateScenario`.
+- **The no-eval scan** covers `src/share/`.
+
+### Key map (top level)
+
+| Key | Field | Notes |
+|---|---|---|
+| `v` | version | = `ScenarioConfig.version` (currently 2). The link format version IS the scenario version: any key-map change bumps it and needs a migration. |
+| `g` | game | Preset id (`"european"`, `"american"`, `"fairCoin"`) when the numbers match the preset exactly; otherwise `[presetId, winProb, netPayout]` (`presetId` may be `"custom"`). |
+| `b` `bb` `tn` | startBankroll, baseBet, tableMin | Dollars, as in `ScenarioConfig`. |
+| `tx` `sw` `sl` | tableMax, stopWin, stopLoss | Omitted = off / no limit (`null`). |
+| `r` `n` `sd` | maxRounds, sessions, seed | |
+| `f` | insufficientFunds | Omitted = `"stop"`; `"a"` = `"allIn"`. |
+| `st` | strategies | At most 8. Instance `uid`s are NOT encoded (they are React identity); loading makes new ones. |
+
+**Strategies in `st`:**
+- **Built-in:** `[id]` when the config equals `defaultConfig`, else `[id, {key: value}]` with only the keys that differ; `null` = blank (optionalNumber). Config keys keep their real names.
+- **Progression rule:** `["p", name, startUnits, onWin, onLoss]`. Each entry is `[condition, action]`, or `[action]` for the default (last) entry.
+  - Conditions: `["ws", n]` winStreak, `["ls", n]` lossStreak, `["cp", n]` cycleProfit, `["bu", n]` betUnits, `["bg", pct]` bankroll ≥ pct%, `["bl", pct]` bankroll ≤ pct%.
+  - Actions: `["s", u]` set, `["m", x]` multiply, `["a", u]` add, `["r"]` reset, `["rc"]` resetCycle, `["x"]` stop.
+- **Sequence rule:** `["q", name, line, "r" | "s"]` (restart | stop).
+
+**Shrinking is lossless only:** short keys, and omitting a field only when it equals its documented default. Numbers are written by `JSON.stringify` (shortest exact round trip). A round-trip test proves deep equality, uids aside.
+
+### Limits
+
+- **Hard cap: 8,000 characters for the WHOLE link** (origin + path + fragment). RFC 9110 §4.1 recommends supporting URIs of at least 8,000 octets, and it is the practical limit of chat, mail and CDN tools a link passes through.
+  - Copy link refuses a longer link with a message (length, limit, what to shorten). It NEVER truncates.
+  - Loading rejects any fragment longer than 8,000 characters before decoding anything.
+- **Nesting deeper than 16** is rejected by a linear pre-scan BEFORE `JSON.parse`. A real payload nests at most 6 deep.
+- **Size budget:** a "typical" scenario (4 strategies, one a 10-entry rule, plus a 60-character address allowance) must stay under 2,000 characters. It is currently 562, enforced in `size.test.ts`.
+
+### Loading
+
+`decodeScenarioLink(hash)` returns one of:
+- **`none`:** there is no `#s=` fragment.
+- **`error`:** nothing is loaded and the defaults stay untouched. Causes: over the length cap, bad base64, invalid UTF-8, not JSON, too deep, not an object, a bad version, or a version newer than this app (the message says "needs a newer version of the app").
+- **`loaded`:** the scenario loaded, plus a `dropped` list of everything that could not be loaded, each with the validator's message.
+
+Version 1 links are expanded into a `ScenarioConfigV1` and upgraded by the EXISTING `migrateScenario` before validation.
+
+**Partial loads:**
+- A wrong type is dropped at expansion.
+- Then, while `validateScenario` reports errors:
+  - an offending top-level field falls back to its default (optional fields turn off);
+  - an offending built-in setting resets to its default;
+  - an unknown strategy or an invalid rule is left out.
+- Unknown keys are reported, at most 5 by name and the rest summarized.
+
+Opening a link never runs a simulation.
+
+**History.** The page keeps ONE loader (`ui/linkBoot.ts`) that applies each fragment at most once per page lifetime. StrictMode double effects, `hashchange` + `popstate`, and Back to an already-loaded fragment never re-fire it, and a real reload (a new page lifetime) does apply it. After loading, `replaceState` writes the canonical fragment (or strips an unreadable one); loading never adds a history entry. Copy link also uses `replaceState` (there is no separate in-app "apply" step, so no `pushState`), which is why reloading right after copying restores the scenario, custom rules included.
+
 ---
 
 ## Roadmap
@@ -343,7 +411,7 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 4. **Charts:** evaluate uPlot vs. canvas; sample-path spaghetti + percentile bands, final-bankroll histogram, single-session replay. Sample-path downsampling must preserve extrema and the final point (e.g. min/max per bucket), never plain stride; stride hides the bust. (Downsampler done in session 3; charts rendered in session 4.)
 5. **More strategies:** Labouchere, Oscar's Grind, Kelly. (Also adds `ctx.game` to the strategy contract, and the replay zoom + chart hover readouts.)
 6. **JSON rule builder:** user-defined strategies compiled into the same Strategy contract. Custom Labouchere sequences (beyond the presets) belong here.
-7. **URL-serialized scenarios:** encode ScenarioConfig in the URL.
+7. **URL-serialized scenarios:** encode ScenarioConfig in the URL. (Done in session 7; see "URL scenario format".)
 8. **Sports-odds mode:** American/decimal odds input, vig, derived winProb and netPayout.
 
 ---
@@ -554,6 +622,55 @@ Session 6 (2026-09-23, Windows / PowerShell). `npm run test` (391 passed, 2 benc
     - A pasted rule with `"script":"alert(1)"` gives `unknown key "script" (allowed: kind, name, startUnits, onWin, onLoss)`. Non-JSON gives `Not valid JSON: Expected property name or '}' in JSON at position 2 …`.
 53. **Production build serves:** `npm run build` + `npm run preview` served `index-zTg6uhW-.js` (92.11 KB gzip) and `sim.worker-B2nJLaBe.js`, all 200. The bundle contains the picker's custom-rule group, and the worker contains the rule compiler. **Not driven in a browser:** the Claude-in-Chrome extension was not connected (2 attempts), so the visual pass is owner-run (below).
 
+Session 7 (2026-09-23, Windows / PowerShell). `npm run test` (452 passed, 2 benchmark tests skipped), `npm run build` and `npm run lint` all clean under strict. `git diff 85ce2af..HEAD -- src/engine/runner.ts src/engine/montecarlo.ts src/engine/stats/ src/engine/rules/validate.ts src/engine/rules/compile.ts` is **EMPTY**. The only engine change is `rules/noEval.test.ts`, whose scan was extended to the link code. Delivered: scenario links (codec, size budget, load path, save path, v1 migration, malicious-input hardening, UI). **This closes the "custom rule is lost on reload" gap:** after Copy link, the address bar holds the link, and a reload restores the scenario, rules included (verified at the code level; the in-browser reload is on the owner checklist).
+
+54. **Round trip** (`roundtrip.test.ts`): each case is encoded, decoded, and passed through `migrateScenario`, which returns the SAME object (version unchanged). The result deep-equals the original, uids aside, with nothing dropped and nothing left out. Cases:
+    - all 8 built-ins with default configs (the maximum);
+    - all 8 with every setting changed (Kelly with 0.61 and with blank);
+    - the 4 session 6 example rules, the blank rule, and a hand-built rule with every field non-default: 4 + 10 entries, every condition and action code, a non-ASCII name, values at range edges (0.01, 1,000,000, -1000, 999.99);
+    - every top-level field non-default (custom game 0.4712345678901234 / 1.0833333333333333, $1,234.56 bankroll, table max, win target, stop-loss floor, all-in, 777 rounds, 25,000 sessions, seed 4,294,967,295);
+    - each preset game. The default scenario's link is 191 characters.
+55. **Size** (`size.test.ts`, 60-character address allowance):
+    - The **typical scenario** (Flat, Martingale x2, Kelly 1/2, and a 4 + 6 = 10-entry rule, $250 table max) is **562 characters** (fragment 502 bytes); the budget is 2,000.
+    - **8 x maximum-size rule** (10 + 10 entries, 40-character name): fits at **5,905** and round-trips exactly.
+    - **Adversarial maximum** (17-digit numbers, 40 x "€" names): **12,155**, refused with "...over the 8,000-character limit... Nothing was copied..." and no fragment returned.
+    - The whole-link cap includes the address.
+56. **Load path** (`load.test.ts`):
+    - A valid link loads with nothing dropped. Invalid fields each produce the exact reported message:
+      - `b: -5` -> default, "Must be at least $0.01. The link had -5; using 1000."
+      - `b: 5000` makes `sw: 1100` invalid -> win target off.
+      - Wrong types (`bb: "10"`, `n: null`) are dropped at expansion.
+      - Unknown keys (including `__proto__` from raw JSON) are reported.
+      - Kelly `assumedWinProb: 5` -> reset to blank, Kelly kept.
+      - Unknown strategy `doubleUpSystem`, a rule with `by: 50` (the validator's own message), and an unknown condition code -> each left out.
+    - 12 strategies -> the first 8 load. None valid -> an empty list, which the app flags.
+    - Fully invalid links (bad base64, `[1,2]`, not JSON, no version, `v: "2"`) -> error. `v: 3` -> "needs a newer version of the app".
+57. **History** (verification 7, `load.test.ts`):
+    - The same fragment handled 4 times in one page lifetime (initial, StrictMode, hashchange, popstate) applies **once**.
+    - A fragment the app wrote itself (`markSeen`) is not loaded back.
+    - **A new loader (a real reload) applies it again.**
+    - Different fragments still load. Errors are applied once. The memory is bounded (50 fragments).
+58. **Save path** (`save.test.ts`):
+    - Valid scenarios copy completely.
+    - An invalid rule and a built-in with `multiplier: 99` are left out (indices [1, 2]), and the link decodes cleanly to the other two.
+    - Copy is blocked, with reasons, when: a scenario field is invalid, there are no strategies, none is valid, or there are more than 8.
+59. **Migration** (verification 5, `migration.test.ts`):
+    - A version-1 link with Kelly `{assumedWinProb: 0, fraction: 0.5}` loads as `{fraction: 0.5}` with **nothing dropped** (migrated, not reset), and 0.6 is kept.
+    - The same 0 in a version-2 link IS reported. That contrast proves the path runs through `migrateScenario`.
+    - Custom rules in a v1 link are left out. Versions 0, -1, 1.5, "1" and null are errors.
+60. **Malicious input** (verification 4, `malicious.test.ts`; each decode asserted **< 50 ms** and **< 2 MB of heap growth**, messages < 600 characters, dropped lists < 40; the file passed 5 runs in a row):
+    - **Prototype pollution:** `__proto__` / `constructor` / `prototype` keys at the top, in configs, in the strategy list and in the game. Kelly never picks up a smuggled `fraction: 9`, and `Object.prototype` / `Array.prototype` have no keys afterward.
+    - **Nesting:** 5,000-deep nesting inside the cap, nesting hidden in a valid payload, and deep objects are all rejected before `JSON.parse`. Brackets inside strings don't count.
+    - **Size:** a **20 MB** string is refused by length without decoding. Within the cap: a 5,000-character name gets the validator's name error; 250 unknown keys at two levels give 12 summarized reports; a 2,000-item strategy list is only looked at up to 8.
+    - **Invalid base64:** a bad character, `+` and `/`, padding, non-ASCII, percent-encoding, `<script>`.
+    - **Truncation:** every truncation of a real link is an error.
+    - **Invalid UTF-8.**
+    - **Version:** `v: 999999` gives the newer-version message, and hostile versions are errors.
+    - **Wrong types everywhere:** 9 hostile values x every key and rule position.
+    - One test-side finding: the first heap measurement counted V8 flattening the test's own 20 MB concatenated input. The input is now flattened before measuring (a real `location.hash` is already flat).
+61. **No code evaluation** (verification 6): `rules/noEval.test.ts` now also scans `src/share/**`, `ui/linkBoot.ts`, `ui/LinkBanner.tsx` and `ui/RunControls.tsx`. All are clean.
+62. **Production build serves:** `npm run build` + `npm run preview` served `index-BBX1ndXj.js` (98.14 KB gzip) and the worker, both 200. The bundle contains "Copy link" and the newer-version and nesting messages. **Not driven in a browser:** the Chrome extension was not connected (3 attempts this session).
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -567,16 +684,29 @@ Session 6 (2026-09-23, Windows / PowerShell). `npm run test` (391 passed, 2 benc
   6. In the JSON tab, paste `{"kind":"progression","name":"x","startUnits":1,"onWin":[{"then":{"type":"reset"}}],"onLoss":[{"then":{"type":"multiply","by":20}}],"script":"alert(1)"}`. You should see the `unknown key "script"` error and Run blocked. Then paste `{ kind: 1 }` and read the "Not valid JSON" message. Then fix `by` to 2 and remove `script`. The Form tab should come back.
   7. On a Kelly card, clear "Assumed win probability" (blank = true probability). No error should show, and the placeholder reads "blank".
   8. Check narrow width (about 360 px) and dark theme for the builder.
+- **Session 7 browser pass (owner-run: no browser automation).** `npm run build; npm run preview`, then open `http://localhost:4173/`:
+  1. **Copy and reopen:** add a custom rule (e.g. Blank rule; after a loss, "Losses in a row >= 2" -> "Multiply by 2"), keep Martingale, and click **Copy link**. Expect "Link copied (N characters)...", and the address bar shows `#s=...`. Paste the link into a NEW tab: the banner says "Loaded the scenario from the link", and every field and the rule match exactly. Nothing runs until you click Run.
+  2. **Reload (the lost-on-reload fix):** reload the original tab. The rule is still there.
+  3. **Garbage fragment:** replace the text after `#s=` with garbage (e.g. `#s=hello!`) and press Enter. You should see "Couldn't load a scenario from this link" with a reason, your settings unchanged, and the garbage removed from the address bar. Also try a cut-off link.
+  4. **Too large:** add 6 custom rules and paste this into each one's JSON tab: the adversarial maximum rule from `size.test.ts` (40 x "€" name, 10 + 10 entries with 17-digit numbers). Session 7's throwaway script measured 1 -> 1,645, 5 -> 7,629, **6 -> too large**. Copy link should show the "over the 8,000-character limit... Nothing was copied" error.
+  5. **Blocked copy:** clear Starting bankroll. Copy link is disabled; hovering shows the reason and a help line repeats it. With 8 strategies, Add is disabled with its reason.
+  6. **Ready-made links** (append to `http://localhost:4173/`):
+     - a version-1 link with Kelly 0: `#s=eyJ2IjoxLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6MTEwMCwiciI6MTAwMCwibiI6MTAwMDAsInNkIjoxMjM0NSwic3QiOltbImZsYXQiXSxbImtlbGx5Iix7ImFzc3VtZWRXaW5Qcm9iIjowLCJmcmFjdGlvbiI6MC41fV1dfQ` -> Kelly's assumed probability should be blank, and the banner says it was upgraded;
+     - a partially valid link: `#s=eyJ2IjoyLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6OTAwLCJyIjoxMDAwLCJuIjoxMDAwMCwic2QiOjEyMzQ1LCJzdCI6W1siZmxhdCJdLFsiZG91YmxlVXBTeXN0ZW0iXSxbImtlbGx5Iix7ImFzc3VtZWRXaW5Qcm9iIjo1fV1dfQ` -> loaded except 3 items (win target, unknown strategy, Kelly setting);
+     - a newer-version link: `#s=eyJ2Ijo5OTk5OTksInN0IjpbXX0` -> "needs a newer version of the app".
+  7. **Back button:** after step 3, press Back to the earlier `#s=` entry. It must not reload the scenario a second time.
+- **Sessions 4-6 checklists above are STILL owner-run** (replay zoom/hover, rule builder form, dark theme, phone width, Kelly blank, Start label): browser automation was unavailable in sessions 5, 6 and 7.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Roadmap sessions 7 on (URL scenarios; sports-odds mode). Session 7's URL loader must run untrusted input through a full scenario parser, then `migrateScenario`, and rules through `validateRule`. `migrateScenario` is NOT a parser.
+- Roadmap session 8 on (sports-odds mode). When sports mode adds scenario fields, bump `ScenarioConfig.version` to 3, extend the link key map, and add a v2 -> v3 migration (links follow the scenario version).
+- The address bar is not kept in sync while editing (owner-approved in the session 7 plan). After opening a link and then editing, a reload brings back the LINK, not the edits, until Copy link is clicked again.
 - Rule language gaps, by design for now: one action per entry (no "multiply AND cap"), no Fibonacci-style step-back, no payout-capped bet (Oscar's Grind), no bankroll-proportional stake (Kelly). Those stay built-ins.
 - Only Martingale **×2** is proven bit-identical. A rule `multiply by m` compounds units by repeated multiplication, while the built-in computes `m ** level`, so for non-power-of-two m the last float bit can differ, which can change a rounded cent. Not tested, not claimed.
 - Sequence rules copy the line on each loss (O(line length) per loss), like the built-in Labouchère. That is not the O(entries) bound progressions have, but it is bounded by the session's losses.
 - An unknown key inside an object hides that object's field errors until the key is fixed. Every problem is reported only once the keys are right.
-- Rules are not saved anywhere yet (out of scope): a page reload loses them. URL sharing (session 7) is the planned home.
+- ~~Rules are not saved anywhere yet: a page reload loses them.~~ **Closed in session 7:** Copy link puts the scenario (rules included) in the address bar, so a reload restores it. Saving without a link (storage, accounts) is still out of scope.
 - Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
 - The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
 - Hover crosshair uses `--chart-axis` (theme-aware) but there is still no on-canvas tooltip box; values go to a text readout under each chart. Good enough; a floating box could be nicer later.
@@ -668,3 +798,19 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 6: the fuzz uses the invariant scenario with maxRounds 200 and 1,000 sessions per rule per game** (the "small Monte Carlo"). With 400 z-tests at 4 SE, a chance failure has roughly a 2.5% probability. Seeds are fixed, so the test is deterministic, and the worst |z| is printed for every run.
 - **Session 6: the equivalence runs two scenarios** (the app default, and the invariant scenario with a tableMax clamp and stops), so clamped progressions are covered too.
 - **Session 6 ran on Windows / PowerShell,** as documented.
+- **Session 7: a real reload is a new page lifetime and re-applies the link** (that is the lost-on-reload fix). "Does not re-fire" applies within one page lifetime: StrictMode, hashchange + popstate, and Back to an applied fragment (owner-confirmed plan).
+- **Session 7: Copy link writes the link into the address bar with `replaceState`.** There is no separate in-app apply step, so there is no `pushState`. Loading uses `replaceState` too, writing the canonical form or stripping an unreadable fragment.
+- **Session 7: no automatic address-bar sync while editing** (owner-confirmed). See Still open.
+- **Session 7: Copy link leaves out strategies with errors and names them** ("Left out of the link because they have errors: ..."). It is disabled only when a scenario field is invalid, there are no strategies, none is valid, or there are more than 8.
+- **Session 7: partial-load fallbacks.** Top-level -> the default (optional fields -> off); a built-in setting -> its default; an unknown strategy or invalid rule -> left out; strategies beyond 8 -> left out. If none survive, the scenario loads with an empty list and the app's own validation says "Add at least one strategy".
+- **Session 7: `MAX_STRATEGIES = 8`** (one per palette color) in `validateScenario`. The picker's Add is disabled at 8 with the reason. This limit is new this session.
+- **Session 7: hard cap 8,000 characters for the whole link; depth limit 16 before `JSON.parse`.** Loading rejects fragments over 8,000 before decoding.
+- **Session 7: the link format version is the scenario version** (`v`). A key-map change bumps both and needs a migration.
+- **Session 7: link code lives in `src/share/`** (outside the engine, no React). Browser glue is in `ui/linkBoot.ts`, which is the only code that touches `location` and `history`.
+- **Session 7: instance uids are not encoded.** Loading makes new ones, and round-trip equality is checked uids aside.
+- **Session 7: the base64url codec is hand-written** (not `atob`/`btoa`): strict alphabet, no padding, never throws, errors carry a position, and the pending-bit accumulator stays bounded.
+- **Session 7: a "copied" confirmation clears after 5 s.** Errors and left-out warnings stay until the next copy. If the clipboard is unavailable, the link appears in a read-only field.
+- **Session 7: the Copy link tooltip lives on a wrapper `<span>`** (disabled buttons don't show `title` in every browser), and a visible help line repeats the reason.
+- **Session 7: unknown keys are reported at most 5 by name per object, then summarized,** so a hostile link can't produce an unbounded error list.
+- **Session 7: the size-budget test counts a 60-character address allowance,** since the real site address is unknown in tests.
+- **Session 7 ran on Windows / PowerShell.**
