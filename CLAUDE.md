@@ -94,7 +94,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 9. **Stats are a plug-in layer** (`src/engine/stats/`). A stat is `{ id; label; format: "money" | "pct" | "ratio" | "int"; emphasis?: boolean; compute(acc: Accumulator, ctx: RunContext): number }`, where `RunContext` is read-only `{ game, edge, config, nSessions }` (session 3). The Accumulator is built in a single pass per strategy and holds running sums (final, wagered, rounds, sums of squares for SE), endReason counts, and one `Float64Array` per strategy for EACH per-session column: final bankroll, max drawdown, longest losing streak (session 3). These columns NEVER leave the worker; only derived outputs cross, typed arrays via `Comlink.transfer`. Every percentile goes through ONE function, `quantileSorted` (type 7) in `stats/quantile.ts`, on a sorted copy made once per column (`sortedColumn`). NEVER retain full paths for all sessions. Stats are registered in `stats/registry.ts`, and the results table renders purely from that registry.
 
-10. **runMonteCarlo(game, strategies[], config, nSessions, masterSeed, onProgress)** runs every strategy over the SAME session seeds and returns per strategy: stat values, raw endReason counts, the first 50 session paths (streaming min/max downsampled), final-bankroll histogram counts over ONE set of 50 bins shared by every strategy in the run, and p5/p25/p50/p75/p95 percentile bands at round 0 + up to 200 checkpoints, from the first min(2000, n) sessions (the same indices for every strategy). Band and sample-path sessions are observed through the runner's optional per-round `observer`; every other session pays only a branch check. Memory per observed session is independent of maxRounds.
+10. **runMonteCarlo(game, strategies[], config, nSessions, masterSeed, onProgress)** runs every strategy over the SAME session seeds and returns per strategy: stat values, raw endReason counts, the first 50 session paths (streaming min/max downsampled), final-bankroll histogram counts over ONE set of 50 bins shared by every strategy in the run, and p5/p25/p50/p75/p95 percentile bands at the ADAPTIVE checkpoints of `checkpoints.ts` (session 12: every round 0..min(maxRounds, 64), then +25% steps capped at ceil(maxRounds / 200), ending exactly at maxRounds; at most 287 checkpoints), from the first min(2000, n) sessions (the same indices for every strategy). Band and sample-path sessions are observed through the runner's optional per-round `observer`; every other session pays only a branch check. Memory per observed session is independent of maxRounds.
 
 11. **Worker.** `src/worker/sim.worker.ts` exposes runMonteCarlo via Comlink. The progress callback is passed with `Comlink.proxy` and reported about every 2%. Cancel = `worker.terminate()`, then respawn (Comlink cannot interrupt a sync loop). The UI NEVER runs a simulation on the main thread. `client.ts` owns the worker lifecycle.
 
@@ -132,6 +132,8 @@ src/
     runner.regression.test.ts     -110 flat $5, 100k sessions: z before (golden) vs after the carry
     invariant.test.ts             THE full invariant table: 8 built-ins + a custom rule x 5 games (incl. two sports games)
     montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, histogram, bands, resultTransferables
+    montecarlo.golden.test.ts + .json  pre-session-12 runMonteCarlo outputs (all but bands): bit-identical
+    checkpoints.ts    THE band checkpoint schedule (pure): dense early, geometric, capped; exhaustively tested
     downsample.ts     streaming min/max sample-path downsampler (<= 1000 points)
     replay.ts         same-luck replay of one session for every strategy (calls runSession only)
     perf.bench.test.ts opt-in benchmark (BENCH=1): session 2 timing scenario + observer cost
@@ -158,7 +160,7 @@ src/
       accumulator.ts  single-pass accumulator, per-session columns, sortedColumn (sort once)
       quantile.ts     THE percentile function (type 7) + sortedCopy
       histogram.ts    shared-bin histogram (50 bins over [min, max] across all strategies)
-      bands.ts        checkpoint rounds + BandRecorder (percentile bands over time)
+      bands.ts        BandRecorder (percentile bands over time, on any strictly increasing checkpoint list)
       registry.ts     the ONE place stats are registered (row order = table order)
   worker/
     sim.worker.ts     Comlink-exposed runMonteCarlo and replay
@@ -547,7 +549,6 @@ Sessions run in this order. Each ends with `npm run test` and `npm run build` cl
 
 The original roadmap is complete. Candidates beyond it (not scheduled; see STATUS "Still open"):
 
-- **Adaptive band checkpoints (possible engine follow-up, NOT implemented):** bands have ~5-round resolution at 1,000 rounds (200 checkpoints). A strategy whose sessions end within ~30 rounds (Martingale on the default scenario) therefore gets only ~6 checkpoints when zoomed with "Fit to this strategy". Denser checkpoints early in the session (or per-strategy checkpoints) would sharpen that. It is an engine change (`stats/bands.ts`) and needs its own spec.
 - **Vercel (optional later):** deploy the same build at a domain root with `VITE_BASE=/` (the default). No code change is needed.
 
 - **Pushes (three-way outcome):** a tie that returns the stake. Needs the runner to resolve a round into win / push / loss from ONE draw (so CRN still holds) and a Game with a push probability. It is the first real change to the Game abstraction, so it needs its own spec.
@@ -1039,6 +1040,55 @@ Session 11 (2026-09-24, Windows / PowerShell). `npm run test` (619 passed, 3 ski
     - Test files: `runner.golden.test.ts` + `.json`, `runner.carry.test.ts`, `runner.regression.test.ts`, `invariant.test.ts` (renamed from `odds.invariant.test.ts`), `odds.devig.test.ts`, `replay.test.ts`.
     - Outside the engine: `src/ui/rules/preview.ts` pays with the same carry (option B).
 
+Session 12 (2026-09-24, Windows / PowerShell). `npm run test` (632 passed, 4 skipped: 2 benchmark tests + 2 golden writers), `npm run build`, `npm run lint` and **`npx playwright test` (37 passed)** all clean. **CI run [36074254452](https://github.com/iangopen/strategylab/actions/runs/36074254452) was green**: lint, unit, build, e2e, build-pages and deploy, every job on `ubuntu-24.04`. Delivered: **adaptive band checkpoints** (`src/engine/checkpoints.ts`), a new working rule (stop and ask before changing an approved decision), and a fix for one flaky timeout.
+
+95. **Schedule** (`checkpoints.test.ts`): every round 0..min(M, 64), then steps of min(ceil(M/200), max(1, floor(x/4))), with the last step clipped to M.
+    - Checked for 1, 2, 63, 64, 65, 200, 1,000, 12,345 and 1,000,000:
+
+      | maxRounds | Checkpoints | Widest gap (allowed) |
+      |---|---|---|
+      | 1 | 2 | 1 (1) |
+      | 64 | 65 | 1 (1) |
+      | 65 | 66 | 1 (1) |
+      | 200 | 201 | 1 (2) |
+      | 1,000 | 253 | 5 (8) |
+      | 12,345 | 267 | 62 (97) |
+      | 1,000,000 | 287 | 5,000 (7,813) |
+
+    - **Exhaustive over EVERY maxRounds from 1 to 1,000,000** (2.6–2.8 s alone). Every one passes all three properties, starts at 0 and ends at M. The longest schedule is 287 (at M = 836,198); the limit is 320.
+    - The widest gap is never larger than the old even spacing, so the new schedule is never coarser than before anywhere.
+96. **Results did not move:**
+    - **`montecarlo.golden.test.ts`** was captured BEFORE the wiring (commit `f44007c`): 4 scenarios (default, invariant, −110 market, 20,000-round American) × 9 strategies × 2,500 sessions (more than the 2,000-session band subset). It covers every stat as its exact decimal text, the end-reason counts, the shared histogram edges and counts, and a digest of every sample path. **Identical after the change.**
+    - **Session 11's 90 runner golden cells, the invariant table and `customGame.test.ts` pass unchanged**, with identical printed z values.
+    - **New observer-leak test:** `runSession` with a band observer on the new schedule deep-equals `runSession` without one (full paths included), for 9 strategies × 300 sessions.
+97. **Band tests** (`bands.test.ts`):
+    - The last checkpoint still equals the type-7 percentiles of the subset's finals, recomputed independently.
+    - p5 ≤ p25 ≤ p50 ≤ p75 ≤ p95 at every one of the 253 checkpoints, for all 8 strategies.
+    - Carry-forward holds for a session ending at round 1, both in the unit test and in a run where every session ends at round 1.
+    - `r.bands.rounds` equals `checkpointRounds(1000)` exactly.
+98. **"Fit to this strategy" on Martingale** (default scenario):
+    - **Was 0–30 with 7 checkpoints; now 0–25 with 26 checkpoints, i.e. EVERY round 0..25.**
+    - The window narrowed because the bands actually stop changing at round 24: the old 5-round grid overshot the end by up to 5 rounds.
+    - E2E asserts `data-band-points` = window end + 1 = the engine's count, on every panel. The unit test asserts that the rounds inside the window are exactly 0..25.
+99. **Non-uniform x** (every chart path reads the real `bands.rounds`; nothing assumed even spacing, so NO chart code needed fixing):
+    - `fillBand`, `strokeLine` and `fanSeries` pass the rounds array through as x (asserted by identity).
+    - `nearestIndex` is a binary search on values. It was tested on the real 1,000-round schedule at 2,700 cursor positions against brute force, including the 64 → 69 jump and the final 999 → 1000 gap.
+    - `activeRangeEnd` returns actual checkpoints in the dense, geometric and capped parts.
+    - **E2E:** after zooming to 449–551 (21 checkpoints, 5 apart), hovering 30% and 70% of the way between rounds 464 and 469 snaps to 464 and 469.
+    - The existing zoom, fit and hover specs pass unchanged.
+100. **Performance and memory:**
+    - Benchmark (`BENCH=1`, European 100k × 6, median of 3): **before 10.05 s** (9.92 / 10.05 / 10.29); **after 10.40 s and 10.08 s** on two runs (+3.5% and +0.3%). Both are inside the 5% budget.
+    - Per-round observer cost is unchanged (the same one comparison per round): 29.1 → 28.7 µs plain, 126.9 → 122.3 µs observed.
+    - **Peak band memory per strategy** (checkpoints × 2,000 sessions × 8 B): **1,000 rounds: 4.05 MB** (253 checkpoints; was 3.22 MB with 201). **1,000,000 rounds: 4.59 MB** (287 checkpoints; was 3.22 MB).
+    - On top of that come 5 output arrays (≤ 11.5 KB) and one 16 KB sort buffer. None of it depends on maxRounds beyond the checkpoint count.
+101. **Flaky test fixed (owner-approved):** `customGame.test.ts` (Paroli, payout 1.2) takes 0.81 s alone but timed out at 8.3 s under the full parallel suite. It also failed 1 of 2 runs with this session's files stashed, so it predates session 12. It now has a per-file 30 s timeout; no assertion changed. The full suite then passed 3 runs in a row.
+102. **`src/engine/` diff since `8923df7`**, file by file:
+    - `checkpoints.ts` (new): the schedule.
+    - `montecarlo.ts`: imports it, plus a comment.
+    - `stats/bands.ts`: the old evenly spaced `checkpointRounds` and `BAND_CHECKPOINTS` were deleted, and the recorder's comment no longer claims even spacing. This is owner-approved cleanup (option A), outside the prompt's "checkpoints.ts, montecarlo.ts and tests" list.
+    - Tests: `checkpoints.test.ts`, `montecarlo.golden.test.ts` + `.json`, `stats/bands.test.ts` (imports repointed; the old even-spacing test replaced by the schedule equality; observer-leak test added), `perf.bench.test.ts` (import), `strategies/customGame.test.ts` (timeout).
+    - Outside the engine: `ui/charts/FanChart.tsx` (the `data-band-points` hook, option B), `ui/charts/adapters.test.ts`, `e2e/charts.spec.ts`.
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -1123,7 +1173,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 2: the Martingale analytic pairs were chosen so money is left over after k losses** ($370 and $245). If the leftover were exactly 0, the session would end in ruin (bankroll < tableMin) instead of insufficientFunds.
 - **Session 2: shared test kit in `testUtils.ts`** (`betSequence`, `expectPure`, `describeEvInvariant`, `deltasFromPath`). It imports vitest, so it is test-only. Production code never imports `testUtils`.
 - **Session 3: the owner rejected full-path recording** for bands and samples (2000 full paths at maxRounds 1,000,000 ≈ 16 GB). Instead the runner takes an optional per-round `observer(round, bankroll)`, called at round 0 and after every resolved round, passed ONLY for band-subset sessions. `recordPath` (full path) remains for tests and future single-session replay; `pathStride` is gone.
-- **Session 3: bands include round 0** (the starting bankroll) as checkpoint 0 (owner decision), then C = min(200, maxRounds) rounds at round(j × maxRounds / C), ending at maxRounds.
+- **Session 3: bands include round 0** (the starting bankroll) as checkpoint 0 (owner decision), then C = min(200, maxRounds) rounds at round(j × maxRounds / C), ending at maxRounds. (Round 0 first and maxRounds last still hold; the even spacing was SUPERSEDED in session 12 by the adaptive schedule in `checkpoints.ts`.)
 - **Session 3: P(hit win target) is NaN ("—") when stopWin is off**, not 0%.
 - **Session 3: z vs theory is NaN ("—") when the SE is 0 or undefined.**
 - **Session 3: histogram with identical values everywhere** widens the range to [min − 1¢, max + 1¢]. Bins are [e_i, e_{i+1}), and the last bin includes max.
@@ -1235,7 +1285,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 10: labels are drawn AFTER the data** (including over the highlighted path), so text never sits on paths. A label that can't fit anywhere (more labels than the plot can hold) is clamped inside the plot; the property test never hit that case.
 - **Session 10: the hover readout snaps to the nearest band checkpoint INSIDE the zoom window.** If the window is narrower than one checkpoint, the readout clears.
 - **Session 10: the elapsed counter shows "—" before the first run**, so "<0.1s" never claims a run happened.
-- **Session 10: the equivalence test's timeout is 30 s** (per file, `describe(..., { timeout: 30_000 })`); every other test uses Vitest's 5 s default.
+- **Session 10: the equivalence test's timeout is 30 s** (per file, `describe(..., { timeout: 30_000 })`); every other test uses Vitest's 5 s default. (Session 12, owner-approved: `customGame.test.ts` also has a per-file 30 s timeout, and the exhaustive schedule test, the goldens and the invariant tests set their own.)
 - **Session 10: the Labouchère help text was NOT changed** (option (b)): the owner's bare "yes" did not clearly override the hard "src/engine/ diff is EMPTY" rule. It is listed under Still open for session 11.
 - **Session 10: the commit gate now runs with `set -o pipefail`.** Piping Playwright's output through `grep | head` hid one failing E2E run; that commit was fixed and amended before any push. Every earlier session 10 commit's captured output shows all specs passing.
 - **Session 10 ran on Windows / PowerShell.**
@@ -1249,3 +1299,11 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 11: the property test's per-round bound is ½¢ + Σ ε × |owed|,** not a hand-picked 1e-6: at $10M bets on a 1,000 payout, float noise is about 1e-4¢, measured at 0.50015¢ worst.
 - **Session 11: the live check was a temporary Playwright spec** (not committed) comparing the live table to `engineTable` in Node, as in session 9.
 - **Session 11 ran on Windows / PowerShell.**
+- **Session 12: schedule constants.** Dense to 64, growth 1/4 (+25% per step), cap ceil(M / 200). The cap reproduces the old even spacing, so no part of any schedule is coarser than before. Growth 1/4 keeps the worst length at 287, well under 320. (A growth of 1/8 was considered; it would have needed more checkpoints for the same cap.)
+- **Session 12: `checkpointRounds` returns a `Float64Array`**, as before, so `bands.rounds` still transfers with `Comlink.transfer` unchanged.
+- **Session 12: the band recorder was NOT changed.** It already accepted any strictly increasing round list; only the list changed.
+- **Session 12: the Monte Carlo golden stores stats as `String(value)`** (an exact decimal round trip that keeps NaN) and sample paths as a digest, so the fixture stays about 32 KB. It regenerates with `GOLDEN_MC=write`, separately from the runner golden (`GOLDEN=write`).
+- **Session 12: the exhaustive schedule test's checker was made faster** (dense check and gap check in separate loops; same properties) to fit the owner's "about 3 s" condition: 4.0 s at first, then 2.6–2.8 s.
+- **Session 12: `data-band-points`** on each fan canvas = the number of band checkpoints inside the shared x window. It is a test hook only; nothing visible changed.
+- **Session 12: the E2E hover check zooms first** (a drag to about 449–551), so one pixel is a small fraction of the 5-round gap and the snap target is unambiguous.
+- **Session 12 ran on Windows / PowerShell.**
