@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MonteCarloResult } from "./engine/montecarlo";
 import type { Replay } from "./engine/replay";
-import { defaultScenario, toSimRequest, validateScenario, type ScenarioConfig } from "./scenario";
+import { toSimRequest, validateScenario, type ScenarioConfig } from "./scenario";
 import { ChartSlot } from "./ui/ChartSlot";
 import type { ChartRefs } from "./ui/charts/adapters";
 import { FanChart } from "./ui/charts/FanChart";
 import { HistogramChart } from "./ui/charts/HistogramChart";
 import { ReplayChart } from "./ui/charts/ReplayChart";
 import { ConfigPanel } from "./ui/ConfigPanel";
+import { LinkBanner } from "./ui/LinkBanner";
+import { bootFromLocation, canonicalizeAddressBar, noticeOf, pageLinkLoader, type LinkNotice } from "./ui/linkBoot";
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls } from "./ui/RunControls";
 import { instanceLabel } from "./ui/format";
@@ -28,8 +30,11 @@ interface CompletedRun {
 }
 
 export default function App() {
-  // ALL scenario state lives here, in one serializable object.
-  const [scenario, setScenario] = useState<ScenarioConfig>(defaultScenario);
+  // ALL scenario state lives here, in one serializable object. A #s= link in the address bar seeds it
+  // (decoded once per page; never auto-runs).
+  const [scenario, setScenario] = useState<ScenarioConfig>(() => bootFromLocation().scenario);
+  // What happened when a link was opened. View state, not scenario state.
+  const [linkNotice, setLinkNotice] = useState<LinkNotice | null>(() => bootFromLocation().notice);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -46,6 +51,26 @@ export default function App() {
   const replayRequestId = useRef(0);
 
   useEffect(() => applyThemePref(theme), [theme]);
+
+  // Links: canonicalize the address bar after the initial load (replaceState, no new history entry),
+  // then load fragments that change later (typed or pasted into the address bar). The page loader
+  // applies each fragment at most once, so Back, StrictMode and hashchange + popstate never re-fire it.
+  useEffect(() => {
+    const initial = bootFromLocation().result;
+    if (initial) canonicalizeAddressBar(initial);
+    const onNavigate = () =>
+      pageLinkLoader.handle(window.location.hash, (r) => {
+        if (r.kind === "loaded") setScenario(r.scenario);
+        setLinkNotice(noticeOf(r));
+        canonicalizeAddressBar(r);
+      });
+    window.addEventListener("hashchange", onNavigate);
+    window.addEventListener("popstate", onNavigate);
+    return () => {
+      window.removeEventListener("hashchange", onNavigate);
+      window.removeEventListener("popstate", onNavigate);
+    };
+  }, []);
 
   useEffect(() => {
     const c = new SimClient();
@@ -139,6 +164,7 @@ export default function App() {
           reshapes the spread of outcomes. Compare strategies here on identical simulated outcomes.
         </p>
       </header>
+      {linkNotice && <LinkBanner notice={linkNotice} onDismiss={() => setLinkNotice(null)} />}
       <main className="layout">
         <div className="left">
           <ConfigPanel scenario={scenario} onChange={setScenario} errors={errors} />

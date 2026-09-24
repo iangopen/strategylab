@@ -185,3 +185,9 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
 .rule-ladder sub { color: var(--muted); font-size: 0.7rem; margin-left: 1px; }
 .rule-preview-table { max-height: 220px; overflow: auto; margin-bottom: 6px; }
 .rule-preview-table table.results th, .rule-preview-table table.results td { padding: 3px 6px; font-size: 0.8rem; }
+
+/* Scenario links */
+.link-banner { margin-bottom: 16px; border-left: 4px solid var(--accent); }
+.link-banner.is-partial, .link-banner.is-error { border-left-color: var(--error); }
+.link-banner-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.link-banner p { margin: 4px 0 0; }
