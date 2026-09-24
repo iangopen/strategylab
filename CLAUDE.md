@@ -74,7 +74,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
      update(state, won: boolean, ctx): State;
    }
    ```
-   `FieldSpec = { key, label, kind: "number" | "integer" | "boolean" | "select", min?, max?, step?, options?, help? }`. Strategies are PURE: no input mutation, no side effects. `ctx` is read-only (bankroll, baseBet, round, lastBet). The UI renders strategy config purely from `configSchema`. A new strategy = one file + one registry line, zero UI edits.
+   `FieldSpec = { key, label, kind: "number" | "integer" | "optionalNumber" | "boolean" | "select", min?, max?, step?, options?, help? }` (`optionalNumber`, session 6: blank = the key is ABSENT from the config, otherwise a number within min/max). Strategies are PURE: no input mutation, no side effects. `ctx` is read-only (bankroll, baseBet, round, lastBet). The UI renders strategy config purely from `configSchema`. A new strategy = one file + one registry line, zero UI edits.
 
 7. **Table rules live in the runner**, never in strategies. Raise the bet to tableMin, clamp it to tableMax. If bet > bankroll, apply `insufficientFunds: "stop"` (default) | `"allIn"`. `endReason` is one of: `"ruin"` (bankroll < tableMin), `"insufficientFunds"` (could not cover the next bet), `"stopWin"`, `"stopLoss"`, `"maxRounds"`, `"strategyStop"`. `maxRounds` is REQUIRED and finite (default 1000, hard cap 1,000,000). Reason: bounded runtime and defined checkpoints.
 
@@ -113,8 +113,17 @@ src/
       registry.ts     the ONE place strategies are registered
       flat.ts         reference implementation
       validate.ts     checks a config against its configSchema
-      crn.test.ts     CRN across every registered strategy
+      crn.test.ts     CRN across every registered strategy plus one custom rule
       customGame.test.ts  every strategy on p = 0.45, payout 1.2, via the registered z stat
+    rules/            the rule language (see "Rule language"): user strategies as DATA, never code
+      types.ts        Rule, Entry, Condition, Action
+      limits.ts       every limit and range (validator and builder read these)
+      validate.ts     THE closed-grammar validator (worker and UI), parseRuleJson; never throws
+      compile.ts      validated rule -> Strategy (id "custom", label = rule name); pure, no RNG
+      examples.ts     shipped example rules (four reproduce built-ins exactly)
+      equivalence.test.ts  4 built-ins vs their rules: bit-identical over 10,000 sessions
+      fuzz.test.ts    200 random valid rules (invariant) + 200 invalid (all rejected)
+      noEval.test.ts  static scan: no eval / Function / dynamic import in the rule pipeline
     stats/
       types.ts        StatDef, RunContext
       accumulator.ts  single-pass accumulator, per-session columns, sortedColumn (sort once)
@@ -124,13 +133,21 @@ src/
       registry.ts     the ONE place stats are registered (row order = table order)
   worker/
     sim.worker.ts     Comlink-exposed runMonteCarlo and replay
+    resolve.ts        StrategyRef (builtin id+config | custom rule data) -> specs; rules compile HERE
     client.ts         worker lifecycle, progress, cancel
   ui/
     ConfigPanel.tsx   game, bankroll, table, stops, rounds, sessions, seed
     NumberField.tsx   numeric input with inline errors
     format.ts         stat formatting, strategy column labels
-    StrategyPicker.tsx
+    StrategyPicker.tsx  built-ins + custom rules (from examples); series swatch per card
     SchemaForm.tsx    renders any configSchema
+    rules/
+      RuleBuilder.tsx Form / JSON tabs + live preview for one custom rule
+      RuleForm.tsx    entry lists: add / reorder / delete, condition + action dropdowns
+      RuleJson.tsx    raw JSON view, copy, paste (JSON.parse only)
+      RulePreview.tsx W/L script -> bet ladder table
+      edit.ts         pure form-editing helpers (tested)
+      preview.ts      pure preview adapter over the COMPILED rule (tested)
     RunControls.tsx
     ResultsTable.tsx  renders any stats registry
     ChartSlot.tsx     placeholder panels shown before the first run
@@ -141,7 +158,7 @@ src/
       FanChart.tsx    fan + spaghetti small multiples (click a path to replay)
       HistogramChart.tsx  final-bankroll histograms, shared bins, linear/log
       ReplayChart.tsx stacked replay: bankroll, bet size, ONE win/loss strip
-  scenario.ts         ScenarioConfig type, defaults, validation, toSimRequest (dollars -> cents)
+  scenario.ts         ScenarioConfig (v2: builtin | custom instances), defaults, validation, toSimRequest (dollars -> cents), migrateScenario (v1 -> v2)
   App.tsx             owns the ScenarioConfig and the SimClient
 ```
 
@@ -158,6 +175,8 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fanScales`, `histogramScales`, `replayLayout`), each computed over ALL strategies of the run and tested. The color of instance k is `var(--series-k mod 8)` (`seriesColorVar`), defined for light and dark in `index.css`, and it is always paired with the instance's text label. Components only draw. Charts redraw on new results, resize, or theme change, never on keystrokes.
 
 ## How to add a strategy
+
+**First ask whether it can be a rule instead of code.** Since session 6, any progression that sizes the next bet from wins/losses, streaks, cycle profit, the bankroll vs start, or the current bet (Martingale, Paroli, D'Alembert, custom Labouchère lines and many variants) can be written in the rule language (see "Rule language") with no code, no registry line and no tests: it compiles into the same Strategy contract, and the fuzzed invariant already covers it. Ship it as an example in `rules/examples.ts` if it is worth offering. Write a built-in only when the rule language cannot express it (e.g. Fibonacci's step-back, Oscar's Grind's payout-capped bet, Kelly's bankroll-proportional stake), or when it needs config fields the UI should render from a schema.
 
 1. Create `src/engine/strategies/<id>.ts` exporting one `Strategy<Config, State>`.
 2. Define `Config`, `State`, `defaultConfig`, and a `configSchema` covering every config key. Give each field sensible min/max bounds.
@@ -183,7 +202,7 @@ Every progression keeps its own level in State and computes the next bet from it
 - **Overflow guard:** Martingale and Fibonacci cap the *returned* bet at `Number.MAX_SAFE_INTEGER` (the level keeps climbing), because the runner rejects non-finite bets and a long enough streak would overflow to Infinity. The runner still clamps and checks bankroll as usual.
 - **Labouchere** (`labouchere.ts`): a line of unit numbers. Bet = (first + last) units × base; a single remaining number bets that number. Win: remove the first and the last number. Loss: append the units just bet (first + last, or the single number). When the line empties, the cycle is complete: `onComplete` "restart" (default) refills it from the preset, "stop" returns "stop". The line lives in State as an IMMUTABLE array (slice/spread only, NEVER mutate). Config: `sequence` select of presets ("1-2-3-4" default, "1-1-1-1-1", "1-2-3-4-5-6", "2-2-2-2") and `onComplete` select ("restart" default | "stop"). No new FieldSpec kind — presets are strings parsed at `init`. Custom sequences are the rule builder's job (roadmap session 6). During an uninterrupted losing streak `first` is fixed and `last` grows by `first` each loss, so the bet grows LINEARLY (no overflow guard needed; the runner still clamps).
 - **Oscar's Grind** (`oscars.ts`): goal is +1 base unit of profit per cycle. State: `cycleProfit` and `betUnits` (start 1). Win: `cycleProfit += ctx.lastBet × ctx.game.netPayout`; if `cycleProfit >= goal` reset the cycle (`cycleProfit = 0`, `betUnits = 1`), otherwise `betUnits += 1`. Loss: `cycleProfit -= ctx.lastBet`, `betUnits` unchanged. Next bet = `min(betUnits × base, ceil((goal − cycleProfit) / ctx.game.netPayout))` in cents — never bet more than what one win needs to reach the goal. Profit is tracked from `ctx.lastBet` (the PLACED bet, after table rules) and `ctx.game.netPayout`, NEVER from the intended bet. No config (empty `configSchema`).
-- **Kelly** (`kelly.ts`): `f* = (b·p − q) / b`, with `b = ctx.game.netPayout`, `p` the assumed win probability, `q = 1 − p`. If `f* <= 0`, Kelly says do not play: return "stop" (the session ends `strategyStop`, so with a never-betting Kelly EV per $ is 0/0 → "—" and P(strategy stopped) reads 100%). Else bet = `fraction × f* × current bankroll` in cents; the runner applies table limits as always. `f*` depends only on session-constant `p`, `q`, `b`, so it is computed once at `init`. Config: `assumedWinProb` number (0 = use the game's true `winProb`; otherwise 0.01–0.99; default 0) and `fraction` number (default 1 = full Kelly, 0.5 = half Kelly, range 0.1–2). The `assumedWinProb` help says plainly that setting it ABOVE the true probability models a MISJUDGED edge, not a real one. No "winning system" language, ever.
+- **Kelly** (`kelly.ts`): `f* = (b·p − q) / b`, with `b = ctx.game.netPayout`, `p` the assumed win probability, `q = 1 − p`. If `f* <= 0`, Kelly says do not play: return "stop" (the session ends `strategyStop`, so with a never-betting Kelly EV per $ is 0/0 → "—" and P(strategy stopped) reads 100%). Else bet = `fraction × f* × current bankroll` in cents; the runner applies table limits as always. `f*` depends only on session-constant `p`, `q`, `b`, so it is computed once at `init`. Config: `assumedWinProb` optionalNumber (blank = use the game's true `winProb`; otherwise 0.01–0.99; default blank; session 6 replaced the old 0 sentinel) and `fraction` number (default 1 = full Kelly, 0.5 = half Kelly, range 0.1–2). The `assumedWinProb` help says plainly that setting it ABOVE the true probability models a MISJUDGED edge, not a real one. No "winning system" language, ever.
 
 ### Strategy test kit (`src/engine/testUtils.ts`)
 
@@ -267,6 +286,16 @@ Exactly the built-in Labouchère: bet (first + last) × base, or the single numb
 ### Limits (enforced by the validator)
 
 At most 10 entries per list, 20 numbers per sequence line, and 40 characters per name. JSON pasted into the builder is capped at 20,000 characters. Every numeric field has the range shown above. Bet units are clamped as described, and the returned bet is capped at `MAX_SAFE_INTEGER`, the same guard Martingale and Fibonacci use.
+
+### Where rules live and how they are checked (session 6)
+
+- **Storage:** a custom strategy instance in `ScenarioConfig` is `{ uid, kind: "custom", rule }`, where `rule` is plain JSON and untrusted until validated. Built-ins are `{ uid, kind: "builtin", strategyId, config }`. `ScenarioConfig.version` is 2, and `migrateScenario` upgrades v1.
+- **Across the worker boundary:** `SimRequest.strategies` is `StrategyRef[]`, the same union as data. `worker/resolve.ts` validates and compiles rules INSIDE the worker. Functions never cross.
+- **Validator output:** a FRESH, deep-frozen rule built only from known keys. It reads own properties only (never inherited ones), accepts only plain objects, and checks a list's length before iterating it. It never throws: exotic input returns an error, not an exception.
+- **Error format:** errors carry a readable location and the bad value, e.g. `onLoss entry 2 → action → by: must be between 0.1 and 10 (got 12)`. All field problems are reported together. One exception: an unknown or missing key in an object stops the checks inside that object, so its fields are not reported until the keys are fixed.
+- **`validateRule(raw, { ranges: false })`** checks structure and types only (keys, types, finite numbers, list shape, where `when` may appear). The form uses it so it can keep showing a rule while the user fixes an out-of-range value.
+- **Compiled strategies** have id `"custom"`, label = the rule's name, `configSchema: []` and `defaultConfig: {}`. They are not registered, and they close over the frozen rule.
+- **Live preview** (`ui/rules/preview.ts`) feeds a typed W/L script (≤ 100 rounds) to the COMPILED rule, using the scenario's base bet, start and payout. It ignores table limits and running out of money, and says so on screen.
 
 ### Worked examples (base bet = 1 unit; "next" = the bet after the script)
 
@@ -465,15 +494,89 @@ Session 5 (2026-09-23). `npm run test` (235 passed, 2 benchmark tests skipped), 
 41. **Programmatic evidence for the UI claims** (throwaway test, not committed; 10,000 sessions, European, seed 12345): Kelly default (assumed 0) → **100% strategyStop, EV per $ = NaN → "—", 0 rounds**; Kelly assumed 0.55 → it **bets** (0% strategyStop), **EV per $ = −2.690%** (≈ −edge = −2.703%), z = 0.08.
 42. **Production build serves:** `npm run build` + `npm run preview` served bundle `index-BKlqEj5h.js` (84.94 KB gzip); the JS and the worker returned 200. Not driven in a browser this session (no browser automation available) — the visual/interaction pass is owner-run (see "Built but not yet verified").
 
+Session 6 (2026-09-23, Windows / PowerShell). `npm run test` (391 passed, 2 benchmark tests skipped), `npm run build` and `npm run lint` (oxlint) all clean under strict. `git diff ecf2f36..HEAD -- src/engine/runner.ts src/engine/montecarlo.ts src/engine/stats/` is **EMPTY**. Delivered: the JSON rule language (progression + sequence), a closed-grammar validator, a compiler into the Strategy contract, the builder UI (form, JSON, live preview), worker plumbing, and the `optionalNumber` field with Kelly migrated onto it. The spec was committed before any code (`48e609b`).
+
+43. **Validator** (`validate.test.ts`, 55 tests):
+    - Every condition type (both bankroll ops) and every action type is accepted, as conditional entries and as the default.
+    - Every numeric field is accepted at its min and max and rejected just outside. Integer fields reject a fraction. Every numeric field rejects NaN, Infinity, −Infinity, a string and null.
+    - Lists: 1 and 10 entries are accepted, 0 and 11 rejected. Line length: 1 and 20 accepted, 0 and 21 rejected. A 1,000,000-element line gives one error without being iterated.
+    - Name: 1 and 40 characters are accepted. Empty, blank, 41 characters, control characters and non-strings are rejected.
+    - Also rejected: unknown keys at every level, `__proto__` and `constructor` from `JSON.parse` (and `Object.prototype` stays unpolluted), unknown kinds and types, missing fields, lists or null where objects belong, a default entry with a condition, and a non-final entry without one.
+    - A Proxy whose `getPrototypeOf` throws, a `Date`, and an object with inherited keys are all rejected without throwing.
+    - An exact error string is asserted: `onLoss entry 2 → action → by: must be between 0.1 and 10 (got 12)`.
+44. **No code evaluation** (`noEval.test.ts`): a static scan of `src/engine/rules/`, `src/ui/rules/`, `src/worker/` and `src/scenario.ts` finds no `eval(`, `["eval"]`, `Function(`, `new Function`, `import(`, string `setTimeout` / `setInterval`, or `.constructor(`. A self-test shows each pattern catches its banned form. The engine isolation test covers `rules/` too.
+45. **Compiler** (`compile.test.ts`):
+    - The three CLAUDE.md worked examples give the exact documented ladders. Example 3 runs through the runner: bankroll 100 → 110, 100, 110, 120, then strategyStop with 4 draws.
+    - Exact sequences for lossStreak + set, cycleProfit at payout 1.2, resetCycle zeroing the cycle, betUnits, bankroll ≤, first-match-wins with a shadowed entry, stop staying stopped, and custom lines.
+    - Units clamp to 0.01. A 400-loss ×10 streak caps at `MAX_SAFE_INTEGER` and stays finite.
+    - Cycle profit counts the PLACED bet. Under a tableMax clamp, intended 400 → placed 200, the rule does NOT stop where counting the intended bet would have. The rule stops exactly on round 6.
+    - Every example passes `expectPure`. Mutating the caller's object after compiling changes nothing.
+46. **Equivalence** (`equivalence.test.ts`): 10,000 sessions per pair per scenario, `SessionResult`s compared as whole JSON, full paths for the first 200. **0 mismatches** in all 8 comparisons:
+
+    | Built-in vs rule | App default (rounds) | Invariant, tableMax clamp + stops (rounds) |
+    |---|---|---|
+    | Martingale ×2 | 185,665 | 1,997,899 |
+    | Paroli cap 3 | 2,844,646 | 8,977,660 |
+    | D'Alembert 1 | 299,115 | 1,632,283 |
+    | Labouchère 1-2-3-4 | 73,629 | 582,946 |
+
+    End reasons covered stopWin, stopLoss, ruin, insufficientFunds and maxRounds. **Negative control:** Paroli with plain `reset` instead of `resetCycle` differs in 904 of 1,000 sessions, so the comparison can fail.
+47. **Fuzz** (`fuzz.test.ts`, seeded mulberry32):
+    - The generator produces 200 valid rules (≈85% progressions), covering both kinds and every condition and action type.
+    - Each ran 1,000 sessions of the invariant scenario with maxRounds 200:
+      - **European:** 15,481,638 rounds, **worst |z| = 3.62** (rule 93), z mean −0.15, sd 1.10.
+      - **p = 0.55:** 14,467,263 rounds, **worst |z| = 2.77** (rule 132), mean −0.17, sd 1.05.
+    - Every result was finite integer cents, with nothing thrown and no NaN.
+    - The 3.62 was checked, since the project rule presumes the engine is wrong until shown otherwise. On three fresh seeds with 20,000 sessions each, rule 93 gave z = −0.43, −0.12, 0.90 and rule 132 gave −0.89, −0.22, −0.43. It was sampling luck at n = 1,000, not a bug.
+    - **200 invalid rules** (11 corruption kinds): all returned `ok: false` with messages, none threw, and `compileRule` threw `Invalid custom rule: …` for each. The test's own generator had one bug: it produced a valid `{type:"reset"}` action. That was fixed in the test; the validator was not changed.
+48. **CRN with a custom rule:** the crn test adds one non-example rule (cycle-profit stop, streak resetCycle, add, set, ×1.5) beside all eight built-ins. All 50 sample sessions match pairwise over 243,465 rounds, and the custom rule played 2,898 rounds.
+49. **Worker plumbing:**
+    - `resolve.test.ts`: built-ins come from the registry. Custom rules are compiled from data, with id `custom` and label = name. An invalid rule fails the request with `Strategy 2: Invalid custom rule: unknown key "code" …`.
+    - Scenario tests: a custom instance round-trips as JSON, validates with the same validator, and is sent to the worker as `{ kind: "custom", rule }`. v1 → v2 migration adds `kind: "builtin"`.
+    - `format.test.ts`: labels use the rule name, number duplicates, and fall back to "Custom rule".
+50. **Preview adapter** (`preview.test.ts`): hand-written scripts give these ladders:
+    - Martingale rule `LLLWLW` → 1, 2, 4, 8, 1, 2, next 1, with bankroll $990, 970, 930, 1,010, 1,000, 1,020.
+    - Paroli `WWWWLW` → 1, 2, 4, 1, 2, 1, next 2. D'Alembert `LLWWW` → 1, 2, 3, 2, 1. Sequence `LWWW` → 5, 6, 6, 3, next 5.
+    - A stop partway through ends the ladder after 2 rounds. Payout 1.2 is honored. Case, spaces and dashes are ignored.
+    - Bad characters, 101 rounds and invalid rules each give a message.
+    - The builder's form helpers (`edit.test.ts`): add, move and delete keep the default last, and every produced rule validates.
+51. **Optional number + Kelly:**
+    - `optionalNumber` validation: absent or undefined is valid; 0.01 and 0.99 are accepted; 0, 1, NaN, Infinity, strings and booleans are rejected.
+    - Kelly's default config is `{ fraction: 1 }` with no `assumedWinProb` key.
+    - **Migration:** v1 Kelly `{ assumedWinProb: 0, fraction: 0.5 }` becomes `{ fraction: 0.5 }`, and 0.6 is kept. Unmigrated, 0 is flagged out of range.
+    - **Behavior unchanged:** blank equals an explicit true p, session for session, over 2,000 sessions each on p = 0.55, on p = 0.4 with payout 2, and on European (0 rounds: it still refuses to bet).
+    - The session 5 Kelly numbers reproduce exactly: growth z = 23.0 / 43.7, double-Kelly median $972,827.65, invariant z −0.56 / 1.14 / −0.30.
+52. **The manual scenario, run programmatically through the app's own code path** (throwaway test, not committed: `toSimRequest` → `resolveStrategies` → `runMonteCarlo` / `replaySession`). Default scenario, 10,000 sessions, seed 12345, Martingale ×2 beside a hand-built rule "Double after 2 losses" (`lossStreak ≥ 2` → ×2, otherwise keep; win → reset):
+    - Preview `LLLWLW` → 1, 1, 2, 4, 1, 1, next 1.
+    - EV per $: Martingale **−2.909%** (SE 0.432%, z −0.48; identical to STATUS 32), rule **−2.547%** (SE 0.327%, z 0.47).
+    - P(profit): 82.930% vs 82.730%. P(bust): 17.070% vs 17.270%.
+    - Replay of session 0: Martingale reached the target in 16 rounds, the rule in 23.
+    - A pasted rule with `"script":"alert(1)"` gives `unknown key "script" (allowed: kind, name, startUnits, onWin, onLoss)`. Non-JSON gives `Not valid JSON: Expected property name or '}' in JSON at position 2 …`.
+53. **Production build serves:** `npm run build` + `npm run preview` served `index-zTg6uhW-.js` (92.11 KB gzip) and `sim.worker-B2nJLaBe.js`, all 200. The bundle contains the picker's custom-rule group, and the worker contains the rule compiler. **Not driven in a browser:** the Claude-in-Chrome extension was not connected (2 attempts), so the visual pass is owner-run (below).
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
 - **Session 5 browser pass (owner-run, no browser automation this session).** All eight strategies appearing in the picker with working config forms and no UI edits; Kelly's config form (assumed win probability + fraction) and its help text; the Start-label fix (session 4) no longer overlapping the win-target label; the replay drag-to-zoom, "fit to first ending" on a Martingale bust, double-click reset; and the fan/replay hover crosshair + readouts rendering. The numeric outcomes behind these (Kelly 100% strategyStop / "—" EV; Kelly assumed 0.55 EV ≈ −2.70%) ARE verified programmatically (STATUS 41); the visuals are not.
+- **Session 6 browser pass (owner-run: the Chrome extension was not connected).** `npm run build; npm run preview`, then:
+  1. In "Strategies to compare", pick **Custom rule (start from…) → Blank rule** and click Add. The card shows a colored swatch, the name "My rule", and Form / JSON tabs.
+  2. In the Form tab, under "After a loss", click **+ Add a rule**. Set "When" to *Losses in a row, at least* = 2 and "Then" to *Multiply the bet by* = 2. Leave "Otherwise" as *Back to the start bet*, rename the rule, and try ↑ / ↓ / Delete on a second rule.
+  3. In the preview box (default `LLLWLW`), the ladder and table should update as you edit. Also type `LLX` (error message) and a W/L string that ends in a stop.
+  4. Make sure Martingale is in the list (it is by default), click **Run**. The rule gets its own column, series color and chart panels; the table, fan and histogram need no special handling. With only the steps above, the numbers should match STATUS 52 exactly.
+  5. Replay a session (type 0, or click a sample path). Both strategies should show in the replay.
+  6. In the JSON tab, paste `{"kind":"progression","name":"x","startUnits":1,"onWin":[{"then":{"type":"reset"}}],"onLoss":[{"then":{"type":"multiply","by":20}}],"script":"alert(1)"}`. You should see the `unknown key "script"` error and Run blocked. Then paste `{ kind: 1 }` and read the "Not valid JSON" message. Then fix `by` to 2 and remove `script`. The Form tab should come back.
+  7. On a Kelly card, clear "Assumed win probability" (blank = true probability). No error should show, and the placeholder reads "blank".
+  8. Check narrow width (about 360 px) and dark theme for the builder.
 - Vercel deploy: not connected yet (the owner connects it in the dashboard).
 
 ### Still open
 
-- Roadmap sessions 6 on (JSON rule builder, incl. custom Labouchère lines; URL scenarios; sports-odds mode).
+- Roadmap sessions 7 on (URL scenarios; sports-odds mode). Session 7's URL loader must run untrusted input through a full scenario parser, then `migrateScenario`, and rules through `validateRule`. `migrateScenario` is NOT a parser.
+- Rule language gaps, by design for now: one action per entry (no "multiply AND cap"), no Fibonacci-style step-back, no payout-capped bet (Oscar's Grind), no bankroll-proportional stake (Kelly). Those stay built-ins.
+- Only Martingale **×2** is proven bit-identical. A rule `multiply by m` compounds units by repeated multiplication, while the built-in computes `m ** level`, so for non-power-of-two m the last float bit can differ, which can change a rounded cent. Not tested, not claimed.
+- Sequence rules copy the line on each loss (O(line length) per loss), like the built-in Labouchère. That is not the O(entries) bound progressions have, but it is bounded by the session's losses.
+- An unknown key inside an object hides that object's field errors until the key is fixed. Every problem is reported only once the keys are right.
+- Rules are not saved anywhere yet (out of scope): a page reload loses them. URL sharing (session 7) is the planned home.
 - Browser vs Node speed gap (~4–5×). Measure in a focused tab before optimizing anything.
 - The automation tab is always `hidden` / unfocused (sessions 1–3). In session 3 a click by element ref silently did nothing until a screenshot woke the renderer; coordinate clicks worked. A focused-tab check still needs a human.
 - Hover crosshair uses `--chart-axis` (theme-aware) but there is still no on-canvas tooltip box; values go to a text readout under each chart. Good enough; a floating box could be nicer later.
@@ -538,7 +641,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 4: the default scenario** keeps seed 12345, 10,000 sessions and table min $1 (not specified by the directive), and adds the $1,100 win target with Flat and Martingale ×2.
 - **Scaffold:** `create-vite` (react-ts) was run into a scratch folder outside the repo, copied in, and the scratch folder deleted; nothing from it is committed except the copied config files.
 - **Session 5: `ctx.game` is `{ winProb, netPayout, edge }`** (owner directive 1), read-only, computed once per session by the runner. Reading it never touches the RNG, so CRN is unaffected. The five existing strategies were not changed; only ctx fixtures in `testUtils.ts` and `flat.test.ts` gained the field, and `betSequence` now also feeds the just-placed bet as `ctx.lastBet` (so Oscar's Grind can be driven without the runner) and takes an optional `game`.
-- **Session 5: Kelly's `assumedWinProb` uses 0 as the "use the game's true probability" sentinel** (range 0–0.99, default 0). The FieldSpec kinds are number/integer/boolean/select — there is no optional-number kind, and directive 2 forbade adding one — so a real "blank" cannot be expressed; 0 is the sentinel, and the help text states plainly that a value ABOVE the true probability models a MISJUDGED edge. This is the one place the prompt's "blank" was interpreted.
+- **(SUPERSEDED in session 6 by the `optionalNumber` field; kept for history.)** **Session 5: Kelly's `assumedWinProb` uses 0 as the "use the game's true probability" sentinel** (range 0–0.99, default 0). The FieldSpec kinds are number/integer/boolean/select — there is no optional-number kind, and directive 2 forbade adding one — so a real "blank" cannot be expressed; 0 is the sentinel, and the help text states plainly that a value ABOVE the true probability models a MISJUDGED edge. This is the one place the prompt's "blank" was interpreted.
 - **Session 5: Kelly refuses to bet when f* ≤ 0** (returns `"stop"` → `strategyStop`), so on any non-positive-edge game its default config plays 0 rounds and EV per $ is 0/0 → "—". `crn.test.ts` and `customGame.test.ts` therefore give Kelly a misjudged edge (assumed 0.6) so it wagers and the CRN / custom-game checks stay meaningful; `describeEvInvariant(kelly, …)` uses the same betting config.
 - **Session 5: the invariant now covers a positive-edge game** (p = 0.55, even money, edge −0.10, seed 303) for every strategy, because the core truth "EV per $ = −edge" is sign-agnostic and testing only negative edges would hide a sign bug. `INVARIANT_SCENARIO` itself is unchanged.
 - **Session 5: Oscar's Grind tracks cycle profit from the PLACED bet** (`ctx.lastBet`) and `ctx.game.netPayout`, and caps the next bet at `ceil((goal − cycleProfit) / netPayout)` so a win closes the cycle at exactly +1 base unit; a table clamp can't skew the accounting. No overflow guard: the bet is at most `betUnits × base`, and `betUnits` only rises after wins.
@@ -546,3 +649,22 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 5: replay zoom is view-only x-window state**, reset by keying `ReplayCanvases` on `replay.session` (not a setState-in-effect). Drag selection and the hover crosshair are drawn on ONE overlay canvas over the bankroll strip, so the stacked charts are never redrawn during a drag or hover. `zoomFromDrag` rejects a span below 2 rounds (a click), and "fit to first ending" uses `firstEndingRound` (≥ 1, so a never-betting strategy does not collapse the view to 0).
 - **Session 5: chart hover values go to a text readout under each chart** (`.chart-readout`, a fixed-min-height muted line), not an on-canvas tooltip box; the overlay carries only the crosshair. This keeps the heavy draw effect off the hover path (its deps exclude hover state) while honoring "never re-render the whole chart on hover".
 - **Session 5 ran on macOS / zsh, not the documented Windows/PowerShell.** The npm scripts (`test`/`build`/`lint`) are cross-platform, so this did not affect any verification; the PowerShell-specific notes in Environment still stand for whoever is on Windows. Flagged rather than silently changed.
+- **Session 6: `resetCycle` also zeroes both streaks; `reset` only resets units** (owner-approved in the plan). Without this, Paroli can't be expressed: a 4th straight win would still read `winStreak = 4 ≥ 3` and reset again (the equivalence negative control shows 904/1,000 sessions differ).
+- **Session 6: one action per entry**, no compound actions (keeps the grammar small; approved).
+- **Session 6: units are clamped to [0.01, `MAX_SAFE_INTEGER`] after set/multiply/add, and the bet is capped at `MAX_SAFE_INTEGER`** (session 2's overflow guard). With ×2 this keeps Martingale bit-identical even past level 53.
+- **Session 6: only Martingale ×2 is claimed bit-identical** (repeated `×m` vs `m ** level` can differ in the last bit for other m).
+- **Session 6: cycle profit is tracked from `ctx.lastBet` (the placed bet) with the runner's own `Math.round(bet × netPayout)`**, so it equals the real bankroll change, like Oscar's Grind.
+- **Session 6: the starting bankroll is copied into State at `init`** (from `ctx.bankroll`) for bankroll conditions; no contract change was needed.
+- **Session 6: compiled rules are NOT registered.** They report id `"custom"`, label = the rule name, and have an empty `configSchema`. The crn id-list assertion stays at eight built-ins, and the custom rule is added separately.
+- **Session 6: the live preview compiles and runs the rule on the MAIN thread.** It is a fixed script of ≤ 100 rounds with no RNG and no runner, so it is not a simulation. Simulations still run only in the worker.
+- **Session 6: `ScenarioConfig.version` is 2** (instances carry `kind`). `migrateScenario` accepts v1 and v2. It is a reshaper, not a parser for untrusted input.
+- **Session 6: request type `StrategyRef` and `resolveStrategies` live in `src/worker/resolve.ts`**, free of Comlink and the DOM, so the worker's resolution path is unit-tested in Node.
+- **Session 6: example rules in the picker.** A blank rule (same bet every round) plus the four equivalence rules, named descriptively ("Double after a loss", …). The picker labels say "Example: Martingale ×2 as a rule". There is no "winning system" wording anywhere, and the custom card says a rule "cannot change the expected result per dollar wagered; it only changes how results spread out".
+- **Session 6: an invalid rule is still stored in the scenario** (so its errors show, and the JSON tab keeps what was pasted). Run is blocked through `strategy:<uid>:rule`. Text that does not parse as JSON stays a local draft and is never committed.
+- **Session 6: the form uses `validateRule(…, { ranges: false })`** so an out-of-range value keeps the form visible with inline errors. A structurally broken rule shows "fix it in the JSON tab" plus the error list.
+- **Session 6: instance labels are grouped by display label** (not by strategy id), so two custom rules with the same name number as "#1 / #2", and so would a custom rule named like a built-in.
+- **Session 6: `optionalNumber` blank = the key is ABSENT** (no `undefined` values stored); `StrategyConfig` values widened to `ConfigValue | undefined` for typing. `SchemaForm` shows the placeholder "blank". Kelly's range is now 0.01–0.99.
+- **Session 6: the Kelly 0 → blank migration applies to v1 scenarios only.** v2 is introduced in the same session, so no v2 scenario ever held the sentinel.
+- **Session 6: the fuzz uses the invariant scenario with maxRounds 200 and 1,000 sessions per rule per game** (the "small Monte Carlo"). With 400 z-tests at 4 SE, a chance failure has roughly a 2.5% probability. Seeds are fixed, so the test is deterministic, and the worst |z| is printed for every run.
+- **Session 6: the equivalence runs two scenarios** (the app default, and the invariant scenario with a tableMax clamp and stops), so clamped progressions are covered too.
+- **Session 6 ran on Windows / PowerShell,** as documented.
