@@ -345,16 +345,30 @@ export interface StripCell {
   x1: number;
   /** 1 = every round won, 0 = every round lost; in between for bucketed strips. */
   winRate: number;
+  /** Bar height as a fraction of the strip (multi-outcome games): (level + 1) / number of levels; bucket mean. */
+  height: number;
+  /** A single round that was a push (multi-outcome games): drawn as a hollow bar. */
+  push: boolean;
 }
 
-/** The ONE win/loss strip as cells over rounds: one per round, or one per bucket (shaded by win rate). */
+/**
+ * The ONE outcome strip as cells over rounds: one per round, or one per bucket. Binary games use
+ * winRate (won / lost, as before). Multi-outcome games use height = (level + 1) / levels, the level
+ * being the outcome's rank by net (Replay.levels, lowest first); a bucket's height is its mean level.
+ */
 export function stripCells(rep: Replay): StripCell[] {
   const s = rep.strip;
-  if (s.kind === "rounds") return Array.from(s.wins, (w, r) => ({ x0: r, x1: r + 1, winRate: w }));
+  const n = Math.max(1, rep.levels.length);
+  if (s.kind === "rounds") {
+    return Array.from(s.wins, (w, r) => {
+      const level = rep.outcomeLevel[s.outcomes[r]!] ?? 0;
+      return { x0: r, x1: r + 1, winRate: w, height: (level + 1) / n, push: rep.levels[level]?.push ?? false };
+    });
+  }
   const out: StripCell[] = [];
   s.counts.forEach((c, b) => {
     if (c === 0) return;
-    out.push({ x0: b * s.bucketRounds, x1: b * s.bucketRounds + c, winRate: s.wins[b]! / c });
+    out.push({ x0: b * s.bucketRounds, x1: b * s.bucketRounds + c, winRate: s.wins[b]! / c, height: (s.levelSums[b]! / c + 1) / n, push: false });
   });
   return out;
 }

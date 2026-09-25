@@ -154,7 +154,18 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
     for (const c of stripCells(replay)) {
       const x0 = fs.x(c.x0);
       const w = Math.max(0.5, fs.x(c.x1) - x0);
-      if (replay.strip.kind === "rounds") {
+      if (!replay.binary) {
+        // Multi-outcome: height = the outcome's level (legend below names each level); a push is hollow.
+        const h = fs.height * c.height;
+        if (c.push) {
+          fs.ctx.strokeStyle = win;
+          fs.ctx.lineWidth = 1;
+          fs.ctx.strokeRect(x0 + 0.5, bottom - h + 0.5, Math.max(0.5, w - 1), h - 1);
+        } else {
+          fs.ctx.fillStyle = win;
+          fs.ctx.fillRect(x0, bottom - h, w, h);
+        }
+      } else if (replay.strip.kind === "rounds") {
         const h = c.winRate === 1 ? fs.height : fs.height * 0.35;
         fs.ctx.fillStyle = c.winRate === 1 ? win : loss;
         fs.ctx.fillRect(x0, bottom - h, w, h);
@@ -168,7 +179,7 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
     unclipStrip();
     chartState(bank.current, { xMin: x.min, xMax: x.max, fullXMax: layout.x.max, zoom: zoom ? `${zoom.min}-${zoom.max}` : "full", lines: layout.bankroll.length, refLabels: JSON.stringify(refLabels), firstEnding: firstEndingRound(replay), theme: effectiveTheme() });
     chartState(bets.current, { yMax: layout.betY.max, lines: layout.bets.length });
-    chartState(strip.current, { cells: stripCells(replay).length });
+    chartState(strip.current, { cells: stripCells(replay).length, levels: replay.binary ? null : JSON.stringify(replay.levels.map((l) => l.label)), pushes: replay.binary ? null : stripCells(replay).filter((c) => c.push).length });
     countDraw(bank.current);
   }, [width, theme, replay, layout, refs, x, zoom]);
 
@@ -275,11 +286,25 @@ const ReplayCanvases = memo(function ReplayCanvases({ replay, layout, refs, labe
       <div className="replay-row-label">Bet size</div>
       <canvas ref={bets} data-testid="replay-bets" role="img" aria-label="Bet placed by each strategy in each round" style={{ cursor: "default" }} />
       <div className="replay-row-label">
-        {replay.strip.kind === "rounds"
-          ? "Each round: tall bar = won, short bar = lost. The same for every strategy."
-          : "Each block of rounds: bar height = share of rounds won. The same for every strategy."}
+        {!replay.binary
+          ? replay.strip.kind === "rounds"
+            ? "Each round: bar height = the outcome (levels below, lowest first); a hollow bar is a push. The same for every strategy."
+            : "Each block of rounds: bar height = the average outcome level (levels below). The same for every strategy."
+          : replay.strip.kind === "rounds"
+            ? "Each round: tall bar = won, short bar = lost. The same for every strategy."
+            : "Each block of rounds: bar height = share of rounds won. The same for every strategy."}
       </div>
-      <canvas ref={strip} data-testid="replay-strip" role="img" aria-label="Win or loss of each round, shared by every strategy" style={{ cursor: "default" }} />
+      <canvas ref={strip} data-testid="replay-strip" role="img" aria-label={replay.binary ? "Win or loss of each round, shared by every strategy" : "Outcome of each round, shared by every strategy"} style={{ cursor: "default" }} />
+      {!replay.binary && (
+        <ol className="strip-levels" data-testid="strip-levels" aria-label="Outcome levels, lowest bar first">
+          {replay.levels.map((l, i) => (
+            <li key={i}>
+              {`Level ${i + 1} of ${replay.levels.length}: ${l.label}`}
+              {l.push ? " (push: hollow bar)" : ""}
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 });

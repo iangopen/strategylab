@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { defaultScenario, ticketExampleGame, type ScenarioConfig } from "../src/scenario";
+import { replaySession } from "../src/engine/replay";
+import { stripCells } from "../src/ui/charts/adapters";
+import { defaultScenario, editorScenarioGame, toSimRequest, ticketExampleGame, type ScenarioConfig } from "../src/scenario";
+import { resolveStrategies } from "../src/worker/resolve";
+import { encodeScenarioLink } from "../src/share/link";
 import { decodeScenarioLink } from "../src/share/link";
 import { BINARY_ONLY_NOTE } from "../src/ui/format";
 import { addStrategy, expectTableMatchesEngine, openApp, runAndWait, watchPage } from "./helpers";
@@ -58,6 +62,8 @@ test("build the ticket game in the editor, run it, replay a session, copy the li
   await page.getByRole("textbox", { name: "Session", exact: true }).fill("0");
   await page.getByRole("button", { name: "Replay", exact: true }).click();
   await expect(page.getByTestId("replay-bankroll")).toHaveAttribute("data-lines", "2");
+  await expect(page.getByTestId("replay-strip")).toHaveAttribute("data-levels", JSON.stringify(["$20", "$50", "$100"]));
+  await expect(page.getByTestId("strip-levels").locator("li")).toHaveText(["Level 1 of 3: $20", "Level 2 of 3: $50", "Level 3 of 3: $100"]);
 
   // Copy link, reopen in a new page: the same inputs, readout and results.
   await page.getByRole("button", { name: "Copy link" }).click();
@@ -105,4 +111,26 @@ test("the outcome editor fits a 360 px screen without horizontal scrolling", asy
   await expect(page.getByRole("button", { name: "+ Add an outcome" })).toBeDisabled(); // at most 12
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test("replay on a game with a push: the strip marks pushes (hollow bars), exactly the engine's rounds, and names every level", async ({ page }) => {
+  const s: ScenarioConfig = {
+    ...defaultScenario(),
+    game: editorScenarioGame({ mode: "multiplier", price: null, rows: [{ prob: "0.44", value: 2, label: "win" }, { prob: "0.1", value: 1, label: "push" }, { prob: "0.46", value: 0, label: "lose" }] }),
+  };
+  const req = toSimRequest(s);
+  const rep = replaySession(req.game, resolveStrategies(req.strategies), req.session, req.masterSeed, 3);
+  const pushes = stripCells(rep).filter((c) => c.push).length;
+  expect(pushes).toBeGreaterThan(0);
+  const link = encodeScenarioLink(s, "");
+  if (!link.ok) throw new Error(link.message);
+  await openApp(page, link.fragment);
+  await expect(readout(page)).toContainText("2.000% of every dollar wagered");
+  await runAndWait(page);
+  await expectTableMatchesEngine(page, s);
+  await page.getByRole("textbox", { name: "Session", exact: true }).fill("3");
+  await page.getByRole("button", { name: "Replay", exact: true }).click();
+  await expect(page.getByTestId("replay-strip")).toHaveAttribute("data-pushes", String(pushes));
+  await expect(page.getByTestId("replay-strip")).toHaveAttribute("data-cells", String(stripCells(rep).length));
+  await expect(page.getByTestId("strip-levels").locator("li")).toHaveText(["Level 1 of 3: lose", "Level 2 of 3: push (push: hollow bar)", "Level 3 of 3: win"]);
 });
