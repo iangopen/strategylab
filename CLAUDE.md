@@ -69,7 +69,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 2. **Seeded randomness only.** All randomness goes through `src/engine/rng.ts` (mulberry32). `Math.random` is BANNED in `src/engine/`. Reason: reproducibility and shareable seeds.
 
-3. **Common random numbers.** Session i's seed = `splitmix32(masterSeed ^ splitmix32(i))`. NEVER `masterSeed + i` (adjacent mulberry32 seeds are correlated). Each round consumes EXACTLY ONE uniform draw to resolve win/loss. Strategies NEVER touch the RNG. Reason: session i of every strategy sees the identical outcome sequence; this is the basis of fair comparison.
+3. **Common random numbers.** Session i's seed = `splitmix32(masterSeed ^ splitmix32(i))`. NEVER `masterSeed + i` (adjacent mulberry32 seeds are correlated). Each round consumes EXACTLY ONE uniform draw, which picks the outcome by cumulative probability (session 13; for a win/lose game exactly `u < p`). Strategies NEVER touch the RNG. Reason: session i of every strategy sees the identical outcome sequence; this is the basis of fair comparison.
 
 4. **Integer money, with a per-session sub-cent carry.** The engine works in integer cents. Bets returned by strategies are rounded to whole cents by the runner. The UI converts at the boundary. A win pays `Math.round(bet × netPayout + carry)` cents and keeps the remainder as the session's `carry` (session 11): the bankroll is always whole cents, `|carry| ≤ 0.5`, the carry starts at 0 in every session and never crosses sessions, and it never consumes or moves a draw. For integer payouts it is always exactly 0. Reason: no float drift in progressions, and no systematic cents-rounding bias in EV per $ on non-integer payouts (see "Cents rounding").
 
@@ -83,10 +83,11 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
      defaultConfig: Config;
      init(config, ctx): State;
      nextBet(state, ctx): number | "stop";
-     update(state, won: boolean, ctx): State;
+     update(state, result: RoundResult, ctx): State;   // session 13; NOT called on a push
    }
+   interface RoundResult { kind: "win" | "loss" | "push"; outcomeIndex: number; profit: number } // profit = lastBet × net, exact
    ```
-   `FieldSpec = { key, label, kind: "number" | "integer" | "optionalNumber" | "boolean" | "select", min?, max?, step?, options?, help? }` (`optionalNumber`, session 6: blank = the key is ABSENT from the config, otherwise a number within min/max). Strategies are PURE: no input mutation, no side effects. `ctx` is read-only (bankroll, baseBet, round, lastBet). The UI renders strategy config purely from `configSchema`. A new strategy = one file + one registry line, zero UI edits.
+   `FieldSpec = { key, label, kind: "number" | "integer" | "optionalNumber" | "boolean" | "select", min?, max?, step?, options?, help?, binaryOnly? }` (`optionalNumber`, session 6: blank = the key is ABSENT from the config, otherwise a number within min/max). Strategies are PURE: no input mutation, no side effects. `ctx` is read-only (bankroll, baseBet, round, lastBet). The UI renders strategy config purely from `configSchema`. A new strategy = one file + one registry line, zero UI edits.
 
 7. **Table rules live in the runner**, never in strategies. Raise the bet to tableMin, clamp it to tableMax. If bet > bankroll, apply `insufficientFunds: "stop"` (default) | `"allIn"`. `endReason` is one of: `"ruin"` (bankroll < tableMin), `"insufficientFunds"` (could not cover the next bet), `"stopWin"`, `"stopLoss"`, `"maxRounds"`, `"strategyStop"`. `maxRounds` is REQUIRED and finite (default 1000, hard cap 1,000,000). Reason: bounded runtime and defined checkpoints.
 
@@ -124,10 +125,12 @@ e2e/
 src/
   engine/
     rng.ts            mulberry32 + splitmix32
-    games.ts          Game type, presets, edge, validation
+    games.ts          Outcome / Game (binary shorthand) / OutcomesGame / AnyGame, presets, edge, legacyView, validation
+    probText.ts       probability TEXT -> exact BigInt rational ("1/6", "0.25"); exact sums
+    outcomeEditor.ts  the outcome editor's inputs (ticket | multiplier) -> outcomes + readout (pure)
     odds.ts           sports odds -> Game: conversions, proportional de-vig, estimate mode (pure)
     types.ts          shared engine types (SessionResult, EndReason, ...)
-    runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer, sub-cent payout carry
+    runner.ts         runSession, runSessionWithRng, compileGame + outcomeIndex (the one-draw mapping), table rules, observer + onRound hooks, sub-cent carry
     runner.golden.stats.test.ts + .json  pre-carry golden SessionResults on even/integer payouts (bit-identical), old-rule -110 run
     runner.carry.stats.test.ts    carry property test: |paid - exact| < 1 cent, exact BigInt rationals, after every round
     runner.regression.stats.test.ts -110 flat $5, 100k sessions: z before (golden) vs after the carry
@@ -194,7 +197,7 @@ src/
       FanChart.tsx    fan + spaghetti small multiples (click a path to replay)
       HistogramChart.tsx  final-bankroll histograms, shared bins, linear/log
       ReplayChart.tsx stacked replay: bankroll, bet size, ONE win/loss strip
-  scenario.ts         ScenarioConfig (v2: builtin | custom instances, at most MAX_STRATEGIES = 8), defaults, validation, toSimRequest (dollars -> cents), migrateScenario (v1 -> v2)
+  scenario.ts         ScenarioConfig (v4 since session 13: games as outcomes, sports/editor inputs; v2: builtin | custom instances, at most MAX_STRATEGIES = 8), defaults, validation, toSimRequest (dollars -> cents), migrateScenario (v1 -> v2)
   share/              scenario links (see "URL scenario format"): UNTRUSTED input, no React, no DOM
     limits.ts         prefix, 8,000-character cap, depth limit, size budget
     base64url.ts      strict hand-written base64url (never throws, errors carry a position)
@@ -230,13 +233,14 @@ How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fa
 
 1. Create `src/engine/strategies/<id>.ts` exporting one `Strategy<Config, State>`.
 2. Define `Config`, `State`, `defaultConfig`, and a `configSchema` covering every config key. Give each field sensible min/max bounds.
-3. Implement `init`, `nextBet`, `update` as pure functions. Return new state objects; never mutate. Do not clamp to table limits or bankroll; the runner does that. Payout-aware sizing reads `ctx.game` (`{ winProb, netPayout, edge }`, read-only, filled by the runner — reading it never touches the RNG, so CRN is safe). Copy any config a strategy needs into State at `init`; `nextBet` gets no config.
+3. Implement `init`, `nextBet`, `update` as pure functions. `update(state, result, ctx)` gets a `RoundResult` (session 13): branch on `result.kind === "win"` (a loss is `"loss"`; a push never reaches `update`, the runner skips it so state is unchanged across a push), and book profit from `result.profit` (the placed bet × the outcome's net, exact) rather than recomputing it. Return new state objects; never mutate. Do not clamp to table limits or bankroll; the runner does that. Payout-aware sizing reads `ctx.game` (`{ winProb, netPayout, edge, outcomes }`; on a multi-outcome game winProb/netPayout are the approximation described in "Multi-outcome games", read-only, filled by the runner — reading it never touches the RNG, so CRN is safe). Copy any config a strategy needs into State at `init`; `nextBet` gets no config.
 4. Add one line to `strategies/registry.ts`.
 5. Write `<id>.test.ts` (fast, `unit` project) and `<id>.stats.test.ts` (the invariant and any other Monte Carlo check, `stats` project; see "Strategy test kit" below) covering:
    - the progression over a hand-written win/loss sequence (`betSequence`, assert the exact bet sequence in cents; `betSequence` carries the just-placed bet as `ctx.lastBet` and takes an optional `game` for payout-aware strategies)
    - reset behavior, caps and floors
    - purity (`expectPure`)
    - the invariant (`describeEvInvariant(strategy, config)`, in `<id>.stats.test.ts`): EV per $ wagered within 4 SE of `-edge` on European roulette, within 4 SE of 0 on a fair coin, AND within 4 SE of `-edge` on the positive-edge game (p = 0.55, even money), with stop conditions ON. The config passed here must make the strategy actually WAGER on all three games (e.g. Kelly needs a misjudged edge above 0.5), or EV per $ is 0/0.
+   - the push rule is covered automatically: `strategies/push.test.ts` runs every registered strategy through a push inside a streak (it must bet on its positive-edge push game);
    - then add the id to the expected id-list assertion in `strategies/crn.test.ts` (and give it a betting config there and in `customGame.stats.test.ts` if its default refuses to bet on a negative-edge game, as Kelly does).
 6. Run the app and confirm the strategy appears in the picker with a working config form and no UI edits.
 7. Update STATUS.
@@ -256,7 +260,7 @@ Every progression keeps its own level in State and computes the next bet from it
 
 ### Strategy test kit (`src/engine/testUtils.ts`)
 
-- `betSequence(strategy, config, script)`: feeds a W/L script straight to init/nextBet/update (no runner) and returns every requested bet, so tests assert the exact sequence in cents.
+- `betSequence(strategy, config, script)`: feeds a W/L script (`P` = a push: the round is played but `update` is skipped, as in the runner; W/L become `binaryResult(won, bet, netPayout)`) straight to init/nextBet/update (no runner) and returns every requested bet, so tests assert the exact sequence in cents.
 - `expectPure(strategy, config)`: deep-frozen config, state and ctx, plus before/after snapshots (`testUtils.test.ts` proves it rejects a mutating strategy).
 - `describeEvInvariant(strategy, config)`: THE fixed invariant scenario, shared by every strategy: $1,000 bankroll, $5 base, table $1–$250, stopWin $1,500, stopLoss floor $500, maxRounds 1000, insufficientFunds "stop", 20,000 sessions, on THREE games — European (seed 101), fair coin (seed 202), and the positive-edge game p = 0.55 / even money (seed 303, edge −0.10). Asserts |EV − (−edge)| < 4 SE and prints measured, expected, SE and z. Do not change this scenario to rescue a strategy. The passed config must wager on all three (Kelly uses a misjudged edge here).
 - `crn.test.ts`: one `runMonteCarlo` over every registered strategy; for all 50 sample sessions, every strategy pair sees the identical W/L sequence over the rounds they both played. When you register a strategy, add its id to the expected list there.
@@ -521,7 +525,7 @@ The invariant tests keep their 4 SE tolerance. If one fails on a non-integer pay
 
 ### Pushes are out of scope
 
-The engine resolves each round with ONE uniform draw into win or loss. A push (a tie that returns the stake) needs a third outcome, so sports mode models **two-way markets without pushes**. The UI says so in one line. Pushes (three-way outcomes), parlays and other de-vig methods are on the roadmap.
+Sports MODE still models **two-way markets without pushes** (the UI says so in one line). Since session 13 the engine itself supports pushes and any number of outcomes (see "Multi-outcome games"), but three-way sports lines (a push or a draw priced by the market) need their own de-vig spec and stay on the roadmap, with parlays and other de-vig methods.
 
 ### Scenario and link representation
 
@@ -547,8 +551,12 @@ interface Outcome {
   net: number;    // profit per $1 staked: -1 = stake lost, 0 = push, 1 = even-money win; >= -1
   label?: string; // shown in the replay strip and the editor
 }
-interface Game { id: string; name: string; outcomes: readonly Outcome[] }
+interface OutcomesGame { id: string; name: string; outcomes: readonly Outcome[] }
+interface Game { id: string; name: string; winProb: number; netPayout: number } // the binary shorthand (kept under its old name)
+type AnyGame = Game | OutcomesGame;  // what the engine accepts; outcomesOf(game) gives the list
 ```
+
+As built (session 13): the engine takes `AnyGame`. The binary shorthand keeps the name `Game` so every preset, custom and sports game, and every existing test, is untouched; `outcomesOf` turns it into the two-outcome form below.
 
 - **Gross return** (the amount returned per $1 staked: 0 = stake lost, 1 = push, 2 = even-money win) is `1 + net`. It is what the editor and readouts SHOW.
 - **Why `net` is stored rather than `grossReturn`** (owner-approved, session 13): `1 + n` loses a bit in floating point. With n = 100/110, `(1 + n) − 1` = 0.9090909090909092 ≠ n. Storing `net` keeps every binary game, sports price and link bit-exact.
@@ -606,7 +614,7 @@ interface RoundResult { kind: "win" | "loss" | "push"; outcomeIndex: number; pro
 
 ### The editor: two input modes
 
-The game list gains **"Custom outcomes"** and a **"Ticket example"** preset. The binary "Custom" editor (win probability + net payout) stays as it is. Rows: 1 to 12, with add and remove.
+The game list reads "Custom (win or lose)" (the binary editor, as before), **"Custom outcomes"** (opens a starter: a $10 ticket paying $20 or nothing at 1/2 each) and **"Ticket example ($70; prizes $20, $50, $100)"** (loads the example into the same editor, presetId `"outcomes"`). Rows: 1 to 12, with add and remove.
 - **Ticket mode:** a price P plus a prize per outcome. `net = (prize − P) / P` (computed this way, not `prize / P − 1`). A prize equal to the price is labeled "push".
 - **Multiplier mode:** the gross return per $1 staked per outcome (0 = stake lost, 1 = push, 2 = even money). `net = r − 1`, with the decimal float artifact snapped by the existing `snapShortDecimal` (1.91 → 0.91 exactly).
 - **Probability fields** accept a decimal (`0.25`, `.5`) or a fraction of two whole numbers (`1/6`). They are parsed EXACTLY into BigInt rationals (a decimal is a rational too: 0.25 = 25/100). The sum is checked in exact rational arithmetic (`1/6 + 3/6 + 2/6` is exactly 1), within the same 1e-9 tolerance as the engine. The engine receives `num / den` as a float.
@@ -623,8 +631,8 @@ The game list gains **"Custom outcomes"** and a **"Ticket example"** preset. The
 It is still drawn ONCE (CRN: every strategy saw the same outcomes).
 - **Binary games:** unchanged (tall = won, short = lost).
 - **Multi-outcome games:**
-  - Bar height = the outcome's rank by net, lowest net = shortest bar.
-  - A left axis labels each level with the outcome's label or its prize/return.
+  - Bar height = (level + 1) / levels, the level being the outcome's rank by net (lowest net = shortest bar; equal nets share a level).
+  - An HTML legend under the strip names every level ("Level 2 of 3: $50"), from the outcome's label or its return; the canvas exposes `data-levels` and `data-pushes`.
   - **Pushes are drawn as a hollow outlined bar** at their level.
   - Neutral grays only, never color alone.
   - Long sessions (bucketed): bar height = the mean level of the bucket.
@@ -690,7 +698,9 @@ The original roadmap is complete. Candidates beyond it (not scheduled; see STATU
 
 - **Vercel (optional later):** deploy the same build at a domain root with `VITE_BASE=/` (the default). No code change is needed.
 
-- **Pushes (three-way outcome):** a tie that returns the stake. Needs the runner to resolve a round into win / push / loss from ONE draw (so CRN still holds) and a Game with a push probability. It is the first real change to the Game abstraction, so it needs its own spec.
+- ~~**Pushes (three-way outcome).**~~ **Done in session 13:** any number of outcomes per game, pushes included (see "Multi-outcome games").
+- **Three-way sports lines** (a draw or a push priced by the market): sports mode is still two-way. Needs a three-way de-vig spec on top of the session 13 outcome model.
+- **Result allocation in the round loop** (session 13 measurement, see STATUS 116): the per-round `RoundResult` object costs about 8% on the benchmark. Reusing one mutable object recovers about half but weakens the purity guarantee; a decision for the owner, not taken.
 - **Parlays:** multi-leg bets whose legs all must win. Out of the two-way model; needs a spec for leg correlation (independent legs only?).
 - **Other de-vig methods:** power, Shin, additive. Each gives a different fair p for the same prices. They would be alternatives to proportional de-vig in `odds.ts`, with hand-computed tests like the proportional ones.
 
@@ -1228,6 +1238,102 @@ Session 12 (2026-09-24, Windows / PowerShell). `npm run test` (632 passed, 4 ski
     - Tests: `checkpoints.test.ts`, `montecarlo.golden.test.ts` + `.json`, `stats/bands.test.ts` (imports repointed; the old even-spacing test replaced by the schedule equality; observer-leak test added), `perf.bench.test.ts` (import), `strategies/customGame.test.ts` (timeout).
     - Outside the engine: `ui/charts/FanChart.tsx` (the `data-band-points` hook, option B), `ui/charts/adapters.test.ts`, `e2e/charts.spec.ts`.
 
+Session 13 (2026-09-24, Windows / PowerShell). `npm run test` (717 passed, 5 skipped: 2 benchmark tests + 3 golden writers), `npm run build`, `npm run lint` and **`npx playwright test` (41 passed)** all clean. **CI run [36084800574](https://github.com/iangopen/strategylab/actions/runs/36084800574) was green**: lint, unit, build, e2e, build-pages and deploy, every job on `ubuntu-24.04`. The pre-step's own run, [36079893679](https://github.com/iangopen/strategylab/actions/runs/36079893679), was green too. Delivered: the Vitest `unit` / `stats` split, and **multi-outcome games** (spec committed first, `939086c`).
+
+103. **Pre-step: two Vitest projects.**
+    - `unit` (default parallelism, 5 s default) runs first. `stats` (`*.stats.test.ts`) runs after it, on 2 workers, under one 120 s project timeout.
+    - No per-file or per-test timeout remains in any test file (grep).
+    - **Wall time:** unit 3.0 s, stats 50.5 s. **Full suite 3 runs in a row: 47.7 s, 54.6 s, 49.9 s, all green.**
+    - Worker count by measurement: 2 → 41.5 s, 4 → 42.5 s, 6 → 46.7 s. At 2, the slowest single test is 8.8 s (13× under the timeout).
+    - The carry property test checks its per-round bound with a plain comparison plus `expect.fail`, instead of 2.25M `expect()` calls: 17 s → 0.8 s. A mutation (bound 0.3¢) still fails it.
+    - The 8 strategy files split into `<id>.test.ts` (sequence tests) and `<id>.stats.test.ts` (invariant, analytic, growth).
+    - The +8 test count is the isolation scan's one test per new engine file.
+104. **Bit-identity (directive 3).** These pass UNCHANGED (`git diff 939086c..HEAD` is empty for each file):
+    - the session 11 runner golden (90 cells) and the session 12 Monte Carlo golden (4 scenarios × 9 strategies);
+    - `runner.test.ts` (draws === rounds, including 2,400 random sessions);
+    - `strategies/crn.test.ts` and the rule equivalence test.
+    - The invariant table's five old columns reproduce digit for digit.
+    - The only sequence-test edits: Flat's hand-built ctx gained `outcomes`, and its two direct `update` calls pass a result.
+105. **Draw mapping** (`runner.outcomes.test.ts`, `runner.frequency.stats.test.ts`):
+    - Binary games: `outcomeIndex` equals `u < p` at the edge cases and on 140,000 random draws over 7 values of p.
+    - The last bound is forced to 1.
+    - draws === rounds on multi-outcome games (600 sessions).
+    - **1,000,000 draws: ticket worst |z| 1.31; 12 outcomes incl. 0.001, worst |z| 2.41 (the 0.001 outcome: z 1.71).** SE = √(p(1−p)/N) is printed per outcome.
+106. **Payouts:**
+    - A $70 ticket pays back exactly $20 / $50 / $100.
+    - Partial losses go through the carry: 7 × (−500/7¢) = exactly −500¢.
+    - A push moves nothing, even with a carry pending.
+    - Total losses are exactly −bet.
+107. **Push semantics** (`strategies/push.test.ts`, all 8 built-ins + a custom rule, through the runner):
+    - With pushes inside a losing and a winning streak, the bets equal those of the same script without the pushes, and the bet after each push equals the bet on it.
+    - The runner test shows that `update` is skipped on a push, and that L, push, L counts as a losing streak of 2.
+108. **Kelly** (`kellyGeneral.test.ts`):
+    - **The solver matches the closed form to within 2.22e-16** (worst of 4,263 random binary games with f* > 0; the requirement is 1e-12).
+    - **Ticket at $60: f* = 0.119801** (G is lower on both sides), and it bets. **At $70: stops.**
+    - The 2% push game stops. Win 0.5 / push 0.1 / lose 0.4 gives f* = 1/9. A game that cannot lose is capped at 1.
+    - `assumedWinProb` is ignored on multi-outcome games and still drives binary games.
+109. **Invariant table** (`invariant.stats.test.ts`, 20,000 sessions per cell, 4 SE). New columns (z):
+
+     | Strategy | ticket $70 (−11.905%) | ticket $60 (+2.778%) | push game (−2%) |
+     |---|---|---|---|
+     | flat | −1.98 | 0.46 | 0.61 |
+     | martingale | −1.49 | −0.71 | 0.98 |
+     | paroli | −1.30 | 0.84 | 2.22 |
+     | dalembert | −2.52 | 0.31 | 0.21 |
+     | fibonacci | −0.85 | −1.07 | −0.90 |
+     | labouchere | −1.25 | −0.02 | 0.49 |
+     | oscars | −2.00 | 0.48 | −0.92 |
+     | kelly | stops (asserted) | −0.02 | stops (asserted) |
+     | custom rule | −1.18 | −0.81 | −1.70 |
+
+     Every |z| < 4. Kelly has no edge to size from on a house-edge multi-outcome game, so the test asserts that it refuses every session (0 rounds, strategyStop).
+110. **Fraction parsing** (`games.test.ts`):
+     - `"1/6" + "3/6" + "2/6"` = exactly 1 (BigInt), and so do 1/3 × 3 and 0.1 + 0.2 + 0.7.
+     - `1/0`, `abc`, `-0.2`, `-1/6`, `0`, `7/6`, `1.5`, `1e-3`, `1/2/3`, `0x10`, empty, 41 characters and non-strings are all rejected with readable messages (asserted exactly).
+111. **Migration and links:**
+     - **The 11 captured v1–v3 links** (`src/v3links.golden.json`, captured from the v3 decoder at `a15431c`) decode to exactly that output, taken through v3 → v4. Session 7's three golden links, likewise.
+     - **v4 editor games round-trip bit-exactly** (6 cases: the example, a push prize with labels, multiplier with 1.91 / a push / a partial loss, 12 outcomes with 0.001, a sure push, 1/997 fractions).
+     - An editor game in a v1–v3 link is reported and falls back to the default game. Malformed `["m", …]` arrays (14 forms) are reported, never thrown.
+     - **The typical scenario on a 12-outcome game is a 921-character link** (budget 2,000).
+     - v2 → v4 migration keeps p and n exactly.
+112. **Editor and E2E** (`outcomes.spec.ts`):
+     - **The ticket game is built field by field** in "Custom outcomes". A 2/3 sum blocks Run with a message, and `1/0` shows a readable error. The readout reads 1 / $61.67 / 0.8810 / 11.905%.
+     - Kelly's assumed probability is disabled on this game, with the note.
+     - **Run: the table equals the engine.** **Replay:** 2 lines, and the strip names its three levels ($20, $50, $100).
+     - **Copy link, reopen in a new page:** same inputs (`1/6` kept as typed), readout and results.
+     - Also: the preset, the $60 player edge, a push prize, and the cannot-lose warning; 12 rows at 360 px with no horizontal scroll; and a push game whose strip push count and cell count equal the engine's replay computed in Node.
+     - **One existing spec edited:** `links.spec.ts` asserted the literal "reads up to version 3". It now uses `SCENARIO_VERSION`: a version-bump message, not engine output.
+113. **Replay strip** (`replay.outcomes.test.ts`):
+     - The strip equals the seeded draw sequence and is the same for every strategy.
+     - Bets are recorded on push rounds too.
+     - Levels are ranked by net, with labels and a push flag.
+     - For a bucketed 20,000-round session, the mean height is within 4 SE (z 0.63).
+114. **Live** (headless Chromium, local Playwright, `https://iangopen.github.io/strategylab/`, bundle `index-C5_7WErn.js`): the ticket game at $70 via a link, Flat + Martingale + Oscar's, 10,000 sessions ("Done: 10,000 sessions in 1.8s").
+     - **Every row equals the engine.** EV per $ −11.908% / −11.997% / −12.041% against −11.905%; z −0.19 / −0.57 / −2.36.
+     - The strip levels read $20, $50, $100, with no console errors.
+115. **`src/engine/` diff since `939086c`:**
+     - `games.ts`: the model.
+     - `probText.ts` and `outcomeEditor.ts`: new.
+     - `runner.ts`: the draw mapping, payouts, `RoundResult`, `onRound`.
+     - `types.ts`: `RoundHook`.
+     - `strategies/*`: the mechanical `result.kind`; Oscar's uses `result.profit`.
+     - `kelly.ts`: the solver.
+     - `strategies/types.ts`: `RoundResult`, `binaryOnly`, `ctx.game.outcomes`.
+     - `rules/compile.ts`: `result.profit`.
+     - `replay.ts`: `onRound`, the strip.
+     - `montecarlo.ts` and `stats/types.ts`: `AnyGame`.
+     - Tests.
+116. **Performance** (not a directive this session; measured because the round loop changed):
+     - The committed benchmark, interleaved in a temporary worktree at `939086c` and at HEAD, 5 pairs, on a machine running about 2× slower than in session 12 (thermal or power state).
+     - **Median before 19.66 s, after 21.23 s: +8%.**
+     - Reusing one mutable result object recovers about half, but weakens purity, so it was not kept. Caching frozen results made it much slower (≈28 s). A two-outcome fast path was within noise.
+     - Recorded under Still open.
+117. **Incident (fixed):**
+     - Removing the benchmark worktree with `git worktree remove --force` BEFORE deleting its `node_modules` junction let git delete files inside the real `node_modules` (`node_modules/.bin` was gone).
+     - Found when `npx playwright` failed. Restored with `npm ci` from the lockfile.
+     - The full gate re-ran clean afterwards (717 unit, 41 E2E).
+     - Rule: delete a junction with a non-recursive delete FIRST (as session 8 did), then remove the worktree.
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -1264,7 +1370,10 @@ Session 12 (2026-09-24, Windows / PowerShell). `npm run test` (632 passed, 4 ski
 
 ### Still open
 
-- The original 8-session roadmap is complete. Next candidates are in the Roadmap: pushes, parlays, other de-vig methods.
+- The original 8-session roadmap is complete. Next candidates are in the Roadmap: three-way sports lines, parlays, other de-vig methods, and the result-allocation cost.
+- **Session 13: +8% on the benchmark** (median of 5 interleaved pairs, 19.66 s -> 21.23 s on a throttled machine; STATUS 116). Not a directive this session; reported, not fixed.
+- **Oscar's Grind on multi-outcome games uses an approximation** (the mean winning net), so a cycle can close above or below exactly +1 unit. Documented; the invariant holds regardless.
+- **Kelly on a house-edge multi-outcome game always stops** (assumedWinProb does not apply there), so it cannot model a misjudged edge on such games. By design (directive 6); the invariant table asserts the stop instead of a 0/0 z.
 - ~~Cents rounding on non-even payouts is ~2 SE for a flat $5 bettor at 20,000 sessions (STATUS 66).~~ **Closed in session 11:** the per-session sub-cent carry (see "Cents rounding"); at 100k sessions z went from 5.29 to 0.55.
 - Sports mode stores decimal prices at full precision after a format switch. The field shows 2 decimals, so the stored price and the visible one can differ (e.g. 1.9090909090909092 vs "1.91"). The readout shows the real payout. This is by design (owner decision 6).
 - The address bar is not kept in sync while editing (owner-approved in the session 7 plan). After opening a link and then editing, a reload brings back the LINK, not the edits, until Copy link is clicked again.
@@ -1446,3 +1555,18 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 12: `data-band-points`** on each fan canvas = the number of band checkpoints inside the shared x window. It is a test hook only; nothing visible changed.
 - **Session 12: the E2E hover check zooms first** (a drag to about 449–551), so one pixel is a small fraction of the 5-round gap and the snap target is unambiguous.
 - **Session 12 ran on Windows / PowerShell.**
+- **Session 13: outcomes store `net`, not `grossReturn`** (owner-approved D1): `1 + n` loses a bit, which would break bit-identity and the round trip. Gross return is what the UI shows.
+- **Session 13: `Game` keeps its name for the binary shorthand;** `OutcomesGame` is the list form, and `AnyGame` is what the engine takes. Every preset and existing test stays untouched.
+- **Session 13: the carry skips total losses (net −1) and pushes (net 0)** (approved D4). Both are exact whole-cent moves; without the exemption a binary loss could move −bet + 1 when the carry is 0.5.
+- **Session 13: `RoundResult.profit` is the EXACT profit** (lastBet × net), not the cents paid, so `kind` depends on the outcome alone (CRN-stable) and Oscar's / rule cycle profit stay bit-identical (approved D5).
+- **Session 13: Kelly keeps the closed form on the legacy binary shape** (2 outcomes, first net > 0, second −1); the solver is used everywhere else, and a test holds the two to 1e-12 (approved D7). f* is capped at 1 only when no outcome loses. A stake above the bankroll is handled by the runner, as with fraction > 1.
+- **Session 13: `assumedWinProb` is disabled via a generic `FieldSpec.binaryOnly`** (SchemaForm shows the note "Applies only to win/lose games; ignored here." from `ui/format.ts`), and Kelly ignores it on multi-outcome games.
+- **Session 13: replay records through the runner's `onRound` hook** (approved D8); the old `recordingStrategy` wrapper is gone (a wrapper around `update` misses pushes). Its "changes nothing" test now covers the hook.
+- **Session 13: probability TEXT is stored** in the scenario and links (approved D9); sums are exact BigInt rationals, accepted within 1e-9 like the engine.
+- **Session 13: "Custom outcomes" opens a starter** ($10 ticket, $20 or nothing, 1/2 each), and "Ticket example" loads the example into the same editor (presetId `"outcomes"`, no separate stored preset id). The binary editor is relabeled "Custom (win or lose)". Switching ticket → multiplier converts prizes to prize / price; multiplier → ticket gives a $1 ticket.
+- **Session 13: strip levels** = outcomes ranked by net (ties share a level); height (level + 1) / levels; pushes hollow; an HTML legend names every level (a 64 px canvas cannot hold 12 axis labels).
+- **Session 13: the invariant table asserts that Kelly STOPS on house-edge multi-outcome games** instead of a 0/0 z (no betting config exists there by design).
+- **Session 13: the v1–v3 link fixture lives in `src/` (not `src/share/`)** because its writer's dynamic `import("node:fs")` is exactly what the no-eval scan of `src/share/` forbids.
+- **Session 13: the tone test also scans the outcome editor** (and bans lottery-operator names).
+- **Session 13: the `stats` project runs on 2 workers** (measured: more workers were not faster on this machine, and 2 gives the most headroom per test). Its one timeout is 120 s.
+- **Session 13 ran on Windows / PowerShell.**
