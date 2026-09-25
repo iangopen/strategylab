@@ -1,6 +1,7 @@
 // Live preview: feeds a hand-typed win/loss script to the COMPILED rule and returns the bet ladder.
 // Pure and tested. It is not a simulation: no RNG, no runner, a fixed script of at most 100 rounds.
 // It deliberately ignores table limits and running out of money (the preview says so).
+import { legacyView, type GameNumbers } from "../../engine/games";
 import { compileValidRule } from "../../engine/rules/compile";
 import { validateRule } from "../../engine/rules/validate";
 import type { RoundResult, StrategyContext } from "../../engine/strategies/types";
@@ -76,10 +77,12 @@ export function previewRule(rule: unknown, script: string, pc: PreviewContext): 
 }
 
 /** Preview context from the scenario's (dollar) values, falling back to sane values while they're invalid. */
-export function previewContextOf(s: { baseBet: number; startBankroll: number; game: { winProb: number; netPayout: number } }): PreviewContext {
+export function previewContextOf(s: { baseBet: number; startBankroll: number; game: GameNumbers }): PreviewContext {
   const cents = (d: number, fallback: number) => (Number.isFinite(d) && Math.round(d * 100) >= 1 ? Math.round(d * 100) : fallback);
-  const winProb = Number.isFinite(s.game.winProb) && s.game.winProb > 0 && s.game.winProb < 1 ? s.game.winProb : 0.5;
-  const netPayout = Number.isFinite(s.game.netPayout) && s.game.netPayout > 0 ? s.game.netPayout : 1;
+  // The preview is a W/L script: on a multi-outcome game it uses P(win) and the mean winning net (ctx.game's view).
+  const g = legacyView(s.game);
+  const winProb = Number.isFinite(g.winProb) && g.winProb > 0 && g.winProb < 1 ? g.winProb : 0.5;
+  const netPayout = Number.isFinite(g.netPayout) && g.netPayout > 0 ? g.netPayout : 1;
   return { baseBet: cents(s.baseBet, 1000), startBankroll: cents(s.startBankroll, 100_000), winProb, netPayout };
 }
 

@@ -1,5 +1,5 @@
 import { CUSTOM_GAME_ID, edge, findPreset, GAME_PRESETS } from "../engine/games";
-import { defaultSportsInput, MAX_SEED, SPORTS_GAME_ID, sportsScenarioGame, type ScenarioConfig } from "../scenario";
+import { binaryScenarioGame, binaryView, defaultSportsInput, MAX_SEED, SPORTS_GAME_ID, sportsScenarioGame, type ScenarioConfig } from "../scenario";
 import { NumberField } from "./NumberField";
 import { SportsOddsFields } from "./SportsOddsFields";
 
@@ -21,6 +21,8 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
   const isCustom = s.game.presetId === CUSTOM_GAME_ID;
   const sports = s.game.presetId === SPORTS_GAME_ID && s.game.sports ? { ...s.game, sports: s.game.sports } : null;
   const e = edge(s.game);
+  // The win/lose view of the game (presets and the binary custom game); an outcome game has none.
+  const view = binaryView(s.game) ?? { winProb: 0.5, netPayout: 1 };
 
   function choosePreset(presetId: string) {
     if (presetId === SPORTS_GAME_ID) {
@@ -29,7 +31,7 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
     }
     const preset = findPreset(presetId);
     // Leaving sports mode drops the odds inputs; custom keeps the current numbers as a starting point.
-    set("game", preset ? { presetId, winProb: preset.winProb, netPayout: preset.netPayout } : { presetId, winProb: s.game.winProb, netPayout: s.game.netPayout });
+    set("game", preset ? binaryScenarioGame(presetId, preset.winProb, preset.netPayout) : binaryScenarioGame(presetId, view.winProb, view.netPayout));
   }
 
   return (
@@ -55,14 +57,14 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
       <div className="row">
         <NumberField
           label="Win probability"
-          value={s.game.winProb}
-          onChange={(v) => v !== null && set("game", { ...s.game, winProb: v })}
+          value={view.winProb}
+          onChange={(v) => v !== null && set("game", binaryScenarioGame(s.game.presetId, v, view.netPayout))}
           disabled={disabled || !isCustom}
         />
         <NumberField
           label="Net payout (per $1 staked)"
-          value={s.game.netPayout}
-          onChange={(v) => v !== null && set("game", { ...s.game, netPayout: v })}
+          value={view.netPayout}
+          onChange={(v) => v !== null && set("game", binaryScenarioGame(s.game.presetId, view.winProb, v))}
           disabled={disabled || !isCustom}
         />
       </div>

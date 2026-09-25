@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { convertOdds, type SportsInput } from "../engine/odds";
-import { defaultScenario, defaultSportsInput, migrateScenario, newStrategyInstance, SCENARIO_VERSION, sportsScenarioGame, validateScenario, type ScenarioConfig } from "../scenario";
+import { defaultScenario, defaultSportsInput, migrateGameV3, migrateScenario, type LegacyScenarioGame, newStrategyInstance, SCENARIO_VERSION, sportsScenarioGame, validateScenario, type ScenarioConfig } from "../scenario";
 import { base64urlToBytes } from "./base64url";
 import { decodeScenarioLink, encodeScenarioLink } from "./link";
 import { FRAGMENT_PREFIX } from "./limits";
@@ -74,8 +74,11 @@ describe("v1 and v2 links load exactly as they did in session 7", () => {
     it(`${name} link`, () => {
       const r = decodeScenarioLink(g.hash);
       if (r.kind !== "loaded") throw new Error(JSON.stringify(r));
-      expect(r.scenario.version).toBe(3); // migrated forward
-      expect({ fromVersion: r.fromVersion, scenario: withoutVersion(r.scenario), dropped: r.dropped }).toEqual(JSON.parse(g.session7));
+      expect(r.scenario.version).toBe(SCENARIO_VERSION); // migrated forward (4 since session 13)
+      // The session 7 output, with its game taken through the documented v3 -> v4 step (the two-outcome form).
+      const want = JSON.parse(g.session7) as { scenario: { game: LegacyScenarioGame } };
+      want.scenario.game = migrateGameV3(want.scenario.game) as unknown as LegacyScenarioGame;
+      expect({ fromVersion: r.fromVersion, scenario: withoutVersion(r.scenario), dropped: r.dropped }).toEqual(want);
       expect(r.scenario.game.sports).toBeUndefined();
     });
   }

@@ -5,6 +5,7 @@
 // Regenerate only on purpose: $env:GOLDEN_LINKS="write"; npx vitest run src/v3links.golden.test.ts
 import { describe, expect, it } from "vitest";
 import golden from "./v3links.golden.json";
+import { migrateGameV3, type LegacyScenarioGame } from "./scenario";
 import { decodeScenarioLink } from "./share/link";
 import { fragmentOf } from "./share/testLinks";
 
@@ -40,6 +41,18 @@ describe.skipIf(env.GOLDEN_LINKS !== "write")("golden capture (writes v3links.go
     const fs = (await import(/* @vite-ignore */ fsName)) as { writeFileSync(u: URL, s: string): void };
     fs.writeFileSync(new URL("./v3links.golden.json", import.meta.url), JSON.stringify(out, null, 1) + "\n");
   });
+});
+
+describe("v1-v3 links decode exactly as the version 3 decoder did, migrated v3 -> v4", () => {
+  const g = golden as Record<string, { hash: string; decoded: { fromVersion: number; dropped: unknown[]; scenario: { version: number; game: LegacyScenarioGame } } }>;
+  for (const name of Object.keys(OLD_LINKS)) {
+    it(name, () => {
+      const want = structuredClone(g[name]!.decoded);
+      want.scenario.version = 4;
+      want.scenario.game = migrateGameV3(want.scenario.game) as unknown as LegacyScenarioGame;
+      expect(decodedContent(OLD_LINKS[name]!)).toEqual(want);
+    });
+  }
 });
 
 describe("the captured fixture covers the link set", () => {

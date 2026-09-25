@@ -3,14 +3,16 @@
 // their documented default, numbers keep full precision. Expansion treats the payload as
 // UNTRUSTED: it reads own properties only, never recurses beyond the known shape, and every custom
 // rule it rebuilds goes through the session 6 validator.
-import { CUSTOM_GAME_ID, findPreset } from "../engine/games";
+import { CUSTOM_GAME_ID, findPreset, MAX_OUTCOMES } from "../engine/games";
 import { sportsGame, type SportsInput } from "../engine/odds";
 import { RULE_LIMITS } from "../engine/rules/limits";
 import type { Action, Condition, Entry, Rule } from "../engine/rules/types";
 import { describeValue, formatRuleError, validateRule } from "../engine/rules/validate";
 import { getStrategy } from "../engine/strategies/registry";
 import type { StrategyConfig } from "../engine/strategies/types";
-import { MAX_STRATEGIES, SPORTS_GAME_ID, sportsScenarioGame, type ScenarioConfig } from "../scenario";
+import { binaryScenarioGame, binaryView, editorScenarioGame, MAX_STRATEGIES, OUTCOMES_GAME_ID, SPORTS_GAME_ID, sportsScenarioGame, type ScenarioConfig } from "../scenario";
+import { editorGame, type OutcomeEditor } from "../engine/outcomeEditor";
+import { MAX_PROB_TEXT } from "../engine/probText";
 import { MAX_REPORTED_UNKNOWN_KEYS } from "./limits";
 
 /** A field the link carried but that could not be loaded, and why. */
@@ -135,11 +137,21 @@ function compactSports(x: SportsInput): unknown[] {
   return ["o", x.mode === "market" ? "m" : "e", x.format === "american" ? "a" : "d", x.sideA, x.sideB, x.side, x.estimate];
 }
 
-/** The game as a preset id when it matches the preset exactly, else [presetId, winProb, netPayout]; sports as ["o", ...]. */
+/** Outcome editor (v4): ["m", "t" | "x", price (null in multiplier mode), [[probText, value, label?], ...]]. Inputs only. */
+function compactEditor(e: OutcomeEditor): unknown[] {
+  return ["m", e.mode === "ticket" ? "t" : "x", e.mode === "ticket" ? e.price : null, e.rows.map((r) => (r.label !== undefined ? [r.prob, r.value, r.label] : [r.prob, r.value]))];
+}
+
+/**
+ * The game as a preset id when it matches the preset exactly, else [presetId, winProb, netPayout] (read
+ * exactly from its two-outcome form); sports as ["o", ...]; the outcome editor as ["m", ...].
+ */
 function compactGame(g: ScenarioConfig["game"]): unknown {
   if (g.presetId === SPORTS_GAME_ID && g.sports) return compactSports(g.sports);
+  if (g.presetId === OUTCOMES_GAME_ID && g.editor) return compactEditor(g.editor);
+  const view = binaryView(g) ?? { winProb: NaN, netPayout: NaN };
   const preset = findPreset(g.presetId);
-  return preset && preset.winProb === g.winProb && preset.netPayout === g.netPayout ? g.presetId : [g.presetId, g.winProb, g.netPayout];
+  return preset && preset.winProb === view.winProb && preset.netPayout === view.netPayout ? g.presetId : [g.presetId, view.winProb, view.netPayout];
 }
 
 /**
@@ -289,6 +301,27 @@ function ruleName(raw: unknown[]): string {
  * validated by the session 6 validator), and everything dropped. Range and cross-field checks are
  * the scenario validator's job, afterwards.
  */
+/** Compact outcome editor -> inputs, or an error. Only the TYPES and shape are checked here; editorGame checks ranges. */
+function expandEditor(g: unknown[]): Expanded<OutcomeEditor> {
+  if (g.length !== 4) return { ok: false, error: 'outcomes must be ["m", mode, price, rows]' };
+  const [, mode, price, rows] = g;
+  if (mode !== "t" && mode !== "x") return { ok: false, error: `unknown outcome mode ${describeValue(mode)}` };
+  if (mode === "t" ? typeof price !== "number" : price !== null) return { ok: false, error: mode === "t" ? `the ticket price must be a number (got ${describeValue(price)})` : `a multiplier game has no price (got ${describeValue(price)})` };
+  if (!Array.isArray(rows)) return { ok: false, error: `outcomes must be a list (got ${describeValue(rows)})` };
+  if (rows.length < 1 || rows.length > MAX_OUTCOMES) return { ok: false, error: `a game needs 1 to ${MAX_OUTCOMES} outcomes (got ${rows.length})` };
+  const out: OutcomeEditor["rows"] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r: unknown = rows[i];
+    if (!Array.isArray(r) || (r.length !== 2 && r.length !== 3)) return { ok: false, error: `outcome ${i + 1} must be [probability, value] or [probability, value, label]` };
+    const [prob, value, label] = r;
+    if (typeof prob !== "string" || prob.length > MAX_PROB_TEXT) return { ok: false, error: `outcome ${i + 1}: the probability must be text of at most ${MAX_PROB_TEXT} characters (got ${describeValue(prob)})` };
+    if (typeof value !== "number") return { ok: false, error: `outcome ${i + 1}: the value must be a number (got ${describeValue(value)})` };
+    if (r.length === 3 && typeof label !== "string") return { ok: false, error: `outcome ${i + 1}: the label must be text (got ${describeValue(label)})` };
+    out.push(r.length === 3 ? { prob, value, label: label as string } : { prob, value });
+  }
+  return { ok: true, value: { mode: mode === "t" ? "ticket" : "multiplier", price: mode === "t" ? (price as number) : null, rows: out } };
+}
+
 /** Compact sports game -> inputs, or an error. Only the TYPES are checked here; sportsGame checks ranges. */
 function expandSports(g: unknown[]): Expanded<SportsInput> {
   if (g.length !== 7) return { ok: false, error: "sports odds must be [\"o\", mode, format, sideA, sideB, side, estimate]" };
@@ -302,7 +335,7 @@ function expandSports(g: unknown[]): Expanded<SportsInput> {
   return { ok: true, value: { mode: mode === "m" ? "market" : "estimate", format: format === "a" ? "american" : "decimal", sideA: sideA as number, sideB: sideB as number, side, estimate: estimate as number } };
 }
 
-export function expandPayload(obj: Obj, options: { rules: boolean; sports: boolean } = { rules: true, sports: true }): ExpandedPayload {
+export function expandPayload(obj: Obj, options: { rules: boolean; sports: boolean; outcomes: boolean } = { rules: true, sports: true, outcomes: true }): ExpandedPayload {
   const dropped: Dropped[] = [];
   const top: Partial<TopValues> = {};
 
@@ -340,9 +373,20 @@ export function expandPayload(obj: Obj, options: { rules: boolean; sports: boole
         else if (r && !r.ok) dropped.push({ field: FIELD_LABELS.game, message: `${Object.values(r.errors).join(" ")} Using the default game.` });
         else top.game = sportsScenarioGame(x.value);
       }
-    } else if (preset) top.game = { presetId: preset.id, winProb: preset.winProb, netPayout: preset.netPayout };
+    } else if (Array.isArray(g) && g[0] === "m") {
+      if (!options.outcomes) {
+        dropped.push({ field: FIELD_LABELS.game, message: "multi-outcome games need a version 4 link; using the default" });
+      } else {
+        const x = expandEditor(g);
+        const r = x.ok ? editorGame(x.value) : null;
+        if (!x.ok) dropped.push({ field: FIELD_LABELS.game, message: `${x.error}; using the default` });
+        else if (r && !r.ok) dropped.push({ field: FIELD_LABELS.game, message: `${Object.values(r.errors).join(" ")} Using the default game.` });
+        else top.game = editorScenarioGame(x.value);
+      }
+    } else if (preset) top.game = binaryScenarioGame(preset.id, preset.winProb, preset.netPayout);
     else if (Array.isArray(g) && g.length === 3 && typeof g[0] === "string" && (g[0] === CUSTOM_GAME_ID || findPreset(g[0])) && typeof g[1] === "number" && typeof g[2] === "number") {
-      top.game = { presetId: g[0], winProb: g[1], netPayout: g[2] };
+      // Every version's win/lose game loads straight into its v4 two-outcome form (exact).
+      top.game = binaryScenarioGame(g[0], g[1], g[2]);
     } else dropped.push({ field: FIELD_LABELS.game, message: `not a known game (got ${describeValue(g)}); using the default` });
   }
 

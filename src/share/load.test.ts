@@ -97,8 +97,8 @@ describe("load path: all valid, partially valid, fully invalid", () => {
   });
 
   it("a link from a newer app version says so, instead of a partial load", () => {
-    const r = decodeScenarioLink(fragmentOf({ ...good, v: 4, newThing: [1] }));
-    expect(r).toEqual({ kind: "error", message: "This link needs a newer version of the app (it is scenario version 4; this app reads up to version 3). Reload the page to get the latest version, then open the link again. Nothing was loaded." });
+    const r = decodeScenarioLink(fragmentOf({ ...good, v: 5, newThing: [1] }));
+    expect(r).toEqual({ kind: "error", message: "This link needs a newer version of the app (it is scenario version 5; this app reads up to version 4). Reload the page to get the latest version, then open the link again. Nothing was loaded." });
   });
 });
 

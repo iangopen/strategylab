@@ -3,7 +3,7 @@ import { EXAMPLE_RULES } from "../engine/rules/examples";
 import type { ProgressionRule } from "../engine/rules/types";
 import { validateRule } from "../engine/rules/validate";
 import { STRATEGIES } from "../engine/strategies/registry";
-import { defaultScenario, migrateScenario, newCustomInstance, newStrategyInstance, SCENARIO_VERSION, validateScenario, type ScenarioConfig } from "../scenario";
+import { binaryScenarioGame, defaultScenario, migrateScenario, newCustomInstance, newStrategyInstance, SCENARIO_VERSION, validateScenario, type ScenarioConfig } from "../scenario";
 import { decodeScenarioLink, encodeScenarioLink } from "./link";
 
 const BASE = "https://strategylab.example.app/";
@@ -83,8 +83,8 @@ describe("scenario links round-trip exactly", () => {
 
   it("the four session 6 example rules, the blank rule, and the every-field rule, with every top-level field non-default", () => {
     const s: ScenarioConfig = {
-      version: 3,
-      game: { presetId: "custom", winProb: 0.4712345678901234, netPayout: 1.0833333333333333 },
+      version: 4,
+      game: binaryScenarioGame("custom", 0.4712345678901234, 1.0833333333333333),
       startBankroll: 1234.56,
       baseBet: 2.5,
       tableMin: 0.5,
@@ -105,7 +105,7 @@ describe("scenario links round-trip exactly", () => {
     for (const presetId of ["european", "american", "fairCoin"]) {
       const d = defaultScenario();
       const preset = { european: [18 / 37, 1], american: [18 / 38, 1], fairCoin: [0.5, 1] }[presetId]!;
-      roundTrip({ ...d, game: { presetId, winProb: preset[0]!, netPayout: preset[1]! } });
+      roundTrip({ ...d, game: binaryScenarioGame(presetId, preset[0]!, preset[1]!) });
     }
   });
 

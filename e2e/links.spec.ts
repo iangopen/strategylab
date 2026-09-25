@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { RULE_LIMITS } from "../src/engine/rules/limits";
 import type { Entry, ProgressionRule } from "../src/engine/rules/types";
-import { defaultScenario, MAX_STRATEGIES, newCustomInstance, newStrategyInstance, type ScenarioConfig } from "../src/scenario";
+import { defaultScenario, MAX_STRATEGIES, newCustomInstance, newStrategyInstance, SCENARIO_VERSION, type ScenarioConfig } from "../src/scenario";
 import { decodeScenarioLink, encodeScenarioLink } from "../src/share/link";
 import { addStrategy, BASE_PATH, expectTableMatchesEngine, openApp, runAndWait, watchPage } from "./helpers";
 
@@ -144,7 +144,7 @@ test("session 7 (6): the ready-made links — v1 with Kelly 0, a partially valid
   ]);
 
   await openApp(page, "#s=eyJ2Ijo5OTk5OTksInN0IjpbXX0");
-  await expect(page.getByRole("alert")).toContainText("This link needs a newer version of the app (it is scenario version 999999; this app reads up to version 3).");
+  await expect(page.getByRole("alert")).toContainText(`This link needs a newer version of the app (it is scenario version 999999; this app reads up to version ${SCENARIO_VERSION}).`);
 });
 
 test("session 7 (7): Back to an already-loaded link does not load it a second time", async ({ page }) => {
