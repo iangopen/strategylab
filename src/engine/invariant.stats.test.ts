@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { edge, GAME_PRESETS, type Game } from "./games";
+import { edge, GAME_PRESETS, isBinary, type AnyGame, type Game, type OutcomesGame } from "./games";
 import { sportsGame, type SportsInput } from "./odds";
 import { sessionSeed } from "./rng";
 import { compileRule } from "./rules/compile";
@@ -33,15 +33,33 @@ const CUSTOM = compileRule({
 const market: Game = gameOf({ mode: "market", format: "american", sideA: -110, sideB: -110, side: "a", estimate: 0.5 }, "-110/-110 market");
 const estimate: Game = gameOf({ mode: "estimate", format: "american", sideA: -110, sideB: -110, side: "a", estimate: 0.55 }, "-110 estimate 0.55");
 
+/** The ticket example at price P (session 13): prizes $20, $50, $100 with probabilities 1/6, 3/6, 2/6. */
+const ticket = (price: number): OutcomesGame => ({
+  id: `ticket${price}`,
+  name: `ticket at $${price}`,
+  outcomes: [
+    { prob: 1 / 6, net: (20 - price) / price },
+    { prob: 3 / 6, net: (50 - price) / price },
+    { prob: 2 / 6, net: (100 - price) / price },
+  ],
+});
+/** Win 0.44 at 2x, push 0.10, lose 0.46: a 2% house edge. Pushes count in the amount wagered. */
+const PUSH_GAME: OutcomesGame = { id: "push", name: "win / push / lose (2% edge)", outcomes: [{ prob: 0.44, net: 1 }, { prob: 0.1, net: 0 }, { prob: 0.46, net: -1 }] };
+
 // Kelly bets only when it believes in an edge: a misjudged 0.6 everywhere except the estimate game,
-// where its default (blank = the game's 0.55) already sees one.
+// where its default (blank = the game's 0.55) already sees one. On MULTI-OUTCOME games assumedWinProb
+// does not apply (session 13), so on a house-edge multi-outcome game Kelly correctly refuses to bet:
+// EV per $ is 0/0 there, and the test asserts that it stops instead (it is z-tested on the $60 ticket).
 const MISJUDGED: StrategyConfig = { assumedWinProb: 0.6, fraction: 1 };
-const GAMES: [Game, number, StrategyConfig][] = [
+const GAMES: [AnyGame, number, StrategyConfig][] = [
   [GAME_PRESETS.find((g) => g.id === "european")!, 101, MISJUDGED],
   [GAME_PRESETS.find((g) => g.id === "fairCoin")!, 202, MISJUDGED],
   [{ id: "posEdge", name: "p = 0.55, even money", winProb: 0.55, netPayout: 1 }, 303, MISJUDGED],
   [market, 808, MISJUDGED],
   [estimate, 809, { fraction: 1 }],
+  [ticket(70), 1370, MISJUDGED],
+  [ticket(60), 1360, { fraction: 1 }],
+  [PUSH_GAME, 1302, MISJUDGED],
 ];
 
 function specs(kellyConfig: StrategyConfig): [string, AnyStrategy, StrategyConfig][] {
@@ -53,7 +71,7 @@ function specs(kellyConfig: StrategyConfig): [string, AnyStrategy, StrategyConfi
 
 const table = new Map<string, Map<string, string>>(); // strategy -> game -> "EV% (z)"
 
-describe("EV per $ wagered = -edge: 8 built-ins + a custom rule x 5 games, every |z| < 4", () => {
+describe("EV per $ wagered = -edge: 8 built-ins + a custom rule x 8 games (3 multi-outcome), every |z| < 4", () => {
   it("the market compiles to fair p 0.5, payout 10/11, edge 1/22; the estimate game to edge -0.05", () => {
     expect(market.winProb).toBeCloseTo(0.5, 15);
     expect(market.netPayout).toBe(100 / 110);
@@ -67,6 +85,13 @@ describe("EV per $ wagered = -edge: 8 built-ins + a custom rule x 5 games, every
       for (const [name, strategy, config] of specs(kellyConfig)) {
         const results: SessionResult[] = [];
         for (let i = 0; i < INVARIANT_SESSIONS; i++) results.push(runSession(game, strategy, config, INVARIANT_SCENARIO, sessionSeed(master, i)));
+        if (name === "kelly" && !isBinary(game) && edge(game) > 0) {
+          // No edge to size from: Kelly must refuse every session (strategyStop, 0 rounds).
+          expect(results.every((r) => r.rounds === 0 && r.endReason === "strategyStop")).toBe(true);
+          if (!table.has(name)) table.set(name, new Map());
+          table.get(name)!.set(game.name, "stops (no edge)");
+          continue;
+        }
         const { ev, se } = evPerWageredWithSE(results, INVARIANT_SCENARIO.startBankroll);
         const z = (ev - expected) / se;
         if (!table.has(name)) table.set(name, new Map());
