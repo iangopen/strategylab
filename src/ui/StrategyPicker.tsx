@@ -16,12 +16,14 @@ interface Props {
   disabled?: boolean;
   /** For custom rules' live preview. */
   previewContext: PreviewContext;
+  /** False on a multi-outcome game (binaryOnly fields are disabled). */
+  binaryGame?: boolean;
 }
 
 /** "Add" dropdown values: a registry id, or "rule:<example id>" for a custom rule. */
 const RULE_PREFIX = "rule:";
 
-export function StrategyPicker({ instances, onChange, errors, disabled, previewContext }: Props) {
+export function StrategyPicker({ instances, onChange, errors, disabled, previewContext, binaryGame = true }: Props) {
   // Which entry the "Add" dropdown points at. Not scenario state.
   const [toAdd, setToAdd] = useState(STRATEGIES[0]!.id);
 
@@ -91,7 +93,7 @@ export function StrategyPicker({ instances, onChange, errors, disabled, previewC
             ) : strategy ? (
               <>
                 <p className="help">{strategy.description}</p>
-                <SchemaForm schema={strategy.configSchema} config={inst.config} errors={fieldErrors} disabled={disabled} onChange={(config) => setConfig(inst.uid, config)} />
+                <SchemaForm schema={strategy.configSchema} config={inst.config} errors={fieldErrors} disabled={disabled} binaryGame={binaryGame} onChange={(config) => setConfig(inst.uid, config)} />
               </>
             ) : (
               <div className="error">{errors[`strategy:${inst.uid}`]}</div>

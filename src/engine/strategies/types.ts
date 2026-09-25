@@ -12,6 +12,8 @@ export interface FieldSpec {
   step?: number;
   options?: readonly { value: string; label: string }[];
   help?: string;
+  /** Applies only to win/lose games: the form disables it (with a note) on multi-outcome games. */
+  binaryOnly?: boolean;
 }
 
 /** Read-only view of the session passed to strategies. Money in cents. */

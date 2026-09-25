@@ -8,7 +8,12 @@ interface Props {
   /** Errors keyed by field key. */
   errors: Record<string, string>;
   disabled?: boolean;
+  /** False on a multi-outcome game: fields marked binaryOnly are disabled, with a note. */
+  binaryGame?: boolean;
 }
+
+/** Shown under a binaryOnly field on a multi-outcome game. */
+export const BINARY_ONLY_NOTE = "Applies only to win/lose games; ignored here.";
 
 function rangeHelp(f: FieldSpec): string | undefined {
   const range = f.min !== undefined && f.max !== undefined ? `${f.min} to ${f.max}` : undefined;
@@ -16,7 +21,7 @@ function rangeHelp(f: FieldSpec): string | undefined {
 }
 
 /** Renders ANY strategy's configSchema. Adding a strategy never requires editing this file. */
-export function SchemaForm({ schema, config, onChange, errors, disabled }: Props) {
+export function SchemaForm({ schema, config, onChange, errors, disabled, binaryGame = true }: Props) {
   const set = (key: string, value: number | boolean | string) => onChange({ ...config, [key]: value });
   // Blank optional number: remove the key, so the config stays plain JSON with no undefined values.
   const clear = (key: string) => onChange(Object.fromEntries(Object.entries(config).filter(([k]) => k !== key)));
@@ -39,7 +44,8 @@ export function SchemaForm({ schema, config, onChange, errors, disabled }: Props
                 disabled={disabled ?? false}
               />
             );
-          case "optionalNumber":
+          case "optionalNumber": {
+            const off = f.binaryOnly === true && !binaryGame;
             return (
               <NumberField
                 key={f.key}
@@ -49,10 +55,11 @@ export function SchemaForm({ schema, config, onChange, errors, disabled }: Props
                 placeholder="blank"
                 onChange={(v) => (v === null ? clear(f.key) : set(f.key, v))}
                 error={errors[f.key]}
-                help={rangeHelp(f)}
-                disabled={disabled ?? false}
+                help={off ? BINARY_ONLY_NOTE : rangeHelp(f)}
+                disabled={(disabled ?? false) || off}
               />
             );
+          }
           case "boolean":
             return (
               <div className="field" key={f.key}>

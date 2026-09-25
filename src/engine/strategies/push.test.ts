@@ -23,8 +23,7 @@ const CUSTOM = compileRule({
   onLoss: [{ when: { type: "lossStreak", atLeast: 3 }, then: { type: "reset" } }, { then: { type: "add", units: 1 } }],
 });
 
-// Kelly joins in the next commit, once it sizes multi-outcome games by the generalized criterion.
-const SPECS: [string, AnyStrategy, StrategyConfig][] = [...STRATEGIES.filter((s) => s.id !== "kelly").map((s): [string, AnyStrategy, StrategyConfig] => [s.id, s, { ...s.defaultConfig }]), ["custom rule", CUSTOM, {}]];
+const SPECS: [string, AnyStrategy, StrategyConfig][] = [...STRATEGIES.map((s): [string, AnyStrategy, StrategyConfig] => [s.id, s, { ...s.defaultConfig }]), ["custom rule", CUSTOM, {}]];
 
 /** Bets placed over a scripted outcome sequence (the RNG lands mid-interval of each scripted outcome). */
 function bets(strategy: AnyStrategy, config: StrategyConfig, script: readonly number[]): number[] {
