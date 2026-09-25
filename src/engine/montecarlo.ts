@@ -1,5 +1,5 @@
 import { MinMaxDownsampler } from "./downsample";
-import { edge, type Game } from "./games";
+import { edge, type AnyGame } from "./games";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
 import { addSession, createAccumulator, type Accumulator } from "./stats/accumulator";
@@ -57,7 +57,7 @@ export type ProgressFn = (fraction: number) => void;
  * for all strategies, so they face identical outcome sequences.
  */
 export function runMonteCarlo(
-  game: Game,
+  game: AnyGame,
   strategies: readonly StrategySpec[],
   config: SessionConfig,
   nSessions: number,

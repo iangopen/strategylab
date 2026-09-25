@@ -1,10 +1,10 @@
-import type { Game } from "../games";
+import type { AnyGame } from "../games";
 import type { SessionConfig } from "../types";
 import type { Accumulator } from "./accumulator";
 
 /** Read-only facts about the run, passed to every stat. Money in cents. */
 export interface RunContext {
-  readonly game: Readonly<Game>;
+  readonly game: Readonly<AnyGame>;
   /** edge(game): expected loss per unit staked. */
   readonly edge: number;
   readonly config: Readonly<SessionConfig>;

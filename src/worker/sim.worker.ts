@@ -1,5 +1,5 @@
 import * as Comlink from "comlink";
-import type { Game } from "../engine/games";
+import type { AnyGame } from "../engine/games";
 import { resultTransferables, runMonteCarlo, type MonteCarloResult } from "../engine/montecarlo";
 import { replaySession, replayTransferables, type Replay } from "../engine/replay";
 import type { SessionConfig } from "../engine/types";
@@ -10,7 +10,7 @@ import { resolveStrategies, type StrategyRef } from "./resolve";
  * both are resolved (rules validated and compiled) HERE, since functions can't cross the worker boundary.
  */
 export interface SimRequest {
-  game: Game;
+  game: AnyGame;
   strategies: StrategyRef[];
   session: SessionConfig;
   nSessions: number;

@@ -45,7 +45,7 @@ export function previewRule(rule: unknown, script: string, pc: PreviewContext): 
   if (!v.ok) return { ok: false, error: "Fix the rule's problems to see the preview." };
   const strategy = compileValidRule(v.rule);
 
-  const game = { winProb: pc.winProb, netPayout: pc.netPayout, edge: 1 - pc.winProb * (1 + pc.netPayout) };
+  const game = { winProb: pc.winProb, netPayout: pc.netPayout, edge: 1 - pc.winProb * (1 + pc.netPayout), outcomes: [{ prob: pc.winProb, net: pc.netPayout }, { prob: 1 - pc.winProb, net: -1 }] };
   let bankroll = pc.startBankroll;
   let lastBet: number | null = null;
   let carry = 0; // the runner's sub-cent carry, so the bankroll column matches a real session

@@ -72,7 +72,7 @@ export function deepFreeze<T>(o: T): T {
 
 /** Read-only game view for ctx fixtures. Even money by default; pass a payout for Kelly/Oscar tests. */
 export function gameView(netPayout = 1, winProb = 0.5): StrategyContext["game"] {
-  return { winProb, netPayout, edge: 1 - winProb * (1 + netPayout) };
+  return { winProb, netPayout, edge: 1 - winProb * (1 + netPayout), outcomes: [{ prob: winProb, net: netPayout }, { prob: 1 - winProb, net: -1 }] };
 }
 
 /**

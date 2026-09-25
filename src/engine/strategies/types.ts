@@ -31,6 +31,8 @@ export interface StrategyContext {
     readonly netPayout: number;
     /** House edge = 1 − winProb × (1 + netPayout). Negative means the player has the edge. */
     readonly edge: number;
+    /** Every outcome, in draw order (binary games: [{ p, n }, { 1 - p, -1 }]). */
+    readonly outcomes: readonly { readonly prob: number; readonly net: number; readonly label?: string }[];
   };
 }
 

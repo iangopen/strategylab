@@ -1,14 +1,56 @@
-import type { Game } from "./games";
-import { edge, validateGame } from "./games";
+import { edge, legacyView, outcomesOf, validateGame, type AnyGame, type Outcome } from "./games";
 import { mulberry32, type Rng } from "./rng";
 import type { AnyStrategy, StrategyConfig, StrategyContext } from "./strategies/types";
 import type { EndReason, RunOptions, SamplePath, SessionConfig, SessionResult } from "./types";
 import { validateSessionConfig } from "./types";
 
 /** Throws if the game or session config is invalid. */
-export function assertValidSetup(game: Game, config: SessionConfig): void {
+export function assertValidSetup(game: AnyGame, config: SessionConfig): void {
   const errors = [...validateGame(game), ...validateSessionConfig(config)];
   if (errors.length > 0) throw new Error(`Invalid setup: ${errors.join(" ")}`);
+}
+
+/** A game ready for the round loop: cumulative bounds (the last forced to exactly 1) and each outcome's net. */
+interface CompiledGame {
+  cum: Float64Array;
+  net: Float64Array;
+  outcomes: readonly Outcome[];
+  view: StrategyContext["game"];
+}
+
+const compiled = new WeakMap<object, CompiledGame>();
+
+/**
+ * Compiles a game once (cached per game object). cum[k] = prob_0 + ... + prob_k, accumulated left to
+ * right, with the LAST bound forced to exactly 1. For a binary game cum[0] = p, so "u < cum[0]" is
+ * exactly the old "u < p".
+ */
+export function compileGame(game: AnyGame): CompiledGame {
+  const hit = compiled.get(game);
+  if (hit) return hit;
+  const outcomes = outcomesOf(game);
+  const n = outcomes.length;
+  const cum = new Float64Array(n);
+  const net = new Float64Array(n);
+  let c = 0;
+  for (let k = 0; k < n; k++) {
+    c += outcomes[k]!.prob;
+    cum[k] = c;
+    net[k] = outcomes[k]!.net;
+  }
+  cum[n - 1] = 1;
+  // Read-only game view, computed once: strategies may size bets from the payout.
+  const view = Object.freeze({ ...legacyView(game), edge: edge(game), outcomes });
+  const out = { cum, net, outcomes, view };
+  compiled.set(game, out);
+  return out;
+}
+
+/** Index of the outcome a uniform draw u in [0, 1) picks: the first k with u < cum[k]. */
+export function outcomeIndex(cum: Float64Array, u: number): number {
+  let k = 0;
+  while (u >= cum[k]!) k++;
+  return k;
 }
 
 /**
@@ -16,7 +58,7 @@ export function assertValidSetup(game: Game, config: SessionConfig): void {
  * so it sees the same outcome sequence (common random numbers).
  */
 export function runSession(
-  game: Game,
+  game: AnyGame,
   strategy: AnyStrategy,
   strategyConfig: StrategyConfig,
   config: SessionConfig,
@@ -37,15 +79,18 @@ export function runSession(
  *   4. ask the strategy ("stop" -> strategyStop)
  *   5. round to whole cents, raise to tableMin, clamp to tableMax
  *   6. bet > bankroll -> "stop" ends with insufficientFunds, "allIn" bets the bankroll
- *   7. exactly ONE uniform draw resolves the round
+ *   7. exactly ONE uniform draw picks the outcome (the first k with u < cum[k])
  * Steps 1-6 never draw, so a session that ends early leaves the RNG untouched.
  *
- * A win pays whole cents with a per-session sub-cent carry: owed = bet × netPayout + carry,
- * paid = Math.round(owed), carry = owed - paid. |carry| <= 0.5, so over any session the total paid
- * is within half a cent of the exact total. For integer payouts the carry is always exactly 0.
+ * The outcome's exact profit is bet × net. A total loss (net = -1) costs exactly the bet and a push
+ * (net = 0) moves nothing; neither touches the carry. Every other outcome pays whole cents with the
+ * per-session sub-cent carry: owed = bet × net + carry, paid = Math.round(owed), carry = owed - paid.
+ * |carry| <= 0.5, so over any session the total paid is within half a cent of the exact total. For a
+ * binary game this is exactly the session 11 rule. On a push the strategy's update is NOT called and
+ * the losing streak neither extends nor breaks.
  */
 export function runSessionWithRng(
-  game: Game,
+  game: AnyGame,
   strategy: AnyStrategy,
   strategyConfig: StrategyConfig,
   config: SessionConfig,
@@ -66,8 +111,7 @@ export function runSessionWithRng(
   let lastBet: number | null = null;
   let carry = 0; // sub-cent remainder of past winnings; starts at 0 and never leaves this session
 
-  // Read-only game view, computed once: strategies may size bets from the payout.
-  const gameView = { winProb: game.winProb, netPayout: game.netPayout, edge: edge(game) };
+  const { cum, net: nets, view: gameView } = compileGame(game);
   const ctx = (): StrategyContext => ({ bankroll, baseBet: config.baseBet, round: rounds, lastBet, game: gameView });
   let state = strategy.init(strategyConfig, ctx());
   let endReason: EndReason;
@@ -90,26 +134,26 @@ export function runSessionWithRng(
       bet = bankroll; // all-in; bankroll >= tableMin here, so the bet is still legal
     }
 
-    const won = rng() < game.winProb;
-    if (won) {
-      const owed = bet * game.netPayout + carry;
+    const net = nets[outcomeIndex(cum, rng())]!;
+    if (net === -1) {
+      bankroll -= bet; // total loss: exactly the stake, carry untouched
+    } else if (net !== 0) {
+      const owed = bet * net + carry;
       const paid = Math.round(owed);
       carry = owed - paid;
       bankroll += paid;
-    } else {
-      bankroll -= bet;
-    }
+    } // net === 0: a push returns the stake; nothing moves
     rounds++;
     totalWagered += bet;
     lastBet = bet;
-    // Post-round view: bankroll after resolution, lastBet = the bet just placed.
-    state = strategy.update(state, won, ctx());
+    // Post-round view: bankroll after resolution, lastBet = the bet just placed. Not called on a push.
+    if (net !== 0) state = strategy.update(state, net > 0, ctx());
 
     if (bankroll > peak) peak = bankroll;
     if (peak - bankroll > maxDrawdown) maxDrawdown = peak - bankroll;
-    if (won) {
+    if (net > 0) {
       losingStreak = 0;
-    } else if (++losingStreak > longestLosingStreak) {
+    } else if (net < 0 && ++losingStreak > longestLosingStreak) {
       longestLosingStreak = losingStreak;
     }
     if (observer !== undefined) observer(rounds, bankroll);

@@ -2,7 +2,7 @@
 // Paths are NEVER stored during runMonteCarlo for this; replay recomputes them on demand.
 // Uses only the existing runSession (no runner or montecarlo changes).
 import { MinMaxDownsampler } from "./downsample";
-import type { Game } from "./games";
+import type { AnyGame } from "./games";
 import type { StrategySpec } from "./montecarlo";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
@@ -52,7 +52,7 @@ export function recordingStrategy(strategy: AnyStrategy, onRound: (roundsBefore:
   };
 }
 
-export function replaySession(game: Game, specs: readonly StrategySpec[], config: SessionConfig, masterSeed: number, session: number): Replay {
+export function replaySession(game: AnyGame, specs: readonly StrategySpec[], config: SessionConfig, masterSeed: number, session: number): Replay {
   assertValidSetup(game, config);
   if (!Number.isInteger(session) || session < 0) throw new Error("session must be a non-negative integer");
   for (const s of specs) {
