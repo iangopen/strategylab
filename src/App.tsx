@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isBinary } from "./engine/games";
 import type { MonteCarloResult } from "./engine/montecarlo";
 import type { Replay } from "./engine/replay";
 import { toSimRequest, validateScenario, type ScenarioConfig } from "./scenario";
@@ -197,7 +198,7 @@ export default function App() {
       <main className="layout">
         <div className="left">
           <ConfigPanel scenario={scenario} onChange={setScenario} errors={errors} />
-          <StrategyPicker instances={scenario.strategies} onChange={(strategies) => setScenario({ ...scenario, strategies })} errors={errors} previewContext={previewContext} />
+          <StrategyPicker instances={scenario.strategies} onChange={(strategies) => setScenario({ ...scenario, strategies })} errors={errors} previewContext={previewContext} binaryGame={isBinary(scenario.game)} />
         </div>
         <div className="right">
           <RunControls

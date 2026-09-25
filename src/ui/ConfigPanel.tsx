@@ -1,5 +1,6 @@
 import { CUSTOM_GAME_ID, edge, findPreset, GAME_PRESETS } from "../engine/games";
-import { binaryScenarioGame, binaryView, defaultSportsInput, MAX_SEED, SPORTS_GAME_ID, sportsScenarioGame, type ScenarioConfig } from "../scenario";
+import { binaryScenarioGame, binaryView, defaultSportsInput, MAX_SEED, OUTCOMES_GAME_ID, SPORTS_GAME_ID, sportsScenarioGame, starterOutcomesGame, ticketExampleGame, type ScenarioConfig } from "../scenario";
+import { OutcomeFields } from "./OutcomeFields";
 import { NumberField } from "./NumberField";
 import { SportsOddsFields } from "./SportsOddsFields";
 
@@ -9,6 +10,9 @@ interface Props {
   errors: Record<string, string>;
   disabled?: boolean;
 }
+
+/** Game list entry that loads the shipped ticket example into the outcome editor (not a stored preset id). */
+const TICKET_EXAMPLE = "ticketExample";
 
 function randomSeed(): number {
   const a = new Uint32Array(1);
@@ -20,6 +24,7 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
   const set = <K extends keyof ScenarioConfig>(key: K, value: ScenarioConfig[K]) => onChange({ ...s, [key]: value });
   const isCustom = s.game.presetId === CUSTOM_GAME_ID;
   const sports = s.game.presetId === SPORTS_GAME_ID && s.game.sports ? { ...s.game, sports: s.game.sports } : null;
+  const outcomes = s.game.presetId === OUTCOMES_GAME_ID && s.game.editor ? { ...s.game, editor: s.game.editor } : null;
   const e = edge(s.game);
   // The win/lose view of the game (presets and the binary custom game); an outcome game has none.
   const view = binaryView(s.game) ?? { winProb: 0.5, netPayout: 1 };
@@ -27,6 +32,11 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
   function choosePreset(presetId: string) {
     if (presetId === SPORTS_GAME_ID) {
       set("game", sportsScenarioGame(defaultSportsInput(), s.game));
+      return;
+    }
+    // Both open the outcome editor: "Custom outcomes" with a simple starter, the example with the ticket game.
+    if (presetId === OUTCOMES_GAME_ID || presetId === TICKET_EXAMPLE) {
+      set("game", presetId === TICKET_EXAMPLE ? ticketExampleGame() : starterOutcomesGame());
       return;
     }
     const preset = findPreset(presetId);
@@ -46,13 +56,17 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
                 {g.name}
               </option>
             ))}
-            <option value={CUSTOM_GAME_ID}>Custom</option>
+            <option value={CUSTOM_GAME_ID}>Custom (win or lose)</option>
+            <option value={OUTCOMES_GAME_ID}>Custom outcomes</option>
+            <option value={TICKET_EXAMPLE}>Ticket example ($70; prizes $20, $50, $100)</option>
             <option value={SPORTS_GAME_ID}>Sports odds</option>
           </select>
         </label>
       </div>
       {sports ? (
         <SportsOddsFields game={sports} onChange={(game) => set("game", game)} errors={errors} disabled={disabled} />
+      ) : outcomes ? (
+        <OutcomeFields game={outcomes} onChange={(game) => set("game", game)} errors={errors} disabled={disabled} />
       ) : (
       <div className="row">
         <NumberField
@@ -71,7 +85,7 @@ export function ConfigPanel({ scenario: s, onChange, errors, disabled }: Props) 
       )}
       {errors.game ? (
         <div className="error">{errors.game}</div>
-      ) : sports ? null : (
+      ) : sports || outcomes ? null : (
         <div className="derived">
           {e >= 0 ? "House edge" : "Player edge"}: <strong>{(Math.abs(e) * 100).toFixed(3)}%</strong> of every dollar wagered
         </div>

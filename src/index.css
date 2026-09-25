@@ -203,3 +203,13 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
 .odds-readout .warn { flex-direction: column; gap: 0; }
 .odds-readout .warn dd { text-align: left; }
 .chart-panel figcaption .fit-strategy { margin-left: auto; font-size: 0.78rem; font-weight: normal; }
+
+/* Outcome editor (session 13): one card per outcome, stacking on narrow screens. */
+.outcome-rows { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.outcome-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px 12px; align-items: start; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.outcome-row .field { margin-bottom: 0; }
+.outcome-row-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 18px; }
+@media (max-width: 640px) {
+  .outcome-row { grid-template-columns: minmax(0, 1fr); }
+  .outcome-row-tools { flex-direction: row; justify-content: space-between; align-items: center; padding-top: 0; }
+}

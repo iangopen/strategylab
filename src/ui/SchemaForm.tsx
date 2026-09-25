@@ -1,4 +1,5 @@
 import type { FieldSpec, StrategyConfig } from "../engine/strategies/types";
+import { BINARY_ONLY_NOTE } from "./format";
 import { NumberField } from "./NumberField";
 
 interface Props {
@@ -12,8 +13,6 @@ interface Props {
   binaryGame?: boolean;
 }
 
-/** Shown under a binaryOnly field on a multi-outcome game. */
-export const BINARY_ONLY_NOTE = "Applies only to win/lose games; ignored here.";
 
 function rangeHelp(f: FieldSpec): string | undefined {
   const range = f.min !== undefined && f.max !== undefined ? `${f.min} to ${f.max}` : undefined;

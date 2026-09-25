@@ -48,11 +48,14 @@ const sources = {
   ...import.meta.glob<string>("./sportsReadout.ts", { query: "?raw", import: "default", eager: true }),
   ...import.meta.glob<string>("./ConfigPanel.tsx", { query: "?raw", import: "default", eager: true }),
   ...import.meta.glob<string>("../engine/odds.ts", { query: "?raw", import: "default", eager: true }),
+  // Session 13: the outcome editor (ticket games) follows the same tone rules.
+  ...import.meta.glob<string>("./OutcomeFields.tsx", { query: "?raw", import: "default", eager: true }),
+  ...import.meta.glob<string>("../engine/outcomeEditor.ts", { query: "?raw", import: "default", eager: true }),
 };
-const BANNED = [/\bpicks?\b/i, /\bsharps?\b/i, /value bets?/i, /\bguarantee/i, /winning system/i, /\bsure thing\b/i, /draftkings|fanduel|betmgm|caesars|bet365|pinnacle|bovada|betfair|william hill/i, /https?:\/\//i];
+const BANNED = [/\bpicks?\b/i, /\bsharps?\b/i, /value bets?/i, /\bguarantee/i, /winning system/i, /\bsure thing\b/i, /draftkings|fanduel|betmgm|caesars|bet365|pinnacle|bovada|betfair|william hill/i, /powerball|mega millions|euromillions|national lottery|scratchcard/i, /https?:\/\//i];
 
 describe("sports tone: no sportsbook names, links, picks, 'sharp' or 'value bet' language", () => {
-  it("found the sources", () => expect(Object.keys(sources)).toHaveLength(4));
+  it("found the sources", () => expect(Object.keys(sources)).toHaveLength(6));
   for (const [file, src] of Object.entries(sources)) {
     it(file, () => {
       for (const re of BANNED) expect(src, String(re)).not.toMatch(re);

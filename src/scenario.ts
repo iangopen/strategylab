@@ -86,6 +86,11 @@ export function binaryView(g: Pick<ScenarioGame, "outcomes">): { winProb: number
   return l.net === -1 && l.prob === 1 - w.prob ? { winProb: w.prob, netPayout: w.net } : null;
 }
 
+/** A new outcome-editor game: a $10 ticket paying $20 or nothing, even odds (edit it into anything). */
+export function starterOutcomesGame(): ScenarioGame {
+  return editorScenarioGame({ mode: "ticket", price: 10, rows: [{ prob: "1/2", value: 20 }, { prob: "1/2", value: 0 }] });
+}
+
 /** The outcome editor with the shipped ticket example (price $70; $20 at 1/6, $50 at 3/6, $100 at 2/6). */
 export function ticketExampleGame(): ScenarioGame {
   return editorScenarioGame(ticketExample());

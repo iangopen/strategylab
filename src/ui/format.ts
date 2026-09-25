@@ -50,3 +50,6 @@ export function instanceLabel(instances: readonly StrategyInstance[], index: num
 export function formatElapsed(ms: number): string {
   return ms < 100 ? "<0.1s" : `${(ms / 1000).toFixed(1)}s`;
 }
+
+/** Shown under a binaryOnly strategy field (e.g. Kelly's assumed win probability) on a multi-outcome game. */
+export const BINARY_ONLY_NOTE = "Applies only to win/lose games; ignored here.";
