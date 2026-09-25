@@ -1,0 +1,447 @@
+{
+ "v1 european, Kelly 0 sentinel": {
+  "hash": "#s=eyJ2IjoxLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6MTEwMCwiciI6MTAwMCwibiI6MTAwMDAsInNkIjoxMjM0NSwic3QiOltbImZsYXQiXSxbImtlbGx5Iix7ImFzc3VtZWRXaW5Qcm9iIjowLCJmcmFjdGlvbiI6MC41fV1dfQ",
+  "decoded": {
+   "fromVersion": 1,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "european",
+     "winProb": 0.4864864864864865,
+     "netPayout": 1
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "flat",
+      "config": {
+       "units": 1
+      }
+     },
+     {
+      "kind": "builtin",
+      "strategyId": "kelly",
+      "config": {
+       "fraction": 0.5
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v1 custom game": {
+  "hash": "#s=eyJ2IjoxLCJnIjpbImN1c3RvbSIsMC40NSwxLjJdLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6MTEwMCwiciI6MTAwMCwibiI6MTAwMDAsInNkIjoxMjM0NSwic3QiOltbIm1hcnRpbmdhbGUiXV19",
+  "decoded": {
+   "fromVersion": 1,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "custom",
+     "winProb": 0.45,
+     "netPayout": 1.2
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "martingale",
+      "config": {
+       "multiplier": 2
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v2 rule + american": {
+  "hash": "#s=eyJ2IjoyLCJnIjoiYW1lcmljYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6MTEwMCwiciI6MTAwMCwibiI6MTAwMDAsInNkIjoxMjM0NSwic3QiOltbImZsYXQiXSxbInAiLCJEb3VibGUgYWZ0ZXIgYSBsb3NzIiwxLFtbWyJyIl1dXSxbW1sibSIsMl1dXV1dfQ",
+  "decoded": {
+   "fromVersion": 2,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "american",
+     "winProb": 0.47368421052631576,
+     "netPayout": 1
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "flat",
+      "config": {
+       "units": 1
+      }
+     },
+     {
+      "kind": "custom",
+      "rule": {
+       "kind": "progression",
+       "name": "Double after a loss",
+       "startUnits": 1,
+       "onWin": [
+        {
+         "then": {
+          "type": "reset"
+         }
+        }
+       ],
+       "onLoss": [
+        {
+         "then": {
+          "type": "multiply",
+          "by": 2
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v2 custom game, long digits": {
+  "hash": "#s=eyJ2IjoyLCJnIjpbImN1c3RvbSIsMC40NzEyMzQ1Njc4OTAxMjM0LDEuMDgzMzMzMzMzMzMzMzMzM10sImIiOjEwMDAsImJiIjoxMCwidG4iOjEsInN3IjoxMTAwLCJyIjoxMDAwLCJuIjoxMDAwMCwic2QiOjEyMzQ1LCJzdCI6W1sicGFyb2xpIix7InN0cmVha0NhcCI6NH1dXX0",
+  "decoded": {
+   "fromVersion": 2,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "custom",
+     "winProb": 0.4712345678901234,
+     "netPayout": 1.0833333333333333
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "paroli",
+      "config": {
+       "streakCap": 4
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v2 partial (bad win target, unknown strategy)": {
+  "hash": "#s=eyJ2IjoyLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6OTAwLCJyIjoxMDAwLCJuIjoxMDAwMCwic2QiOjEyMzQ1LCJzdCI6W1siZmxhdCJdLFsiZG91YmxlVXBTeXN0ZW0iXV19",
+  "decoded": {
+   "fromVersion": 2,
+   "dropped": [
+    {
+     "field": "Strategy 2",
+     "message": "unknown strategy \"doubleUpSystem\"; left out"
+    },
+    {
+     "field": "Win target",
+     "message": "Must be above the starting bankroll (or blank for off). The link had 900; using off."
+    }
+   ],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "european",
+     "winProb": 0.4864864864864865,
+     "netPayout": 1
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": null,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "flat",
+      "config": {
+       "units": 1
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v3 sports market -110 / -110": {
+  "hash": "#s=eyJ2IjozLCJnIjpbIm8iLCJtIiwiYSIsLTExMCwtMTEwLCJhIiwwLjVdLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6MTEwMCwiciI6MTAwMCwibiI6MTAwMDAsInNkIjoxMjM0NSwic3QiOltbImZsYXQiXSxbIm1hcnRpbmdhbGUiXV19",
+  "decoded": {
+   "fromVersion": 3,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "sports",
+     "winProb": 0.5,
+     "netPayout": 0.9090909090909091,
+     "sports": {
+      "mode": "market",
+      "format": "american",
+      "sideA": -110,
+      "sideB": -110,
+      "side": "a",
+      "estimate": 0.5
+     }
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "flat",
+      "config": {
+       "units": 1
+      }
+     },
+     {
+      "kind": "builtin",
+      "strategyId": "martingale",
+      "config": {
+       "multiplier": 2
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v3 sports +150 / -180 side B, decimal": {
+  "hash": "#s=eyJ2IjozLCJnIjpbIm8iLCJtIiwiZCIsMi41LDEuNTU1NTU1NTU1NTU1NTU1NiwiYiIsMC41XSwiYiI6MTAwMCwiYmIiOjEwLCJ0biI6MSwic3ciOjExMDAsInIiOjEwMDAsIm4iOjEwMDAwLCJzZCI6MTIzNDUsInN0IjpbWyJvc2NhcnMiXV19",
+  "decoded": {
+   "fromVersion": 3,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "sports",
+     "winProb": 0.6164383561643836,
+     "netPayout": 0.5555555555555556,
+     "sports": {
+      "mode": "market",
+      "format": "decimal",
+      "sideA": 2.5,
+      "sideB": 1.5555555555555556,
+      "side": "b",
+      "estimate": 0.5
+     }
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "oscars",
+      "config": {}
+     }
+    ]
+   }
+  }
+ },
+ "v3 sports estimate 0.55": {
+  "hash": "#s=eyJ2IjozLCJnIjpbIm8iLCJlIiwiYSIsLTExMCwtMTEwLCJhIiwwLjU1XSwiYiI6MTAwMCwiYmIiOjEwLCJ0biI6MSwic3ciOjExMDAsInIiOjEwMDAsIm4iOjEwMDAwLCJzZCI6MTIzNDUsInN0IjpbWyJrZWxseSJdXX0",
+  "decoded": {
+   "fromVersion": 3,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "sports",
+     "winProb": 0.55,
+     "netPayout": 0.9090909090909091,
+     "sports": {
+      "mode": "estimate",
+      "format": "american",
+      "sideA": -110,
+      "sideB": -110,
+      "side": "a",
+      "estimate": 0.55
+     }
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "kelly",
+      "config": {
+       "fraction": 1
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v3 fair coin, every field set": {
+  "hash": "#s=eyJ2IjozLCJnIjoiZmFpckNvaW4iLCJiIjoxMjM0LjU2LCJiYiI6NSwidG4iOjEsInR4IjoyNTAsInN3IjoxNTAwLCJzbCI6NTAwLCJyIjo3NzcsImYiOiJhIiwibiI6MjUwMDAsInNkIjo0Mjk0OTY3Mjk1LCJzdCI6W1siZGFsZW1iZXJ0Iix7InVuaXRTaXplIjowLjV9XV19",
+  "decoded": {
+   "fromVersion": 3,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "fairCoin",
+     "winProb": 0.5,
+     "netPayout": 1
+    },
+    "startBankroll": 1234.56,
+    "baseBet": 5,
+    "tableMin": 1,
+    "tableMax": 250,
+    "stopWin": 1500,
+    "stopLoss": 500,
+    "maxRounds": 777,
+    "insufficientFunds": "allIn",
+    "sessions": 25000,
+    "seed": 4294967295,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "dalembert",
+      "config": {
+       "unitSize": 0.5
+      }
+     }
+    ]
+   }
+  }
+ },
+ "v3 custom game": {
+  "hash": "#s=eyJ2IjozLCJnIjpbImN1c3RvbSIsMC4zLDIuNV0sImIiOjEwMDAsImJiIjoxMCwidG4iOjEsInN3IjoxMTAwLCJyIjoxMDAwLCJuIjoxMDAwMCwic2QiOjEyMzQ1LCJzdCI6W1siZmlib25hY2NpIl1dfQ",
+  "decoded": {
+   "fromVersion": 3,
+   "dropped": [],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "custom",
+     "winProb": 0.3,
+     "netPayout": 2.5
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "fibonacci",
+      "config": {}
+     }
+    ]
+   }
+  }
+ },
+ "v3 bad game": {
+  "hash": "#s=eyJ2IjozLCJnIjpbImN1c3RvbSIsMS41LC0xXSwiYiI6MTAwMCwiYmIiOjEwLCJ0biI6MSwic3ciOjExMDAsInIiOjEwMDAsIm4iOjEwMDAwLCJzZCI6MTIzNDUsInN0IjpbWyJmbGF0Il1dfQ",
+  "decoded": {
+   "fromVersion": 3,
+   "dropped": [
+    {
+     "field": "Game",
+     "message": "Win probability must be strictly between 0 and 1. Net payout must be greater than 0. The link had custom; using european."
+    }
+   ],
+   "scenario": {
+    "version": 3,
+    "game": {
+     "presetId": "european",
+     "winProb": 0.4864864864864865,
+     "netPayout": 1
+    },
+    "startBankroll": 1000,
+    "baseBet": 10,
+    "tableMin": 1,
+    "tableMax": null,
+    "stopWin": 1100,
+    "stopLoss": null,
+    "maxRounds": 1000,
+    "insufficientFunds": "stop",
+    "sessions": 10000,
+    "seed": 12345,
+    "strategies": [
+     {
+      "kind": "builtin",
+      "strategyId": "flat",
+      "config": {
+       "units": 1
+      }
+     }
+    ]
+   }
+  }
+ }
+}
