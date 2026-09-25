@@ -1,4 +1,5 @@
 // Shared engine types. All money is integer cents.
+import type { RoundResult } from "./strategies/types";
 
 export const END_REASONS = [
   "ruin",
@@ -50,11 +51,19 @@ export interface SessionResult {
 /** Called with (round, bankroll) at round 0 and after every resolved round. Must not throw or touch the RNG. */
 export type RoundObserver = (round: number, bankroll: number) => void;
 
+/**
+ * Called after EVERY resolved round, pushes included, with the rounds played before it, the bet placed
+ * and the round's result. Replay records bets and the outcome strip through it. Must not touch the RNG.
+ */
+export type RoundHook = (roundsBefore: number, bet: number, result: RoundResult) => void;
+
 export interface RunOptions {
   /** Full path, every round (tests and single-session replay). runMonteCarlo uses observer instead. */
   recordPath?: boolean;
   /** Optional per-round observer. Sessions without one pay only a branch check per round. */
   observer?: RoundObserver;
+  /** Optional per-round result hook (see RoundHook). Sessions without one pay only a branch check. */
+  onRound?: RoundHook;
 }
 
 function isCents(x: number): boolean {

@@ -37,6 +37,19 @@ export interface StrategyContext {
 }
 
 /**
+ * What a resolved round meant for the bettor (session 13). `profit` is the EXACT profit of the round in
+ * fractional cents: ctx.lastBet × the outcome's net (the bankroll moved by the same amount give or take
+ * the sub-cent carry). kind follows its sign: "win" > 0, "loss" < 0, "push" = 0. The runner never calls
+ * update on a push, so strategies only ever see "win" or "loss".
+ */
+export interface RoundResult {
+  readonly kind: "win" | "loss" | "push";
+  /** Index of the drawn outcome in ctx.game.outcomes (binary games: 0 = win, 1 = loss). */
+  readonly outcomeIndex: number;
+  readonly profit: number;
+}
+
+/**
  * Strategies are PURE: never mutate inputs, no side effects, never touch the RNG.
  * Table limits and bankroll checks are the runner's job, not the strategy's.
  */
@@ -49,8 +62,11 @@ export interface Strategy<Config extends StrategyConfig, State> {
   init(config: Config, ctx: StrategyContext): State;
   /** Desired bet in cents (the runner rounds it), or "stop" to end the session. */
   nextBet(state: State, ctx: StrategyContext): number | "stop";
-  /** Called after each resolved round; ctx is the post-round view (lastBet = the bet just placed). */
-  update(state: State, won: boolean, ctx: StrategyContext): State;
+  /**
+   * Called after each resolved round EXCEPT a push (state is unchanged across a push); ctx is the
+   * post-round view (lastBet = the bet just placed).
+   */
+  update(state: State, result: RoundResult, ctx: StrategyContext): State;
 }
 
 // Method syntax above makes parameters bivariant, so any concrete strategy fits here.

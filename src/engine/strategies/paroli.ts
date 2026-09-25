@@ -18,8 +18,8 @@ export const paroli: Strategy<ParoliConfig, ParoliState> = {
   defaultConfig: { streakCap: 3 },
   init: (config) => ({ streakCap: config.streakCap, wins: 0 }),
   nextBet: (state, ctx) => ctx.baseBet * 2 ** state.wins,
-  update: (state, won) => {
-    if (!won) return { ...state, wins: 0 };
+  update: (state, result) => {
+    if (result.kind !== "win") return { ...state, wins: 0 };
     const wins = state.wins + 1;
     return { ...state, wins: wins >= state.streakCap ? 0 : wins };
   },

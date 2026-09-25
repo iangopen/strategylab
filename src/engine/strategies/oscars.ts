@@ -12,7 +12,10 @@ type OscarsState = {
  * Oscar's Grind: aim for +1 base unit of profit per cycle. Raise the bet by one unit after a win
  * (never after a loss), but never bet more than what a single win needs to reach the goal, so the
  * cycle closes at exactly +1 unit. Profit is tracked from the PLACED bet (ctx.lastBet, after table
- * rules) and the payout (ctx.game.netPayout), never from the intended bet.
+ * rules): cycle profit adds the round's exact profit (result.profit = placed bet × the outcome's net),
+ * never the intended bet. The cap reads ctx.game.netPayout, which on a multi-outcome game is the
+ * probability-weighted mean net over winning outcomes: an APPROXIMATION there (a win may pay more or
+ * less, so a cycle can close above or below exactly +1 unit).
  */
 export const oscars: Strategy<OscarsConfig, OscarsState> = {
   id: "oscars",
@@ -28,11 +31,11 @@ export const oscars: Strategy<OscarsConfig, OscarsState> = {
     const capToGoal = Math.ceil((goal - state.cycleProfit) / ctx.game.netPayout);
     return Math.min(state.betUnits * ctx.baseBet, capToGoal);
   },
-  update: (state, won, ctx) => {
+  update: (state, result, ctx) => {
     const goal = ctx.baseBet;
-    const placed = ctx.lastBet!; // the bet actually placed, after table rules
-    if (!won) return { ...state, cycleProfit: state.cycleProfit - placed };
-    const cycleProfit = state.cycleProfit + placed * ctx.game.netPayout;
+    // result.profit = the placed bet (after table rules) × the outcome's net: -placed on a total loss.
+    if (result.kind !== "win") return { ...state, cycleProfit: state.cycleProfit + result.profit };
+    const cycleProfit = state.cycleProfit + result.profit;
     if (cycleProfit >= goal) return { cycleProfit: 0, betUnits: 1 }; // cycle complete
     return { cycleProfit, betUnits: state.betUnits + 1 };
   },

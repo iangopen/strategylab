@@ -6,9 +6,8 @@ import type { AnyGame } from "./games";
 import type { StrategySpec } from "./montecarlo";
 import { sessionSeed } from "./rng";
 import { assertValidSetup, runSession } from "./runner";
-import type { AnyStrategy } from "./strategies/types";
 import { validateStrategyConfig } from "./strategies/validate";
-import type { EndReason, SamplePath, SessionConfig } from "./types";
+import type { EndReason, RoundHook, SamplePath, SessionConfig } from "./types";
 
 /** At or below this maxRounds, replay records full paths (recordPath); above it, it streams through the downsampler. */
 export const REPLAY_FULL_MAX_ROUNDS = 5000;
@@ -40,18 +39,6 @@ export interface Replay {
   strip: ReplayStrip;
 }
 
-/** Wraps a strategy so every resolved round reports (roundsBefore, betPlaced, won). The strategy itself stays pure. */
-export function recordingStrategy(strategy: AnyStrategy, onRound: (roundsBefore: number, bet: number, won: boolean) => void): AnyStrategy {
-  return {
-    ...strategy,
-    // ctx is the post-round view: ctx.round = rounds completed, ctx.lastBet = the bet actually placed (after table rules).
-    update: (state, won, ctx) => {
-      onRound(ctx.round - 1, ctx.lastBet!, won);
-      return strategy.update(state, won, ctx);
-    },
-  };
-}
-
 export function replaySession(game: AnyGame, specs: readonly StrategySpec[], config: SessionConfig, masterSeed: number, session: number): Replay {
   assertValidSetup(game, config);
   if (!Number.isInteger(session) || session < 0) throw new Error("session must be a non-negative integer");
@@ -71,12 +58,13 @@ export function replaySession(game: AnyGame, specs: readonly StrategySpec[], con
       const betX: number[] = [];
       const betY: number[] = [];
       const wins: number[] = [];
-      const recorder = recordingStrategy(strategy, (r, bet, won) => {
+      // The runner's per-round hook sees EVERY resolved round (pushes included; update does not).
+      const onRound: RoundHook = (r, bet, result) => {
         betX.push(r);
         betY.push(bet);
-        wins.push(won ? 1 : 0);
-      });
-      const res = runSession(game, recorder, strategyConfig, config, seed, { recordPath: true });
+        wins.push(result.kind === "win" ? 1 : 0);
+      };
+      const res = runSession(game, strategy, strategyConfig, config, seed, { recordPath: true, onRound });
       if (res.rounds > longest) {
         longest = res.rounds;
         strip = { kind: "rounds", wins: Uint8Array.from(wins) };
@@ -89,13 +77,13 @@ export function replaySession(game: AnyGame, specs: readonly StrategySpec[], con
     const betDs = new MinMaxDownsampler(config.maxRounds);
     const bw = new Uint32Array(REPLAY_STRIP_BUCKETS);
     const bc = new Uint32Array(REPLAY_STRIP_BUCKETS);
-    const recorder = recordingStrategy(strategy, (r, bet, won) => {
+    const onRound: RoundHook = (r, bet, result) => {
       betDs.observer(r, bet);
       const b = Math.min(REPLAY_STRIP_BUCKETS - 1, Math.floor(r / bucketRounds));
       bc[b]!++;
-      if (won) bw[b]!++;
-    });
-    const res = runSession(game, recorder, strategyConfig, config, seed, { observer: bankDs.observer });
+      if (result.kind === "win") bw[b]!++;
+    };
+    const res = runSession(game, strategy, strategyConfig, config, seed, { observer: bankDs.observer, onRound });
     if (res.rounds > longest) {
       longest = res.rounds;
       strip = { kind: "buckets", bucketRounds, wins: bw, counts: bc };

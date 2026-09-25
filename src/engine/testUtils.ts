@@ -5,7 +5,7 @@ import { sessionSeed, type Rng } from "./rng";
 import { runSession } from "./runner";
 import type { SportsInput } from "./odds";
 import type { RunContext } from "./stats/types";
-import type { AnyStrategy, StrategyConfig, StrategyContext } from "./strategies/types";
+import type { AnyStrategy, RoundResult, StrategyConfig, StrategyContext } from "./strategies/types";
 import type { SamplePath, SessionConfig, SessionResult } from "./types";
 
 /** An RNG that plays a scripted win/loss sequence and counts every draw. */
@@ -31,6 +31,14 @@ export function countingRng(inner: Rng): Rng & { draws: () => number } {
 
 export const W = true;
 export const L = false;
+/** A push in a betSequence script: the round is played but update is NOT called (as in the runner). */
+export const P = "push" as const;
+export type ScriptStep = boolean | typeof P;
+
+/** The RoundResult a binary game gives for a win or a loss at bet `bet` (profit = bet × net, exact). */
+export function binaryResult(won: boolean, bet: number, netPayout = 1): RoundResult {
+  return won ? { kind: "win", outcomeIndex: 0, profit: bet * netPayout } : { kind: "loss", outcomeIndex: 1, profit: -bet };
+}
 
 export function sessionConfig(overrides: Partial<SessionConfig> = {}): SessionConfig {
   return {
@@ -84,7 +92,7 @@ export function gameView(netPayout = 1, winProb = 0.5): StrategyContext["game"] 
 export function betSequence(
   strategy: AnyStrategy,
   config: StrategyConfig,
-  outcomes: readonly boolean[],
+  outcomes: readonly ScriptStep[],
   baseBet = 100,
   game: StrategyContext["game"] = gameView(),
 ): (number | "stop")[] {
@@ -96,7 +104,8 @@ export function betSequence(
     const bet = strategy.nextBet(state, ctx(round));
     bets.push(bet);
     if (typeof bet === "number") lastBet = bet;
-    state = strategy.update(state, won, ctx(round + 1));
+    // A push leaves state untouched (the runner does not call update); W / L feed the round's result.
+    if (won !== P) state = strategy.update(state, binaryResult(won, lastBet ?? 0, game.netPayout), ctx(round + 1));
   });
   bets.push(strategy.nextBet(state, ctx(outcomes.length)));
   return bets;
@@ -114,7 +123,7 @@ export function expectPure(strategy: AnyStrategy, config: StrategyConfig): void 
   for (const won of [L, L, L, W, W, L, W, W, W, W, L]) {
     const snap = JSON.stringify(state);
     strategy.nextBet(state, ctx);
-    const next = deepFreeze(strategy.update(state, won, ctx));
+    const next = deepFreeze(strategy.update(state, deepFreeze(binaryResult(won, 100, 1.2)), ctx));
     expect(JSON.stringify(state)).toBe(snap);
     state = next;
   }

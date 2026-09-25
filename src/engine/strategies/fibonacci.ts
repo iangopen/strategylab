@@ -28,5 +28,5 @@ export const fibonacci: Strategy<FibonacciConfig, FibonacciState> = {
   // Capped only against float overflow on very long losing streaks; the runner still applies
   // tableMax and bankroll checks to the result.
   nextBet: (state, ctx) => Math.min(ctx.baseBet * fib(state.step), Number.MAX_SAFE_INTEGER),
-  update: (state, won) => ({ step: won ? Math.max(0, state.step - 2) : state.step + 1 }),
+  update: (state, result) => ({ step: result.kind === "win" ? Math.max(0, state.step - 2) : state.step + 1 }),
 };

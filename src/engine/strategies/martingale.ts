@@ -21,5 +21,5 @@ export const martingale: Strategy<MartingaleConfig, MartingaleState> = {
   // Capped only against float overflow: a long enough streak would make multiplier^level
   // Infinity, which the runner rejects. The runner still applies tableMax and bankroll checks.
   nextBet: (state, ctx) => Math.min(ctx.baseBet * state.multiplier ** state.level, Number.MAX_SAFE_INTEGER),
-  update: (state, won) => ({ ...state, level: won ? 0 : state.level + 1 }),
+  update: (state, result) => ({ ...state, level: result.kind === "win" ? 0 : state.level + 1 }),
 };

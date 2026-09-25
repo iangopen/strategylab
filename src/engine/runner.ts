@@ -1,6 +1,6 @@
 import { edge, legacyView, outcomesOf, validateGame, type AnyGame, type Outcome } from "./games";
 import { mulberry32, type Rng } from "./rng";
-import type { AnyStrategy, StrategyConfig, StrategyContext } from "./strategies/types";
+import type { AnyStrategy, RoundResult, StrategyConfig, StrategyContext } from "./strategies/types";
 import type { EndReason, RunOptions, SamplePath, SessionConfig, SessionResult } from "./types";
 import { validateSessionConfig } from "./types";
 
@@ -100,6 +100,7 @@ export function runSessionWithRng(
   const { tableMin, tableMax, stopWin, stopLoss, maxRounds } = config;
   const path: SamplePath | undefined = opts.recordPath ? { rounds: [0], bankroll: [config.startBankroll] } : undefined;
   const observer = opts.observer;
+  const onRound = opts.onRound;
 
   let bankroll = config.startBankroll;
   let rounds = 0;
@@ -134,7 +135,8 @@ export function runSessionWithRng(
       bet = bankroll; // all-in; bankroll >= tableMin here, so the bet is still legal
     }
 
-    const net = nets[outcomeIndex(cum, rng())]!;
+    const k = outcomeIndex(cum, rng());
+    const net = nets[k]!;
     if (net === -1) {
       bankroll -= bet; // total loss: exactly the stake, carry untouched
     } else if (net !== 0) {
@@ -146,8 +148,11 @@ export function runSessionWithRng(
     rounds++;
     totalWagered += bet;
     lastBet = bet;
+    // The round's EXACT profit (fractional cents); for binary games bet × n on a win, -bet on a loss.
+    const result: RoundResult = { kind: net > 0 ? "win" : net < 0 ? "loss" : "push", outcomeIndex: k, profit: bet * net };
     // Post-round view: bankroll after resolution, lastBet = the bet just placed. Not called on a push.
-    if (net !== 0) state = strategy.update(state, net > 0, ctx());
+    if (net !== 0) state = strategy.update(state, result, ctx());
+    if (onRound !== undefined) onRound(rounds - 1, bet, result);
 
     if (bankroll > peak) peak = bankroll;
     if (peak - bankroll > maxDrawdown) maxDrawdown = peak - bankroll;

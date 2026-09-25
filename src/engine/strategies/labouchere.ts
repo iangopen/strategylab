@@ -60,9 +60,9 @@ export const labouchere: Strategy<LabouchereConfig, LabouchereState> = {
     if (state.line.length === 0) return "stop"; // only reachable when onComplete = "stop"
     return ctx.baseBet * betUnits(state.line);
   },
-  update: (state, won) => {
+  update: (state, result) => {
     if (state.line.length === 0) return state; // session already ended
-    if (!won) return { ...state, line: [...state.line, betUnits(state.line)] };
+    if (result.kind !== "win") return { ...state, line: [...state.line, betUnits(state.line)] };
     // Win: cancel the first and last number.
     const next = state.line.length <= 2 ? [] : state.line.slice(1, -1);
     if (next.length > 0) return { ...state, line: next };

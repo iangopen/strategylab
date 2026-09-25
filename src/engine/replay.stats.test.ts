@@ -3,7 +3,7 @@ import { MinMaxDownsampler } from "./downsample";
 import { GAME_PRESETS, type Game } from "./games";
 import { runMonteCarlo, SAMPLE_PATH_COUNT } from "./montecarlo";
 import { sessionSeed } from "./rng";
-import { recordingStrategy, replaySession, REPLAY_FULL_MAX_ROUNDS } from "./replay";
+import { replaySession, REPLAY_FULL_MAX_ROUNDS } from "./replay";
 import { runSession } from "./runner";
 import { STRATEGIES } from "./strategies/registry";
 import { deltasFromPath, sessionConfig } from "./testUtils";
@@ -115,11 +115,12 @@ describe("replay: the same luck in every strategy", () => {
     });
   });
 
-  it("the recording wrapper changes nothing about the session", () => {
+  it("the recording hook (onRound) changes nothing about the session", () => {
     const cfg = sessionConfig({ startBankroll: 100_000, baseBet: 1_000, maxRounds: 800 });
     for (const { strategy, config } of specs) {
       const plain = runSession(european, strategy, config, cfg, 99, { recordPath: true });
-      const recorded = runSession(european, recordingStrategy(strategy, () => {}), config, cfg, 99, { recordPath: true });
+      // Replay records through the runner's onRound hook (session 13; it replaced a wrapper around update).
+      const recorded = runSession(european, strategy, config, cfg, 99, { recordPath: true, onRound: () => {} });
       expect(recorded).toEqual(plain);
     }
   });

@@ -17,5 +17,5 @@ export const dalembert: Strategy<DAlembertConfig, DAlembertState> = {
   defaultConfig: { unitSize: 1 },
   init: (config) => ({ unitSize: config.unitSize, units: 0 }),
   nextBet: (state, ctx) => ctx.baseBet + state.units * state.unitSize * ctx.baseBet,
-  update: (state, won) => ({ ...state, units: won ? Math.max(0, state.units - 1) : state.units + 1 }),
+  update: (state, result) => ({ ...state, units: result.kind === "win" ? Math.max(0, state.units - 1) : state.units + 1 }),
 };

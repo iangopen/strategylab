@@ -79,16 +79,17 @@ function compileProgression(rule: ProgressionRule): Strategy<NoConfig, Progressi
     init: (_config, ctx) => ({ units: rule.startUnits, winStreak: 0, lossStreak: 0, cycleProfit: 0, stopped: false, start: ctx.bankroll }),
     // Capped only against float overflow, as in Martingale/Fibonacci; the runner applies table limits.
     nextBet: (state, ctx) => (state.stopped ? "stop" : Math.min(ctx.baseBet * state.units, Number.MAX_SAFE_INTEGER)),
-    update: (state, won, ctx) => {
+    update: (state, result, ctx) => {
       if (state.stopped) return state;
-      const placed = ctx.lastBet ?? 0; // the bet actually placed, after table rules
+      const won = result.kind === "win";
       const counted: ProgressionState = {
         ...state,
         winStreak: won ? state.winStreak + 1 : 0,
         lossStreak: won ? 0 : state.lossStreak + 1,
-        // Exact winnings (fractional cents), as Oscar's Grind counts them. The runner pays whole cents with
-        // a sub-cent carry, so over any stretch of rounds this is within 1 cent of the real bankroll change.
-        cycleProfit: state.cycleProfit + (won ? placed * ctx.game.netPayout : -placed),
+        // The round's exact profit (placed bet × the outcome's net, fractional cents), as Oscar's Grind
+        // counts it. The runner pays whole cents with a sub-cent carry, so over any stretch of rounds this
+        // is within 1 cent of the real bankroll change.
+        cycleProfit: state.cycleProfit + result.profit,
       };
       return apply(firstMatch(won ? rule.onWin : rule.onLoss, counted, ctx).then, counted, rule.startUnits);
     },
@@ -108,9 +109,9 @@ function compileSequence(rule: SequenceRule): Strategy<NoConfig, SequenceState> 
     defaultConfig: {},
     init: () => ({ line: rule.line }),
     nextBet: (state, ctx) => (state.line.length === 0 ? "stop" : ctx.baseBet * lineUnits(state.line)),
-    update: (state, won) => {
+    update: (state, result) => {
       if (state.line.length === 0) return state;
-      if (!won) return { line: [...state.line, lineUnits(state.line)] };
+      if (result.kind !== "win") return { line: [...state.line, lineUnits(state.line)] };
       const next = state.line.length <= 2 ? [] : state.line.slice(1, -1);
       if (next.length > 0) return { line: next };
       return { line: rule.onComplete === "restart" ? rule.line : [] }; // cycle complete

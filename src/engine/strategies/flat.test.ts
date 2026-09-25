@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { betSequence, expectPure, L, W } from "../testUtils";
+import { betSequence, binaryResult, expectPure, L, W } from "../testUtils";
 import { flat } from "./flat";
 
 describe("flat", () => {
@@ -7,7 +7,7 @@ describe("flat", () => {
     const ctx = { bankroll: 1000, baseBet: 100, round: 0, lastBet: null, game: { winProb: 0.5, netPayout: 1, edge: 0, outcomes: [{ prob: 0.5, net: 1 }, { prob: 0.5, net: -1 }] } };
     const s = flat.init({ units: 2.5 }, ctx);
     expect(flat.nextBet(s, ctx)).toBe(250);
-    expect(flat.nextBet(flat.update(s, false, ctx), ctx)).toBe(250);
+    expect(flat.nextBet(flat.update(s, binaryResult(false, 250), ctx), ctx)).toBe(250);
   });
 
   it("exact sequence: the same bet whatever happens", () => {
@@ -23,7 +23,7 @@ describe("flat", () => {
     const ctx = Object.freeze({ bankroll: 1000, baseBet: 100, round: 0, lastBet: null, game: { winProb: 0.5, netPayout: 1, edge: 0, outcomes: [{ prob: 0.5, net: 1 }, { prob: 0.5, net: -1 }] } });
     const s = Object.freeze(flat.init(config, ctx));
     flat.nextBet(s, ctx);
-    flat.update(s, true, ctx);
+    flat.update(s, binaryResult(true, 200), ctx);
     expect(s).toEqual({ units: 2 });
     expect(config).toEqual({ units: 2 });
   });

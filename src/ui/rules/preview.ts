@@ -3,7 +3,7 @@
 // It deliberately ignores table limits and running out of money (the preview says so).
 import { compileValidRule } from "../../engine/rules/compile";
 import { validateRule } from "../../engine/rules/validate";
-import type { StrategyContext } from "../../engine/strategies/types";
+import type { RoundResult, StrategyContext } from "../../engine/strategies/types";
 
 export const PREVIEW_MAX_ROUNDS = 100;
 
@@ -67,7 +67,9 @@ export function previewRule(rule: unknown, script: string, pc: PreviewContext): 
     }
     lastBet = bet;
     rows.push({ round: i + 1, units: desired / pc.baseBet, bet, won, bankrollAfter: bankroll });
-    state = strategy.update(state, won, ctx(i + 1));
+    // The round's exact profit (bet × net), as the runner reports it.
+    const result: RoundResult = won ? { kind: "win", outcomeIndex: 0, profit: bet * pc.netPayout } : { kind: "loss", outcomeIndex: 1, profit: -bet };
+    state = strategy.update(state, result, ctx(i + 1));
   }
   const next = strategy.nextBet(state, ctx(parsed.outcomes.length));
   return { ok: true, rows, next: next === "stop" ? "stop" : { units: next / pc.baseBet }, stoppedEarly: false };
