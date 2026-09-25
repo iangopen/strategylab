@@ -73,7 +73,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 4. **Integer money, with a per-session sub-cent carry.** The engine works in integer cents. Bets returned by strategies are rounded to whole cents by the runner. The UI converts at the boundary. A win pays `Math.round(bet × netPayout + carry)` cents and keeps the remainder as the session's `carry` (session 11): the bankroll is always whole cents, `|carry| ≤ 0.5`, the carry starts at 0 in every session and never crosses sessions, and it never consumes or moves a draw. For integer payouts it is always exactly 0. Reason: no float drift in progressions, and no systematic cents-rounding bias in EV per $ on non-integer payouts (see "Cents rounding").
 
-5. **Game model** (`games.ts`): `interface Game { id; name; winProb; netPayout }`. `netPayout` = profit per unit staked on a win (even money = 1). Derived: `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom, and (session 8) sports odds, which COMPILE to a Game in `odds.ts` (see "Sports odds"). Validate `0 < winProb < 1` and `netPayout > 0`.
+5. **Game model** (`games.ts`). **Since session 13 a game is a list of 1–12 outcomes `{ prob, net }` (see "Multi-outcome games"); binary games are `[{p, n}, {1 − p, −1}]` and the text below describes them.** Originally: `interface Game { id; name; winProb; netPayout }`. `netPayout` = profit per unit staked on a win (even money = 1). Derived: `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom, and (session 8) sports odds, which COMPILE to a Game in `odds.ts` (see "Sports odds"). Validate `0 < winProb < 1` and `netPayout > 0`.
 
 6. **Strategy contract** (`strategies/types.ts`), registered in ONE place (`strategies/registry.ts`):
    ```ts
@@ -532,6 +532,144 @@ The engine resolves each round with ONE uniform draw into win or loss. A push (a
 - **Links:**
   - The game is `["o", mode "m"|"e", format "a"|"d", sideA, sideB, side "a"|"b", estimate]`, inputs only. The derived numbers are recomputed on load.
   - v1 and v2 links load exactly as before, then migrate. A sports game in a v1/v2 link is rejected (it did not exist then).
+
+---
+
+## Multi-outcome games (session 13)
+
+A game can have ANY number of outcomes (1 to 12), each with its own probability and payout. The ticket example: price P; a prize of $20 with probability 1/6, $50 with 3/6, $100 with 2/6.
+
+### The model
+
+```ts
+interface Outcome {
+  prob: number;   // > 0, finite
+  net: number;    // profit per $1 staked: -1 = stake lost, 0 = push, 1 = even-money win; >= -1
+  label?: string; // shown in the replay strip and the editor
+}
+interface Game { id: string; name: string; outcomes: readonly Outcome[] }
+```
+
+- **Gross return** (the amount returned per $1 staked: 0 = stake lost, 1 = push, 2 = even-money win) is `1 + net`. It is what the editor and readouts SHOW.
+- **Why `net` is stored rather than `grossReturn`** (owner-approved, session 13): `1 + n` loses a bit in floating point. With n = 100/110, `(1 + n) − 1` = 0.9090909090909092 ≠ n. Storing `net` keeps every binary game, sports price and link bit-exact.
+- **Binary games are exactly** `[{ prob: p, net: n }, { prob: 1 − p, net: −1 }]`, where p and n are the old `winProb` and `netPayout`, untouched. Presets, the binary "Custom" game and sports odds all compile to this form.
+- **Validation** (`validateGame`, never throws; every problem reported):
+  - 1–12 outcomes;
+  - every `prob` finite and > 0;
+  - every `net` finite and ≥ −1 (i.e. gross return ≥ 0);
+  - probabilities sum to 1 within 1e-9.
+- **Edge** = `1 − Σ probᵢ × (1 + netᵢ)`. Negative = player edge. For a binary game the loss term is `(1 − p) × 0 = 0`, so this is BIT-EQUAL to the old `1 − p(1 + n)`: the theory stat and z do not move.
+
+### One draw per round
+
+The single uniform draw `u` picks the outcome by cumulative probability, in the order the outcomes were entered:
+- `cum[k] = prob₀ + … + prob_k`, accumulated left to right, and the LAST bound is forced to exactly 1 (so rounding never leaves a gap);
+- the outcome is the first k with `u < cum[k]`.
+
+For a binary game `cum[0] = p`, so this is exactly the old `u < p` (win). CRN is unchanged: the same draw gives the same outcome index in every strategy. A round still consumes exactly ONE draw; nothing else does.
+
+### Payout, carry and the round result
+
+- The round's EXACT profit is `bet × net_k` (fractional cents).
+- **Total loss (`net = −1`)** moves the bankroll by exactly `−bet`. **Push (`net = 0`)** moves it by exactly 0. Neither touches the carry.
+- **Every other outcome** pays through the session 11 carry: `owed = bet × net_k + carry`, `paid = Math.round(owed)`, `carry = owed − paid`. That includes partial losses (−1 < net < 0).
+- Why the two exemptions: a binary loss has always been exactly −bet, even when the carry is ±0.5 (`Math.round(−bet + 0.5)` would give −bet + 1). The exemptions keep binary games bit-identical, and they are exact accounting anyway (the exact change is a whole number of cents).
+- `|carry| ≤ ½¢` still holds, so over any session |total paid − total exact| ≤ ½¢ (plus float noise).
+
+**The strategy result.** `update(state, result, ctx)` receives
+
+```ts
+interface RoundResult { kind: "win" | "loss" | "push"; outcomeIndex: number; profit: number }
+```
+
+- `profit` is the EXACT profit `ctx.lastBet × net_k` in fractional cents, not the cents actually paid (those differ by the carry).
+- `kind` follows the sign of `profit`: `"win"` if > 0, `"loss"` if < 0, `"push"` if 0. It depends on the outcome alone, so the same draw gives the same kind in every strategy.
+- For binary games `profit` equals the old `placed × netPayout` on a win and `−placed` on a loss, bit for bit. Oscar's Grind and rule cycle profit use it and stay bit-identical.
+- **On a push the runner does NOT call `update`:** state is unchanged, and streaks neither extend nor break. The runner's own `longestLosingStreak` also neither extends nor breaks on a push. The round still counts (`rounds`, `totalWagered`, observers).
+- The runner gains an optional `onRound(roundsBefore, bet, result)` in `RunOptions`, called after EVERY resolved round (pushes included). Replay records bets and the outcome strip through it, because wrapping `update` would miss pushes. Sessions without it pay only a branch check.
+
+### Legacy `ctx.game` fields (an approximation for multi-outcome games)
+
+`ctx.game` is `{ outcomes, winProb, netPayout, edge }`.
+- `winProb` = Σ prob over outcomes with net > 0.
+- `netPayout` = the net of the winning outcome when there is exactly ONE (bit-exact for binary games). Otherwise it is the probability-weighted mean net over the winning outcomes. With no winning outcome, both are 0.
+- **Oscar's Grind uses these.** Its cap `ceil((goal − cycleProfit) / netPayout)` assumes every win pays `netPayout`. On a multi-outcome game that is an APPROXIMATION: a win can pay more or less, so a cycle may close above or below exactly +1 unit. Its cycle-profit bookkeeping uses the exact `result.profit`.
+
+### Kelly, generalized
+
+- `f*` maximizes `G(f) = Σ probᵢ × log(1 + f × netᵢ)` over `0 ≤ f < f_max`, where `f_max = 1 / (−min netᵢ)` when some outcome loses money.
+- **G is concave**, so it is solved by bisection on `G′(f) = Σ probᵢ netᵢ / (1 + f netᵢ)`, a decreasing function: 200 fixed iterations, deterministic.
+- **`G′(0) = −edge`.** If it is ≤ 0, `f* ≤ 0`: Kelly says do not play and returns `"stop"`, as today.
+- **If NO outcome loses money** (every net ≥ 0, some > 0), G grows without bound, so `f*` is capped at 1 (the whole bankroll). That game cannot lose money; the editor warns about it.
+- **Legacy binary games** (exactly 2 outcomes, the first with net > 0 and the second with net = −1) keep the closed form `(b p − q) / b`, so every existing result stays bit-identical. A test runs the solver on binary games and requires agreement with the closed form to 1e-12.
+- **`assumedWinProb` applies only to binary games.** The field carries a new generic `FieldSpec` flag `binaryOnly: true`: SchemaForm disables it on multi-outcome games with the note "Applies only to win/lose games; ignored here", and Kelly ignores it there (it uses the game's true probabilities).
+
+### The editor: two input modes
+
+The game list gains **"Custom outcomes"** and a **"Ticket example"** preset. The binary "Custom" editor (win probability + net payout) stays as it is. Rows: 1 to 12, with add and remove.
+- **Ticket mode:** a price P plus a prize per outcome. `net = (prize − P) / P` (computed this way, not `prize / P − 1`). A prize equal to the price is labeled "push".
+- **Multiplier mode:** the gross return per $1 staked per outcome (0 = stake lost, 1 = push, 2 = even money). `net = r − 1`, with the decimal float artifact snapped by the existing `snapShortDecimal` (1.91 → 0.91 exactly).
+- **Probability fields** accept a decimal (`0.25`, `.5`) or a fraction of two whole numbers (`1/6`). They are parsed EXACTLY into BigInt rationals (a decimal is a rational too: 0.25 = 25/100). The sum is checked in exact rational arithmetic (`1/6 + 3/6 + 2/6` is exactly 1), within the same 1e-9 tolerance as the engine. The engine receives `num / den` as a float.
+- **Rejected with readable messages:** `1/0`, `abc`, negatives, 0, empty, more than 40 characters, and anything else outside the grammar (`^\d+/\d+$` or a plain non-negative decimal).
+- **Live readout:**
+  - the sum of probabilities (exact);
+  - the mean return per $1 (and the mean prize in ticket mode);
+  - the edge, as house or player;
+  - a plain warning when every outcome returns at least the stake: "Every outcome returns at least your stake, so this game cannot lose money."
+- Tone rules unchanged: educational, no casino or lottery-operator names, no "winning" language.
+
+### The replay strip
+
+It is still drawn ONCE (CRN: every strategy saw the same outcomes).
+- **Binary games:** unchanged (tall = won, short = lost).
+- **Multi-outcome games:**
+  - Bar height = the outcome's rank by net, lowest net = shortest bar.
+  - A left axis labels each level with the outcome's label or its prize/return.
+  - **Pushes are drawn as a hollow outlined bar** at their level.
+  - Neutral grays only, never color alone.
+  - Long sessions (bucketed): bar height = the mean level of the bucket.
+- The strip stores per-round outcome indices (`Uint8Array`); a bucketed strip stores per-bucket level sums and counts.
+
+### Scenario v4 and links
+
+- **`ScenarioConfig.version` = 4.** `game = { presetId, outcomes: { prob, net, label? }[], sports?, editor? }`.
+- **Sources of truth:**
+  - presets and the binary custom game: `outcomes`;
+  - sports: the odds inputs (outcomes re-derived, as in v3);
+  - editor games: `editor = { mode: "ticket" | "multiplier", price, rows: { prob: string, value: number, label?: string }[] }`, with `outcomes` re-derived and re-synced on every edit and load and checked by `validateScenario`.
+- **Probability TEXT is stored** (`"1/6"`), so a link reproduces exactly what was typed.
+- **`migrateScenario` v3 → v4:** `{ winProb, netPayout }` becomes `[{ prob: winProb, net: netPayout }, { prob: 1 − winProb, net: −1 }]`. Converting back reads `outcomes[0]`, so the round trip is exact. Chained after v1 → v2 → v3.
+- **Link key map (`g`), v = 4:**
+  - Presets: the preset id, as before.
+  - The binary custom game: `[presetId, winProb, netPayout]`, as before.
+  - Sports: `["o", …]`, as before.
+  - Editor games: **`["m", mode "t" | "x", price, [[probText, value, label?], …]]`**. `price` is `null` in multiplier mode.
+  - v1–v3 links decode EXACTLY as before, then migrate.
+  - The size test adds a 12-outcome game.
+
+### Worked examples
+
+**1. The ticket game** (probabilities 1/6, 3/6, 2/6; prizes $20, $50, $100). The mean prize is (20 + 150 + 200) / 6 = **$61.67**.
+
+| Price | Nets | Mean return per $1 | Edge | Kelly |
+|---|---|---|---|---|
+| $70 | −5/7, −2/7, +3/7 | 37/42 = 0.880952 | **5/42 = 11.905% house edge** | G′(0) = −5/42 < 0: stops |
+| $60 | −2/3, −1/6, +2/3 | 37/36 = 1.027778 | **−1/36 = 2.778% player edge** | G′(0) = +1/36: bets f* = 0.119801 (f_max 1.5) |
+
+- `ctx.game` at $70: winProb 1/3, netPayout 3/7. At $60: winProb 1/3, netPayout 2/3.
+- Draw bounds: `cum` = [0.16666666666666666, 0.6666666666666666, 1 (forced)].
+- The invariant predicts EV per $ wagered = −edge: −11.905% at $70 and +2.778% at $60, for EVERY strategy.
+
+**2. A game with a push:** win 0.44 at gross 2 (net 1), push 0.10 at gross 1 (net 0), lose 0.46 at gross 0 (net −1).
+- Edge = 1 − (0.88 + 0.10 + 0) = **2%** (house edge).
+- A push returns the stake: the bankroll and the carry are unchanged, and `update` is not called, so a Martingale at level 3 stays at level 3 across it.
+- Kelly: G′(0) = 0.44 − 0.46 < 0, so it stops.
+- Every strategy's EV per $ wagered must be −2%. Pushes count in the amount wagered, which is why EV per $ is −2% and not −2% / 0.9.
+
+**3. European roulette, even money, as outcomes:** `[{ prob: 18/37, net: 1 }, { prob: 19/37, net: −1 }]`.
+- Edge = 1 − (18/37 × 2 + 0) = **1/37 = 2.703%**, the same bits as before.
+- Draw: `u < 18/37` wins, as before.
+- Every existing result is bit-identical (the session 11 and 12 goldens, the invariant tables, CRN and draw count).
 
 ---
 
