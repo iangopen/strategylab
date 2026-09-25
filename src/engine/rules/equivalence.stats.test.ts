@@ -33,11 +33,7 @@ const SCENARIOS: [string, SessionConfig, number][] = [
   ["invariant (tableMax clamp, stops)", INVARIANT_SCENARIO, 777],
 ];
 
-// Timeout: each case runs 2 x 10,000 full sessions (about 1-2 s idle). Under parallel-file CPU load
-// "Paroli cap 3, invariant" once took 5,868 ms, over Vitest's 5 s default (session 9). The assertion
-// is a deterministic bit-identity check, so the budget, not the engine, was the problem. Only this
-// file gets a longer budget; everything else keeps the default so a hung test fails fast.
-describe("equivalence: built-ins expressed as rules give bit-identical SessionResults", { timeout: 30_000 }, () => {
+describe("equivalence: built-ins expressed as rules give bit-identical SessionResults", () => {
   it("the four proofs are the shipped examples", () => {
     for (const [, builtin, , rule] of PAIRS) expect(EXAMPLE_RULES.find((e) => e.builtinId === builtin.id)?.rule).toBe(rule);
   });

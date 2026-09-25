@@ -73,7 +73,6 @@ describe("runMonteCarlo", () => {
 
   it(
     "memory (test 6): 100k sessions × 1000 rounds keeps only the 50 sample paths",
-    { timeout: 180_000 }, // explicit: the run is NOT shrunk to fit the default timeout
     () => {
       const proc = (globalThis as { process?: { memoryUsage(): { heapUsed: number } } }).process;
       const heapBefore = proc?.memoryUsage().heapUsed ?? 0;

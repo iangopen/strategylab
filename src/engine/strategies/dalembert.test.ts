@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { betSequence, describeEvInvariant, expectPure, L, W } from "../testUtils";
+import { betSequence, expectPure, L, W } from "../testUtils";
 import { dalembert } from "./dalembert";
 
 describe("dalembert: exact bet sequences (no runner)", () => {
@@ -27,5 +27,3 @@ describe("dalembert: purity", () => {
     expectPure(dalembert, { unitSize: 0.5 });
   });
 });
-
-describeEvInvariant(dalembert, { unitSize: 1 });

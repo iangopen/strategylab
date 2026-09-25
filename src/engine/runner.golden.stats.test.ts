@@ -88,7 +88,7 @@ const cells = () =>
   );
 
 describe.skipIf(env.GOLDEN !== "write")("golden capture (writes runner.golden.json)", () => {
-  it("captures", { timeout: 600_000 }, async () => {
+  it("captures", async () => {
     const out: Record<string, Cell> = {};
     for (const c of cells()) out[c.key] = computeCell(c.game, c.cfg, c.strategy, c.config, c.master);
     // The regression test's "before": Flat, -110 / -110 market, $5 base, stops on, 100k sessions,

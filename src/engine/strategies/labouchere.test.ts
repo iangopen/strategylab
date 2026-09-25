@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { betSequence, describeEvInvariant, expectPure, L, W } from "../testUtils";
+import { betSequence, expectPure, L, W } from "../testUtils";
 import { labouchere } from "./labouchere";
 
 describe("labouchere: exact bet sequences (no runner)", () => {
@@ -33,5 +33,3 @@ describe("labouchere: purity", () => {
     expectPure(labouchere, { sequence: "1-1-1-1-1", onComplete: "stop" });
   });
 });
-
-describeEvInvariant(labouchere, { sequence: "1-2-3-4", onComplete: "restart" });

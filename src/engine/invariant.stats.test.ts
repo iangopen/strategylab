@@ -62,7 +62,7 @@ describe("EV per $ wagered = -edge: 8 built-ins + a custom rule x 5 games, every
   });
 
   for (const [game, master, kellyConfig] of GAMES) {
-    it(`${game.name} (edge ${(edge(game) * 100).toFixed(3)}%, seed ${master})`, { timeout: 300_000 }, () => {
+    it(`${game.name} (edge ${(edge(game) * 100).toFixed(3)}%, seed ${master})`, () => {
       const expected = -edge(game);
       for (const [name, strategy, config] of specs(kellyConfig)) {
         const results: SessionResult[] = [];

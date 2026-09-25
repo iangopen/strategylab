@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { betSequence, describeEvInvariant, expectPure, gameView, L, W } from "../testUtils";
+import { betSequence, expectPure, gameView, L, W } from "../testUtils";
 import { oscars } from "./oscars";
 
 describe("oscars: exact bet sequences (no runner)", () => {
@@ -30,5 +30,3 @@ describe("oscars: purity", () => {
     expectPure(oscars, {});
   });
 });
-
-describeEvInvariant(oscars, {});

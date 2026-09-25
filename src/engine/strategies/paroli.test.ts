@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { betSequence, describeEvInvariant, expectPure, L, W } from "../testUtils";
+import { betSequence, expectPure, L, W } from "../testUtils";
 import { paroli } from "./paroli";
 
 describe("paroli: exact bet sequences (no runner)", () => {
@@ -32,5 +32,3 @@ describe("paroli: purity", () => {
     expectPure(paroli, { streakCap: 1 });
   });
 });
-
-describeEvInvariant(paroli, { streakCap: 3 });

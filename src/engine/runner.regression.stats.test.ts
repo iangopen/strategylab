@@ -13,7 +13,7 @@ import type { SessionResult } from "./types";
 // "Before" was captured from the pre-carry runner with the SAME seeds (runner.golden.json, oldRule),
 // so the two runs see identical outcomes and differ only in what a win pays.
 describe("regression: -110 / -110, $5 base, Flat, 100,000 sessions, stops on", () => {
-  it("EV per $ wagered is within 4 SE of -edge (it was ~5 SE away before the carry)", { timeout: 300_000 }, () => {
+  it("EV per $ wagered is within 4 SE of -edge (it was ~5 SE away before the carry)", () => {
     const m = sportsGame(REGRESSION_MARKET);
     if (!m.ok) throw new Error("bad market");
     const game: Game = { id: "sports", name: "Sports odds", winProb: m.winProb, netPayout: m.netPayout };

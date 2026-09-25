@@ -6,10 +6,7 @@ import { STRATEGIES } from "./registry";
 
 // Session 2 open item: custom game p = 0.45, net payout 1.2 (edge = 1 - 0.45 × 2.2 = 1%), stops ON.
 // Uses the registered stats (EV per $, SE, theory, z), i.e. exactly what the results table shows.
-// Per-file 30 s timeout (session 12, owner-approved): each test is deterministic and CPU-bound (Paroli
-// takes ~0.8 s alone) but reached 8.3 s under the full parallel suite. The 5 s default is a harness
-// budget, not an assertion; nothing asserted here changed.
-describe("custom game p = 0.45, payout 1.2: every registered strategy within 4 SE of -edge", { timeout: 30_000 }, () => {
+describe("custom game p = 0.45, payout 1.2: every registered strategy within 4 SE of -edge", () => {
   const game: Game = { id: "custom", name: "Custom", winProb: 0.45, netPayout: 1.2 };
 
   it("edge is 1%", () => {

@@ -138,7 +138,7 @@ describe("fuzz: 200 random VALID rules satisfy the EV-per-$ invariant", () => {
       const meanZ = zs.reduce((a, b) => a + b, 0) / zs.length;
       const sdZ = Math.sqrt(zs.reduce((a, b) => a + (b - meanZ) ** 2, 0) / (zs.length - 1));
       console.log(`[fuzz] ${game.id}: ${N_RULES} rules x ${SESSIONS} sessions, ${totalRounds} rounds; worst |z| = ${Math.abs(worst.z).toFixed(2)} (rule ${worst.i}); z mean ${meanZ.toFixed(2)}, sd ${sdZ.toFixed(2)}`);
-    }, 300_000);
+    });
   }
 });
 

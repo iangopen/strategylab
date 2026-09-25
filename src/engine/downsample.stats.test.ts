@@ -65,7 +65,7 @@ describe("MinMaxDownsampler (streaming)", () => {
 });
 
 describe("observed sessions at the maxRounds hard cap", () => {
-  it("maxRounds 1,000,000: memory per observed session is independent of maxRounds", { timeout: 300_000 }, () => {
+  it("maxRounds 1,000,000: memory per observed session is independent of maxRounds", () => {
     const proc = (globalThis as { process?: { memoryUsage(): { heapUsed: number } } }).process;
     const european = GAME_PRESETS.find((g) => g.id === "european")!;
     // Bankroll large enough that flat $1 bets play all 1,000,000 rounds.

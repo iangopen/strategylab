@@ -51,7 +51,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 
 ```powershell
 npm run dev           # local dev server (base "/")
-npm run test          # Vitest, must be clean before any commit (chain commits after it: npm run test && git commit ...)
+npm run test          # Vitest: "unit" project, then "stats" (*.stats.test.ts); must be clean before any commit (chain commits after it: npm run test && git commit ...)
 npm run build         # strict type check (app, config, E2E specs) + production build, must be clean before any push
 npm run lint          # oxlint
 npm run e2e           # Playwright: builds with VITE_BASE=/strategylab/, serves on :4180, runs e2e/*.spec.ts
@@ -102,6 +102,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 - **All scenario state lives in one serializable `ScenarioConfig`** (`src/scenario.ts`, plain JSON). No scenario state hidden in component-local state. Reason: URL sharing must stay trivial.
 - **If an approved decision turns out wrong mid-session, STOP and ask before changing it.** (Added in session 12, after session 11 swapped an approved option for a variant and only reported it afterwards.)
+- **Monte Carlo-heavy tests go in the `stats` Vitest project; never add a per-file or per-test timeout** (session 13). A test that simulates about 1,000 sessions or more, or takes over a second alone, lives in a `*.stats.test.ts` file: invariant tables, equivalence, fuzz, goldens, frequency and property tests. The `stats` project runs AFTER `unit` on 2 workers with ONE project-wide timeout (120 s, in `vite.config.ts`); `unit` keeps Vitest's 5 s default. Reason: heavy files competing for CPU made deterministic tests time out, and per-file timeouts only hid that.
 - **Statistical tests use standard-error tolerances**, never hand-picked constants. Tolerance = 4 × SE computed in the test from the samples, and the test prints the SE. Fixed seeds keep them deterministic; SE-based bounds keep them honest. Do NOT increase nSessions or loosen tolerances just to make a test pass. If an invariant test fails, the engine is presumed wrong until proven otherwise.
 
 ---
@@ -127,16 +128,16 @@ src/
     odds.ts           sports odds -> Game: conversions, proportional de-vig, estimate mode (pure)
     types.ts          shared engine types (SessionResult, EndReason, ...)
     runner.ts         runSession, runSessionWithRng (injected RNG for tests), table rules, round observer, sub-cent payout carry
-    runner.golden.test.ts + .json  pre-carry golden SessionResults on even/integer payouts (bit-identical), old-rule -110 run
-    runner.carry.test.ts          carry property test: |paid - exact| < 1 cent, exact BigInt rationals, after every round
-    runner.regression.test.ts     -110 flat $5, 100k sessions: z before (golden) vs after the carry
-    invariant.test.ts             THE full invariant table: 8 built-ins + a custom rule x 5 games (incl. two sports games)
+    runner.golden.stats.test.ts + .json  pre-carry golden SessionResults on even/integer payouts (bit-identical), old-rule -110 run
+    runner.carry.stats.test.ts    carry property test: |paid - exact| < 1 cent, exact BigInt rationals, after every round
+    runner.regression.stats.test.ts -110 flat $5, 100k sessions: z before (golden) vs after the carry
+    invariant.stats.test.ts       THE full invariant table: 8 built-ins + a custom rule x 5 games (incl. two sports games)
     montecarlo.ts     runMonteCarlo, CRN seeding, sample paths, histogram, bands, resultTransferables
-    montecarlo.golden.test.ts + .json  pre-session-12 runMonteCarlo outputs (all but bands): bit-identical
+    montecarlo.golden.stats.test.ts + .json  pre-session-12 runMonteCarlo outputs (all but bands): bit-identical
     checkpoints.ts    THE band checkpoint schedule (pure): dense early, geometric, capped; exhaustively tested
     downsample.ts     streaming min/max sample-path downsampler (<= 1000 points)
     replay.ts         same-luck replay of one session for every strategy (calls runSession only)
-    perf.bench.test.ts opt-in benchmark (BENCH=1): session 2 timing scenario + observer cost
+    perf.bench.stats.test.ts opt-in benchmark (BENCH=1): session 2 timing scenario + observer cost
     testUtils.ts      test-only helpers (scripted/counting RNG, sample-based SE)
     isolation.test.ts guards rules 1-2 (no Math.random / React / DOM in engine)
     strategies/
@@ -145,15 +146,15 @@ src/
       flat.ts         reference implementation
       validate.ts     checks a config against its configSchema
       crn.test.ts     CRN across every registered strategy plus one custom rule
-      customGame.test.ts  every strategy on p = 0.45, payout 1.2, via the registered z stat
+      customGame.stats.test.ts  every strategy on p = 0.45, payout 1.2, via the registered z stat
     rules/            the rule language (see "Rule language"): user strategies as DATA, never code
       types.ts        Rule, Entry, Condition, Action
       limits.ts       every limit and range (validator and builder read these)
       validate.ts     THE closed-grammar validator (worker and UI), parseRuleJson; never throws
       compile.ts      validated rule -> Strategy (id "custom", label = rule name); pure, no RNG
       examples.ts     shipped example rules (four reproduce built-ins exactly)
-      equivalence.test.ts  4 built-ins vs their rules: bit-identical over 10,000 sessions
-      fuzz.test.ts    200 random valid rules (invariant) + 200 invalid (all rejected)
+      equivalence.stats.test.ts  4 built-ins vs their rules: bit-identical over 10,000 sessions
+      fuzz.stats.test.ts    200 random valid rules (invariant) + 200 invalid (all rejected)
       noEval.test.ts  static scan: no eval / Function / dynamic import in the rule pipeline
     stats/
       types.ts        StatDef, RunContext
@@ -231,12 +232,12 @@ How the code honors them: ranges come ONLY from `src/ui/charts/adapters.ts` (`fa
 2. Define `Config`, `State`, `defaultConfig`, and a `configSchema` covering every config key. Give each field sensible min/max bounds.
 3. Implement `init`, `nextBet`, `update` as pure functions. Return new state objects; never mutate. Do not clamp to table limits or bankroll; the runner does that. Payout-aware sizing reads `ctx.game` (`{ winProb, netPayout, edge }`, read-only, filled by the runner — reading it never touches the RNG, so CRN is safe). Copy any config a strategy needs into State at `init`; `nextBet` gets no config.
 4. Add one line to `strategies/registry.ts`.
-5. Write `<id>.test.ts` (see "Strategy test kit" below) covering:
+5. Write `<id>.test.ts` (fast, `unit` project) and `<id>.stats.test.ts` (the invariant and any other Monte Carlo check, `stats` project; see "Strategy test kit" below) covering:
    - the progression over a hand-written win/loss sequence (`betSequence`, assert the exact bet sequence in cents; `betSequence` carries the just-placed bet as `ctx.lastBet` and takes an optional `game` for payout-aware strategies)
    - reset behavior, caps and floors
    - purity (`expectPure`)
-   - the invariant (`describeEvInvariant(strategy, config)`): EV per $ wagered within 4 SE of `-edge` on European roulette, within 4 SE of 0 on a fair coin, AND within 4 SE of `-edge` on the positive-edge game (p = 0.55, even money), with stop conditions ON. The config passed here must make the strategy actually WAGER on all three games (e.g. Kelly needs a misjudged edge above 0.5), or EV per $ is 0/0.
-   - then add the id to the expected id-list assertion in `strategies/crn.test.ts` (and give it a betting config there and in `customGame.test.ts` if its default refuses to bet on a negative-edge game, as Kelly does).
+   - the invariant (`describeEvInvariant(strategy, config)`, in `<id>.stats.test.ts`): EV per $ wagered within 4 SE of `-edge` on European roulette, within 4 SE of 0 on a fair coin, AND within 4 SE of `-edge` on the positive-edge game (p = 0.55, even money), with stop conditions ON. The config passed here must make the strategy actually WAGER on all three games (e.g. Kelly needs a misjudged edge above 0.5), or EV per $ is 0/0.
+   - then add the id to the expected id-list assertion in `strategies/crn.test.ts` (and give it a betting config there and in `customGame.stats.test.ts` if its default refuses to bet on a negative-edge game, as Kelly does).
 6. Run the app and confirm the strategy appears in the picker with a working config form and no UI edits.
 7. Update STATUS.
 
@@ -1180,7 +1181,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 3: sample paths stay `number[]`**; histogram counts (`Uint32Array`), edges, and bands (`Float64Array`) are transferred with `Comlink.transfer` (`resultTransferables`).
 - **Session 3: percentages display with 3 decimals** (owner-approved; `src/ui/format.ts`) so the SE row is readable (0.032%, not 0.03%).
 - **Session 3: `testCtx` lives in `testUtils.ts`**; tests never import from other test files.
-- **Session 3: `perf.bench.test.ts` is committed and skipped unless `BENCH=1`**, so later sessions can re-measure against the same scenario.
+- **Session 3: `perf.bench.test.ts` (since session 13 `perf.bench.stats.test.ts`) is committed and skipped unless `BENCH=1`**, so later sessions can re-measure against the same scenario.
 - **Session 4: chart library = raw Canvas 2D** (timeboxed spike on a throwaway branch `spike/charts`, deleted; never pushed). Same chart for all three candidates: fan (p5–p95, p25–p75, median) + 50 sample paths, 6 strategy panels, ~1000 points per path (real worker run, 10k sessions), production build, Chrome (tab hidden, DPR 1), median of 10 full redraws of all 6 panels:
   | Candidate | Bundle delta (gzip) | Render, 6 panels | Band fill | Per-path x arrays | Resize | Theming |
   |---|---|---|---|---|---|---|
@@ -1285,7 +1286,7 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 10: labels are drawn AFTER the data** (including over the highlighted path), so text never sits on paths. A label that can't fit anywhere (more labels than the plot can hold) is clamped inside the plot; the property test never hit that case.
 - **Session 10: the hover readout snaps to the nearest band checkpoint INSIDE the zoom window.** If the window is narrower than one checkpoint, the readout clears.
 - **Session 10: the elapsed counter shows "—" before the first run**, so "<0.1s" never claims a run happened.
-- **Session 10: the equivalence test's timeout is 30 s** (per file, `describe(..., { timeout: 30_000 })`); every other test uses Vitest's 5 s default. (Session 12, owner-approved: `customGame.test.ts` also has a per-file 30 s timeout, and the exhaustive schedule test, the goldens and the invariant tests set their own.)
+- **(SUPERSEDED in session 13 by the `stats` Vitest project: no per-file timeouts anywhere.)** **Session 10: the equivalence test's timeout is 30 s** (per file, `describe(..., { timeout: 30_000 })`); every other test uses Vitest's 5 s default. (Session 12, owner-approved: `customGame.test.ts` also has a per-file 30 s timeout, and the exhaustive schedule test, the goldens and the invariant tests set their own.)
 - **Session 10: the Labouchère help text was NOT changed** (option (b)): the owner's bare "yes" did not clearly override the hard "src/engine/ diff is EMPTY" rule. It is listed under Still open for session 11.
 - **Session 10: the commit gate now runs with `set -o pipefail`.** Piping Playwright's output through `grep | head` hid one failing E2E run; that commit was fixed and amended before any push. Every earlier session 10 commit's captured output shows all specs passing.
 - **Session 10 ran on Windows / PowerShell.**

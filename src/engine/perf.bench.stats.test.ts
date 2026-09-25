@@ -1,4 +1,4 @@
-// Performance harness. Skipped unless BENCH=1 (PowerShell: $env:BENCH=1; npx vitest run src/engine/perf.bench.test.ts --reporter=verbose).
+// Performance harness. Skipped unless BENCH=1 (PowerShell: $env:BENCH=1; npx vitest run src/engine/perf.bench.stats.test.ts --reporter=verbose).
 // Scenario = session 2's timing run: European, $1,000 bankroll, $10 base, 1000 max rounds,
 // 100k sessions, seed 12345, six strategy instances.
 import { describe, it } from "vitest";
@@ -16,7 +16,7 @@ import { sessionConfig } from "./testUtils";
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 
 describe.skipIf(env.BENCH !== "1")("perf benchmark", () => {
-  it("100k sessions × 6 strategies, median of 3", { timeout: 600_000 }, () => {
+  it("100k sessions × 6 strategies, median of 3", () => {
     const game = GAME_PRESETS.find((g) => g.id === "european")!;
     const cfg = sessionConfig({ startBankroll: 100_000, baseBet: 1_000, tableMin: 100, maxRounds: 1000 });
     const instances: [string, StrategyConfig][] = [
@@ -38,7 +38,7 @@ describe.skipIf(env.BENCH !== "1")("perf benchmark", () => {
     console.log(`[bench] 100k × 6 strategies: runs ${times.map((t) => t.toFixed(2)).join("s, ")}s; median ${times[1]!.toFixed(2)}s`);
   });
 
-  it("observer cost per session: none vs band + downsampler (flat, 20k sessions x 1000 rounds)", { timeout: 600_000 }, () => {
+  it("observer cost per session: none vs band + downsampler (flat, 20k sessions x 1000 rounds)", () => {
     const game = GAME_PRESETS.find((g) => g.id === "european")!;
     const cfg = sessionConfig({ startBankroll: 10_000_000, baseBet: 100, maxRounds: 1000 });
     const flatS = getStrategy("flat")!;

@@ -23,7 +23,7 @@ function winsOf(r: ReturnType<typeof replaySession>, k: number): boolean[] {
 }
 
 describe("replay determinism: re-simulated session i equals the stored sample path i", () => {
-  it(`maxRounds 20,000 (downsampled replay): EXACT equality for i < 50, every strategy`, { timeout: 300_000 }, () => {
+  it(`maxRounds 20,000 (downsampled replay): EXACT equality for i < 50, every strategy`, () => {
     // $10,000 bankroll, $10 base: long sessions, so paths are genuinely downsampled.
     const cfg = sessionConfig({ startBankroll: 1_000_000, baseBet: 1_000, tableMin: 100, maxRounds: 20_000 });
     expect(cfg.maxRounds).toBeGreaterThan(REPLAY_FULL_MAX_ROUNDS);

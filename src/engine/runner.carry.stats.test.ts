@@ -76,12 +76,13 @@ function worstDrift(netPayout: number, bets: number[], outcomes: boolean[]): num
       wonStakes += BigInt(bets[k]!);
       floatNoise += Number.EPSILON * (bets[k]! * netPayout + 1);
     } else {
-      expect(delta).toBe(-bets[k]!);
+      if (delta !== -bets[k]!) expect.fail(`round ${k + 1}: a loss moved the bankroll by ${delta}, not -${bets[k]}`);
     }
     const d = paid * den - wonStakes * num;
     const abs = d < 0n ? -d : d;
     if (abs > worst) worst = abs;
-    expect(Number((abs * 1_000_000_000_000n) / den) / 1e12).toBeLessThanOrEqual(0.5 + floatNoise);
+    const drift = Number((abs * 1_000_000_000_000n) / den) / 1e12;
+    if (!(drift <= 0.5 + floatNoise)) expect.fail(`round ${k + 1}: |paid - exact| = ${drift} cents > 0.5 + ${floatNoise}`);
   }
   // worst / den in cents, without losing precision before the division.
   return Number((worst * 1_000_000_000_000n) / den) / 1e12;
@@ -95,7 +96,7 @@ describe("sub-cent carry: |total paid - total exact| < 1 cent over any session (
     ["custom 1.2", 1.2],
   ];
 
-  it("named payouts (2,500 sessions each) and 5,000 random payouts: 15,000 random bet sequences", { timeout: 60_000 }, () => {
+  it("named payouts (2,500 sessions each) and 5,000 random payouts: 15,000 random bet sequences", () => {
     const rng = mulberry32(20260924);
     const sequence = (): [number[], boolean[]] => {
       const n = 1 + Math.floor(rng() * 300);

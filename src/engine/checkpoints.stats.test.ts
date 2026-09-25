@@ -38,7 +38,7 @@ describe("checkpointRounds (adaptive band schedule)", () => {
     expect(k).toHaveLength(253);
   });
 
-  it("EVERY maxRounds from 1 to 1,000,000 (exhaustive)", { timeout: 60_000 }, () => {
+  it("EVERY maxRounds from 1 to 1,000,000 (exhaustive)", () => {
     const t0 = performance.now();
     let longest = 0;
     let longestAt = 0;

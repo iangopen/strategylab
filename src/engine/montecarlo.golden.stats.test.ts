@@ -82,7 +82,7 @@ function snapshot(r: MonteCarloResult): Snapshot {
 const run = ([, game, cfg, seed]: (typeof SCENARIOS)[number]) => snapshot(runMonteCarlo(game, SPECS, cfg, N, seed));
 
 describe.skipIf(env.GOLDEN_MC !== "write")("golden capture (writes montecarlo.golden.json)", () => {
-  it("captures", { timeout: 600_000 }, async () => {
+  it("captures", async () => {
     const out = Object.fromEntries(SCENARIOS.map((s) => [s[0], run(s)]));
     // Specifier through a variable: the app tsconfig has no Node types, and this branch only runs in Node.
     const fsName = "node:fs";
@@ -91,7 +91,7 @@ describe.skipIf(env.GOLDEN_MC !== "write")("golden capture (writes montecarlo.go
   });
 });
 
-describe("runMonteCarlo outputs other than the bands are bit-identical to the pre-session-12 run", { timeout: 60_000 }, () => {
+describe("runMonteCarlo outputs other than the bands are bit-identical to the pre-session-12 run", () => {
   const stored = golden as Record<string, Snapshot>;
   it("covers every scenario", () => {
     expect(Object.keys(stored).sort()).toEqual(SCENARIOS.map((s) => s[0]).sort());

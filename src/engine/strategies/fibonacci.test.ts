@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { betSequence, describeEvInvariant, expectPure, L, W } from "../testUtils";
+import { betSequence, expectPure, L, W } from "../testUtils";
 import { fib, fibonacci } from "./fibonacci";
 
 describe("fibonacci: fib()", () => {
@@ -39,5 +39,3 @@ describe("fibonacci: purity", () => {
     expectPure(fibonacci, {});
   });
 });
-
-describeEvInvariant(fibonacci, {});
