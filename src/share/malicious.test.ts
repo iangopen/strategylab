@@ -154,7 +154,7 @@ describe("malicious links: bounded errors, no throw, no hang, bounded memory (ve
     expect([control.base64.length, control.utf8.length, control.json.length]).toEqual([1, 1, 1]);
     const huge = FRAGMENT_PREFIX + "A".repeat(20_000_000);
     expect(countedDecode(huge)).toMatchObject({ base64: [], utf8: [], json: [] });
-    expect(errorOf(huge)).toMatch(/too long to be a Betting Lab scenario \(20,000,003 characters; the limit is 8,000\)/);
+    expect(errorOf(huge)).toMatch(/too long to be a StrategyLab scenario \(20,000,003 characters; the limit is 8,000\)/);
     expect(errorOf(FRAGMENT_PREFIX + "A".repeat(MAX_FRAGMENT_CHARS))).toMatch(/too long/);
     // Within the cap: a 5,000-character rule name.
     const r = measuredDecode(fragmentOf({ ...good, st: [["flat"], ["p", "x".repeat(5000), 1, [[["r"]]], [[["r"]]]]] }));

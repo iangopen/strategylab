@@ -179,7 +179,7 @@ export default function App() {
     <div className="app">
       <header>
         <div className="header-row">
-          <h1>Betting Lab</h1>
+          <h1>StrategyLab</h1>
           <label className="theme-control">
             Theme
             <select value={theme} onChange={(e) => setTheme(e.target.value as ThemePref)}>
@@ -189,6 +189,7 @@ export default function App() {
             </select>
           </label>
         </div>
+        <p className="subtitle">A Monte Carlo simulator for betting strategies.</p>
         <p className="tagline">
           In a game with a house edge, every bet loses <em>edge × stake</em> on average. No betting strategy changes that; it only
           reshapes the spread of outcomes. Compare strategies here on identical simulated outcomes.

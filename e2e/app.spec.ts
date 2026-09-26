@@ -104,7 +104,7 @@ test("fan hover: the crosshair round and the readout follow the mouse; leaving c
   await expect(readout).toContainText(/^Round [\d,k.]+: p5 \$/);
   await fan.hover({ position: { x: box.width * 0.9, y: box.height * 0.5 } });
   await expect.poll(() => dataNum(fan, "hover-round")).toBeGreaterThan(first); // further right = a later round
-  await page.getByRole("heading", { name: "Betting Lab" }).hover();
+  await page.getByRole("heading", { name: "StrategyLab" }).hover();
   await expect(fan).not.toHaveAttribute("data-hover-round", /.*/);
   await expect(readout).toHaveText("Hover for percentile and sample-path values.");
 });

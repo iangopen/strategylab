@@ -102,7 +102,7 @@ export function jsonDepthExceeds(text: string, max: number): boolean {
 export function parseFragment(hash: string): { ok: true; payload: Record<string, unknown> } | { ok: false; message: string } | { ok: "none" } {
   if (!hash.startsWith(FRAGMENT_PREFIX)) return { ok: "none" };
   if (hash.length > MAX_FRAGMENT_CHARS) {
-    return { ok: false, message: `This link is too long to be a Betting Lab scenario (${hash.length.toLocaleString("en-US")} characters; the limit is ${MAX_FRAGMENT_CHARS.toLocaleString("en-US")}). Nothing was loaded.` };
+    return { ok: false, message: `This link is too long to be a StrategyLab scenario (${hash.length.toLocaleString("en-US")} characters; the limit is ${MAX_FRAGMENT_CHARS.toLocaleString("en-US")}). Nothing was loaded.` };
   }
   const bytes = base64urlToBytes(hash.slice(FRAGMENT_PREFIX.length));
   if (!bytes.ok) return { ok: false, message: `${bytes.error} Nothing was loaded.` };

@@ -31,7 +31,7 @@ export function watchPage(page: Page) {
 
 export async function openApp(page: Page, hash = "") {
   await page.goto(hash === "" ? "./" : `./${hash}`);
-  await expect(page.getByRole("heading", { name: "Betting Lab" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "StrategyLab" })).toBeVisible();
 }
 
 /** Click Run and wait for the completion status (web-first). */
