@@ -1,4 +1,4 @@
-# CLAUDE.md — Betting Lab (working name)
+# CLAUDE.md — StrategyLab
 
 Read this file in full at the start of every session. It is the source of truth for what this project is, the rules it must never break, and what is actually done. If code and this file disagree, stop and flag it. Do not silently pick one.
 
@@ -6,7 +6,7 @@ Read this file in full at the start of every session. It is the source of truth 
 
 ## Product
 
-Betting Lab is a Monte Carlo lab for betting strategies. Users configure a game, a bankroll scenario, and one or more strategies (Martingale, Fibonacci, etc.), run thousands of simulated sessions, and compare outcome distributions side by side.
+StrategyLab ("A Monte Carlo simulator for betting strategies.") is a Monte Carlo lab for betting strategies. Users configure a game, a bankroll scenario, and one or more strategies (Martingale, Fibonacci, etc.), run thousands of simulated sessions, and compare outcome distributions side by side.
 
 ### The core truth
 
@@ -35,7 +35,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: **`iangopen/strategylab`** (the account was renamed during session 10; `origin` points at `https://github.com/iangopen/strategylab.git` since session 11). GitHub redirects the old repo and git URLs, but NOT the old Pages address. **Public**, intentionally, since session 9. Product display name stays "Betting Lab (working name)". gh CLI is authenticated.
+- GitHub: **`iangopen/strategylab`** (the account was renamed during session 10; `origin` points at `https://github.com/iangopen/strategylab.git` since session 11). GitHub redirects the old repo and git URLs, but NOT the old Pages address. **Public**, intentionally, since session 9. Product name: **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." (session 14; it was "Betting Lab (working name)"). Used in the README, `<title>`, `og:title`, the repo description and the app header. **License: MIT** (`LICENSE`, © 2026 Ian Gopen). gh CLI is authenticated.
 - **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/**. **Links made with the pre-rename Pages address are permanently broken:** GitHub Pages does not redirect after an account rename, so they return 404 forever. Re-share such links with the new address (the `#s=` fragment is unchanged).
   - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
   - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
@@ -56,6 +56,7 @@ npm run build         # strict type check (app, config, E2E specs) + production 
 npm run lint          # oxlint
 npm run e2e           # Playwright: builds with VITE_BASE=/strategylab/, serves on :4180, runs e2e/*.spec.ts
 npm run build:pages   # the GitHub Pages build (VITE_BASE=/strategylab/)
+npm run screenshots   # regenerate docs/*.png + public/og-image.png from the LIVE site (SCREENSHOT_URL overrides); NOT a test
 npx playwright install chromium   # once per machine, before the first e2e run
 ```
 
@@ -113,6 +114,10 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 ```
 .github/workflows/ci.yml  CI (lint, unit, build, e2e) + GitHub Pages deploy after all pass
 playwright.config.ts      E2E: production build under /strategylab/ on :4180, Chromium, clipboard permissions
+playwright.screenshots.config.ts  the screenshot script (NOT the suite): live site, light, 1280x800 @2x
+scripts/screenshots/capture.spec.ts  default run, table = engine, then README images + the OG image, oxipng
+docs/                     README screenshots (generated: results.png, fan-fit-martingale.png, replay-bust.png)
+public/og-image.png       1200x630 link-preview image (generated; og:image points at it on Pages)
 e2e/
   helpers.ts          engineTable (same scenario through the engine in Node), watchPage, canvas-not-blank, dataNum
   app.spec.ts         sub-path load, all strategies' forms, default run = engine, shared axes, labels, fan hover
@@ -948,7 +953,7 @@ Session 7 (2026-09-23, Windows / PowerShell). `npm run test` (452 passed, 2 benc
     - A version-1 link with Kelly `{assumedWinProb: 0, fraction: 0.5}` loads as `{fraction: 0.5}` with **nothing dropped** (migrated, not reset), and 0.6 is kept.
     - The same 0 in a version-2 link IS reported. That contrast proves the path runs through `migrateScenario`.
     - Custom rules in a v1 link are left out. Versions 0, -1, 1.5, "1" and null are errors.
-60. **Malicious input** (verification 4, `malicious.test.ts`; each decode asserted **< 50 ms** and **< 2 MB of heap growth**, messages < 600 characters, dropped lists < 40; the file passed 5 runs in a row):
+60. **Malicious input** (verification 4, `malicious.test.ts`; each decode asserted **< 50 ms** (SUPERSEDED in session 14 by counted stage inputs + a 1 s hang backstop; STATUS 118) and **< 2 MB of heap growth**, messages < 600 characters, dropped lists < 40; the file passed 5 runs in a row):
     - **Prototype pollution:** `__proto__` / `constructor` / `prototype` keys at the top, in configs, in the strategy list and in the game. Kelly never picks up a smuggled `fraction: 9`, and `Object.prototype` / `Array.prototype` have no keys afterward.
     - **Nesting:** 5,000-deep nesting inside the cap, nesting hidden in a valid payload, and deep objects are all rejected before `JSON.parse`. Brackets inside strings don't count.
     - **Size:** a **20 MB** string is refused by length without decoding. Within the cap: a 5,000-character name gets the validator's name error; 250 unknown keys at two levels give 12 summarized reports; a 2,000-item strategy list is only looked at up to 8.
@@ -1334,6 +1339,49 @@ Session 13 (2026-09-24, Windows / PowerShell). `npm run test` (717 passed, 5 ski
      - The full gate re-ran clean afterwards (717 unit, 41 E2E).
      - Rule: delete a junction with a non-recursive delete FIRST (as session 8 did), then remove the worktree.
 
+Session 14 (2026-09-26, Windows / PowerShell). Portfolio pass: red CI fixed, product renamed to StrategyLab, README, generated screenshots, Open Graph tags, repo metadata, MIT license. `npm run test` (717 passed, 5 skipped), `npm run build`, `npm run lint` and **`npx playwright test` (41 passed)** all clean. **Three green CI runs in a row on `main`, each with the Pages deploy, every job on `ubuntu-24.04`:** [36231438799](https://github.com/iangopen/strategylab/actions/runs/36231438799), [36231615199](https://github.com/iangopen/strategylab/actions/runs/36231615199), [36232008890](https://github.com/iangopen/strategylab/actions/runs/36232008890). **`git diff` of `src/engine/` over the session is EMPTY.**
+
+118. **The red CI run** ([36085502803](https://github.com/iangopen/strategylab/actions/runs/36085502803)):
+     - `src/share/malicious.test.ts` › "huge repeated strings: over the cap is refused without decoding…". A 20,000,003-character fragment took **68.2 ms against a 50 ms wall-clock limit**.
+     - It guards a security bound: a hostile link cannot hang the page or grow memory. The decoder refuses that input with a constant-time length check (`parseFragment`), so the time was runner noise, not decoding work.
+     - **Now deterministic:** every `measuredDecode` counts what each decoding stage is handed (`base64urlToBytes` wrapped with `vi.mock` + `importOriginal`; `TextDecoder.prototype.decode` and `JSON.parse` spied only during the decode).
+       - A fragment over 8,000 characters reaches **no stage at all**.
+       - Any other input reaches each stage at most once: base64 ≤ 7,997 characters, UTF-8 ≤ 5,997 bytes, and `JSON.parse` only on text within the cap and within depth 16.
+       - A control asserts that a valid link reaches each stage exactly once, so "no stage reached" is meaningful.
+     - **Backstop:** 1,000 ms, for real hangs only. The heap (< 2 MB), message and dropped-list bounds are unchanged. Nothing is skipped or deleted.
+     - **Mutation check:** decoding before the length check fails 9 tests.
+     - **Other wall-clock assertions in the pass/fail suites: none.** `downsample.stats`, `montecarlo.stats` and `checkpoints.stats` only log times, `perf.bench.stats` is opt-in (`BENCH=1`), `responsiveness.spec` records long tasks without asserting on time, and `charts.spec` checks the elapsed label's format only.
+     - The no-eval scan also covers `src/share/*.test.ts`: a type-level `import("./base64url")` tripped it, so the type is written without `import(`. The scan was not loosened.
+119. **Links after the rename:** `git grep -i iangopenbusinessai` returns nothing (it already did; `origin` moved in session 11). Homepage set with `gh repo edit`.
+120. **Rename to StrategyLab** (owner): `<title>`, the app header (h1 + subtitle "A Monte Carlo simulator for betting strategies."), the too-long-link message, the README, `og:title` and the repo description. The two E2E heading selectors and one test regex follow the new text.
+121. **Screenshots** (`npm run screenshots`, generated from the LIVE site):
+     - Before capturing, the results table must equal `engineTable` in Node. The bust session is found in Node (**session 6**: Martingale couldn't cover the next bet after 9 rounds; Flat played all 1,000).
+     - Images: `docs/results.png` 139,676 B, `docs/fan-fit-martingale.png` 101,740 B (rounds 0–25), `docs/replay-bust.png` 86,858 B, and `public/og-image.png` 1200×630, 40,858 B. oxipng level 3 cut them by 24–43%.
+     - **A second run after the deploy reproduced all four byte for byte.**
+122. **README:** every link returns 200 (curl, following redirects), including the CI badge (`image/svg+xml`) and the three images via raw.githubusercontent (`image/png`). Number → source:
+
+     | README number | Source |
+     |---|---|
+     | 8 built-in strategies and their names | `strategies/registry.ts` (labels in each strategy file) |
+     | up to 8 strategies per run | `MAX_STRATEGIES` in `scenario.ts` |
+     | up to 12 outcomes | `MAX_OUTCOMES` in `games.ts` |
+     | edge 1/37 = 2.703%; $1,000, $10, $1,100, 10,000 sessions, seed 12345 | `defaultScenario()` in `scenario.ts`; European preset in `games.ts` |
+     | P(profit) 82.930% / 53.760%; EV per $ −2.909% / −2.758%; theory −2.703%; P(bust) 17.070% | the default run: `docs/results.png`, checked against `engineTable` by the screenshot script; identical to STATUS 32 and to the live run (STATUS 124) |
+     | half a cent (carry bound) | "Cents rounding"; `runner.carry.stats.test.ts` |
+     | more than 5 SE at 100,000 sessions (flat $5 at −110) | STATUS 89 (z 5.29), `runner.regression.stats.test.ts` |
+     | 1,000,000 sessions; 1,000,000 rounds per session | `MAX_SESSIONS` in `montecarlo.ts`; `MAX_ROUNDS_CAP` in `types.ts` |
+     | 8,000 characters; depth 16 | `share/limits.ts` |
+     | 4 standard errors | `describeEvInvariant` in `testUtils.ts`, `invariant.stats.test.ts` |
+     | Node.js 24 | `ci.yml` (`node-version: 24`) |
+     | 1200×630 (OG image) | `capture.spec.ts` |
+     | 2026 (license year) | `LICENSE` |
+
+     The README has no wall-clock timings and no test counts.
+123. **Open Graph tags on the live page** (curl): `og:type`, `og:title` "StrategyLab", `og:description`, `og:url` https://iangopen.github.io/strategylab/, `og:image` https://iangopen.github.io/strategylab/og-image.png (**200, `image/png`, byte-identical to the committed file**), width/height/alt, and `twitter:card` `summary_large_image`.
+124. **Live demo** (headless Chromium, local Playwright, bundle `index-DCFDUANk.js`): title "StrategyLab". The default run finished ("Done: 10,000 sessions…") with EV per $ −2.758% | −2.909% and P(profit) 53.760% | 82.930%. The worker returned 200 from `/strategylab/assets/`, with **0 console errors**. The screenshot script's live runs also asserted every table row equals the engine.
+125. **Repo metadata** (`gh repo view`): the description (the README pitch), homepage https://iangopen.github.io/strategylab/, the 10 topics (monte-carlo, simulation, typescript, react, vite, web-worker, probability, statistics, betting-strategies, education), and license MIT (detected by GitHub).
+126. **Housekeeping:** two untracked session 13 leftovers were deleted after confirming the tracked `src/v3links.golden.test.ts` passes (12 passed, 1 skipped): `e2e/live.tmp.spec.ts` (it ran against the live site on every local E2E run) and a stale pre-move `src/share/v3links.golden.test.ts` (its JSON import did not resolve).
+
 ### Built but not yet verified
 
 - Any run in a focused, visible tab (needs a human, about 2 minutes): is the 100k × 10,000-round flat run much faster than ~75–90s? Node does the same work in ~17s. (The owner runs this himself.)
@@ -1395,7 +1443,7 @@ Session 13 (2026-09-24, Windows / PowerShell). `npm run test` (717 passed, 5 ski
 
 _Record any choice the session prompt didn't specify, with the reason, so later sessions don't undo it by accident._
 
-- **Repo is `strategylab`, not `betting-lab`.** The folder already had an `origin` named `strategylab` (then under the pre-rename account); the owner chose to keep it. Display name stays "Betting Lab (working name)".
+- **Repo is `strategylab`, not `betting-lab`.** The folder already had an `origin` named `strategylab` (then under the pre-rename account); the owner chose to keep it. Display name was "Betting Lab (working name)" until session 14, when it became **StrategyLab**.
 - **No `echo >` in PowerShell for file creation** (writes UTF-16; see Environment). Use file tools or `Set-Content -Encoding utf8`.
 - **Stop boundaries are inclusive:** stopWin fires at `bankroll >= target`, stopLoss at `bankroll <= floor`. The UI labels stopLoss as a "floor". Both boundaries are tested to the cent.
 - **Runner check order each round:** stopWin → stopLoss → ruin → maxRounds → strategy ("stop") → round/tableMin/tableMax → insufficientFunds → ONE draw. Stops and ruin come before maxRounds so a session that busts or hits a target on its last allowed round is reported as that, not as maxRounds (keeps a future P(bust) honest). None of the pre-resolution checks draws; a test asserts draws === rounds for every endReason.
@@ -1570,3 +1618,12 @@ _Record any choice the session prompt didn't specify, with the reason, so later 
 - **Session 13: the tone test also scans the outcome editor** (and bans lottery-operator names).
 - **Session 13: the `stats` project runs on 2 workers** (measured: more workers were not faster on this machine, and 2 gives the most headroom per test). Its one timeout is 120 s.
 - **Session 13 ran on Windows / PowerShell.**
+- **Session 14: the malicious-link bound is proven by counting stage inputs, not by timing** (owner directive 1). The 1 s wall clock remains only as a hang backstop. `base64urlToBytes` is wrapped through `vi.mock` with `importOriginal` (the real function still runs), and `TextDecoder.decode` / `JSON.parse` are spied only for the duration of one decode, so Vitest's own use of them is never counted.
+- **Session 14: product name StrategyLab** (owner). The header gains the subtitle line "A Monte Carlo simulator for betting strategies." (`.subtitle`). The repo and path stay `strategylab`.
+- **Session 14: screenshots are a Playwright "spec" under `scripts/screenshots/`** with their own config (`playwright.screenshots.config.ts`), so Playwright's TypeScript loader resolves the engine's extensionless imports. They are outside `e2e/`, so never part of the suite, and type-checked through `tsconfig.e2e.json`.
+- **Session 14: screenshot settings.** Light theme set explicitly through the Theme control (and `colorScheme: light`), 1280×800 at device scale 2, element screenshots of the three panels, mouse parked at (0, 0) so no crosshair shows. The replay is zoomed with "Fit to first ending", so Martingale's 9-round bust is readable next to Flat's 1,000 rounds.
+- **Session 14: `@jsquash/oxipng` (WASM, lossless, level 3)** optimizes the PNGs (owner-approved dev dependency). In Node its wasm is loaded explicitly with `init(WebAssembly.compile(...))` from `node_modules`.
+- **Session 14: `og:image` is `public/og-image.png`**, a 1200×630 viewport capture of the same default run (owner-approved; `docs/` is not in the Pages build). It shows the app's real status line, including its elapsed time ("in 0.3s"), so a regeneration could differ by that label alone. The og:url and og:image URLs are absolute canonical Pages URLs in `index.html`; this is HTML metadata, not app code, so the no-hardcoded-base rule is unaffected.
+- **Session 14: the README states the carry bound with its caveat** ("within half a cent … up to floating-point noise"), and the regression figure with its scenario (flat $5 at −110), because each README number must match its source exactly.
+- **Session 14: MIT license** (owner), © 2026 Ian Gopen, referenced in the README.
+- **Session 14 ran on Windows / PowerShell** (tools via Git Bash where noted).
