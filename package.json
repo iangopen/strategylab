@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "build:pages": "cross-env VITE_BASE=/strategylab/ npm run build",
     "preview:pages": "cross-env VITE_BASE=/strategylab/ vite preview --port 4180 --strictPort",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "screenshots": "playwright test -c playwright.screenshots.config.ts"
   },
   "dependencies": {
     "comlink": "^4.4.2",
@@ -20,6 +21,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@jsquash/oxipng": "^2.3.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
