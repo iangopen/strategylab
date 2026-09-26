@@ -1,15 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultScenario } from "../scenario";
-import { bytesToBase64url } from "./base64url";
+import { base64urlToBytes, bytesToBase64url } from "./base64url";
 import { decodeScenarioLink, encodeScenarioLink, jsonDepthExceeds, type LoadResult } from "./link";
 import { FRAGMENT_PREFIX, MAX_FRAGMENT_CHARS, MAX_JSON_DEPTH } from "./limits";
 import { fragmentOf } from "./testLinks";
 
+// The decoder's base64 stage, wrapped so every call (and its input size) can be counted. The real
+// function still does the work; link.ts imports this same wrapped export.
+vi.mock("./base64url", async (importOriginal) => {
+  const m = await importOriginal<{ base64urlToBytes: typeof base64urlToBytes }>();
+  return { ...m, base64urlToBytes: vi.fn(m.base64urlToBytes) };
+});
+
 // A link is attacker-controlled. Every hostile input below must produce a BOUNDED error (or a
-// bounded partial load), never throw, never hang, and never grow memory: each decode is asserted
-// to finish under TIME_LIMIT_MS and to grow the heap by less than HEAP_LIMIT_BYTES (the input
-// itself is allocated before measuring), and every message is short.
-const TIME_LIMIT_MS = 50;
+// bounded partial load), never throw, never hang, and never grow memory. The protection is asserted
+// DETERMINISTICALLY by counting what each decode stage (base64, UTF-8, JSON.parse) is handed:
+//   - a fragment over MAX_FRAGMENT_CHARS reaches NO stage at all (refused by length alone);
+//   - otherwise base64 sees at most the cap, UTF-8 decoding at most 3/4 of it in bytes, and
+//     JSON.parse runs at most once, only on text within the cap and within MAX_JSON_DEPTH.
+// A generous wall-clock backstop (HANG_BACKSTOP_MS) only catches a real hang; a tight time limit
+// flaked on shared CI runners (68 ms against 50 ms on an input refused by its length check).
+// Heap growth is bounded too (the input itself is allocated before measuring), and every message is short.
+const HANG_BACKSTOP_MS = 1000;
 const HEAP_LIMIT_BYTES = 2 * 1024 * 1024;
 const MESSAGE_LIMIT = 600;
 const DROPPED_LIMIT = 40;
@@ -20,17 +32,60 @@ const proc = (globalThis as unknown as { process: NodeProcess }).process;
 const good = { v: 2, g: "european", b: 1000, bb: 10, tn: 1, sw: 1100, r: 1000, n: 10000, sd: 12345, st: [["flat"], ["kelly", { fraction: 0.5 }]] };
 const goodJson = JSON.stringify(good);
 
+const base64Spy = vi.mocked(base64urlToBytes);
+
+/** Runs one decode and returns the input sizes each decoding stage was handed. */
+function countedDecode(hash: string): { r: LoadResult; base64: number[]; utf8: number[]; json: string[] } {
+  base64Spy.mockClear();
+  const utf8: number[] = [];
+  const json: string[] = [];
+  const realDecode = TextDecoder.prototype.decode;
+  const realParse = JSON.parse;
+  const decodeSpy = vi.spyOn(TextDecoder.prototype, "decode").mockImplementation(function (this: TextDecoder, input?: AllowSharedBufferSource, options?: TextDecodeOptions) {
+    utf8.push(input ? input.byteLength : 0);
+    return realDecode.call(this, input, options);
+  });
+  const parseSpy = vi.spyOn(JSON, "parse").mockImplementation((text: string, reviver?: (this: unknown, key: string, value: unknown) => unknown) => {
+    json.push(text);
+    return realParse(text, reviver);
+  });
+  let r: LoadResult | undefined;
+  try {
+    expect(() => (r = decodeScenarioLink(hash))).not.toThrow();
+  } finally {
+    decodeSpy.mockRestore();
+    parseSpy.mockRestore();
+  }
+  return { r: r!, base64: base64Spy.mock.calls.map(([s]) => s.length), utf8, json };
+}
+
 function measuredDecode(hash: string): LoadResult {
   // V8 builds long concatenations lazily and flattens them on first character access. A real
   // location.hash is already flat, so flatten the INPUT here, before measuring the decoder.
   void hash.charCodeAt(hash.length - 1);
   const heap0 = proc.memoryUsage().heapUsed;
   const t0 = performance.now();
-  let r: LoadResult | undefined;
-  expect(() => (r = decodeScenarioLink(hash))).not.toThrow();
+  const { r, base64, utf8, json } = countedDecode(hash);
   const ms = performance.now() - t0;
   const heap = proc.memoryUsage().heapUsed - heap0;
-  expect(ms, `decode took ${ms.toFixed(1)} ms`).toBeLessThan(TIME_LIMIT_MS);
+  const stages = `base64 ${JSON.stringify(base64)}, utf8 ${JSON.stringify(utf8)}, JSON.parse ${json.length}`;
+  if (hash.length > MAX_FRAGMENT_CHARS) {
+    // Over the cap: refused by its length alone; not one character is decoded.
+    expect(base64, stages).toEqual([]);
+    expect(utf8, stages).toEqual([]);
+    expect(json, stages).toEqual([]);
+  } else {
+    expect(base64.length, stages).toBeLessThanOrEqual(1);
+    for (const n of base64) expect(n, stages).toBeLessThanOrEqual(MAX_FRAGMENT_CHARS - FRAGMENT_PREFIX.length);
+    expect(utf8.length, stages).toBeLessThanOrEqual(1);
+    for (const n of utf8) expect(n, stages).toBeLessThanOrEqual(Math.floor(((MAX_FRAGMENT_CHARS - FRAGMENT_PREFIX.length) * 3) / 4));
+    expect(json.length, stages).toBeLessThanOrEqual(1);
+    for (const text of json) {
+      expect(text.length, stages).toBeLessThanOrEqual(MAX_FRAGMENT_CHARS);
+      expect(jsonDepthExceeds(text, MAX_JSON_DEPTH), "JSON.parse was handed over-deep text").toBe(false);
+    }
+  }
+  expect(ms, `decode took ${ms.toFixed(1)} ms (hang backstop only)`).toBeLessThan(HANG_BACKSTOP_MS);
   expect(heap, `heap grew ${heap} bytes`).toBeLessThan(HEAP_LIMIT_BYTES);
   if (r!.kind === "error") expect(r!.message.length).toBeLessThan(MESSAGE_LIMIT);
   if (r!.kind === "loaded") {
@@ -92,7 +147,13 @@ describe("malicious links: bounded errors, no throw, no hang, bounded memory (ve
   });
 
   it("huge repeated strings: over the cap is refused without decoding; under it, a huge name is rejected by the rule validator", () => {
+    // Control: the stage counters do see a real decode (a valid link reaches each stage exactly once),
+    // so the "no stage reached" assertions below are meaningful.
+    const control = countedDecode(fragmentOf(good));
+    expect(control.r.kind).toBe("loaded");
+    expect([control.base64.length, control.utf8.length, control.json.length]).toEqual([1, 1, 1]);
     const huge = FRAGMENT_PREFIX + "A".repeat(20_000_000);
+    expect(countedDecode(huge)).toMatchObject({ base64: [], utf8: [], json: [] });
     expect(errorOf(huge)).toMatch(/too long to be a Betting Lab scenario \(20,000,003 characters; the limit is 8,000\)/);
     expect(errorOf(FRAGMENT_PREFIX + "A".repeat(MAX_FRAGMENT_CHARS))).toMatch(/too long/);
     // Within the cap: a 5,000-character rule name.
