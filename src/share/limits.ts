@@ -1,4 +1,4 @@
-// Limits of the URL scenario format (see "URL scenario format" in CLAUDE.md).
+// Limits of the URL scenario format (see "URL scenario format" in docs/spec.md).
 
 /** The fragment that carries a scenario: `#s=<base64url(compact JSON)>`. Never the query string. */
 export const FRAGMENT_PREFIX = "#s=";

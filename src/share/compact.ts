@@ -1,5 +1,5 @@
 // The compact payload of a scenario link: short keys and positional rule entries (documented in
-// CLAUDE.md "URL scenario format"). Encoding is lossless: fields are omitted ONLY when they equal
+// docs/spec.md "URL scenario format"). Encoding is lossless: fields are omitted ONLY when they equal
 // their documented default, numbers keep full precision. Expansion treats the payload as
 // UNTRUSTED: it reads own properties only, never recurses beyond the known shape, and every custom
 // rule it rebuilds goes through the session 6 validator.

@@ -15,7 +15,7 @@ function progression(onWin: Entry[], onLoss: Entry[], startUnits = 1): Progressi
   return { kind: "progression", name: "test", startUnits, onWin, onLoss };
 }
 
-describe("compiled rules: the worked examples in CLAUDE.md", () => {
+describe("compiled rules: the worked examples in docs/spec.md", () => {
   it("1. double after a loss: LLLWLW -> 1, 2, 4, 8, 1, 2, next 1", () => {
     expect(bets(MARTINGALE_RULE, "LLLWLW", 1)).toEqual([1, 2, 4, 8, 1, 2, 1]);
   });

@@ -1,5 +1,5 @@
 // Sports odds -> Game { winProb, netPayout }. Pure math, no React, no DOM, no RNG. See "Sports odds"
-// in CLAUDE.md. Nothing downstream knows about odds: the runner only ever sees a Game.
+// in docs/spec.md. Nothing downstream knows about odds: the runner only ever sees a Game.
 
 export type OddsFormat = "american" | "decimal";
 

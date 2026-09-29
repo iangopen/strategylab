@@ -1,4 +1,4 @@
-// The outcome editor's inputs -> a game's outcomes (see "Multi-outcome games" in CLAUDE.md). Pure; never
+// The outcome editor's inputs -> a game's outcomes (see "Multi-outcome games" in docs/spec.md). Pure; never
 // throws. Probabilities are TEXT parsed exactly (probText.ts), so their sum is checked exactly.
 import { edge, MAX_OUTCOMES, PROB_SUM_TOLERANCE, type Outcome } from "./games";
 import { snapShortDecimal } from "./odds";

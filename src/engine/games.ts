@@ -1,4 +1,4 @@
-// Games (see "Multi-outcome games" in CLAUDE.md). A game is a list of 1-12 outcomes { prob, net },
+// Games (see "Multi-outcome games" in docs/spec.md). A game is a list of 1-12 outcomes { prob, net },
 // where net = profit per $1 staked (-1 = stake lost, 0 = push, 1 = even money; gross return = 1 + net).
 // The binary shorthand { winProb, netPayout } is exactly [{ prob: p, net: n }, { prob: 1 - p, net: -1 }]
 // with p and n untouched, so every binary game (presets, custom, sports) stays bit-identical.

@@ -1,5 +1,5 @@
 // The ONE rule validator, used by the worker (before compiling) and by the UI (to show errors).
-// Closed grammar: anything not listed in "Rule language" (CLAUDE.md) is rejected with a readable
+// Closed grammar: anything not listed in "Rule language" (docs/spec.md) is rejected with a readable
 // error. It never throws, never evaluates anything, and only ever reads the keys it knows.
 import { RULE_LIMITS, type NumberRange } from "./limits";
 import type { Action, Condition, Entry, ProgressionRule, Rule, SequenceRule } from "./types";

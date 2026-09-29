@@ -1,4 +1,4 @@
-// The rule language (see "Rule language" in CLAUDE.md). Rules are plain JSON DATA, never code.
+// The rule language (see "Rule language" in docs/spec.md). Rules are plain JSON DATA, never code.
 
 export type Condition =
   | { readonly type: "winStreak"; readonly atLeast: number }

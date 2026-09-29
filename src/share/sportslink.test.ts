@@ -51,7 +51,7 @@ describe("v3 sports scenarios round-trip exactly through a link", () => {
   });
 });
 
-// Links produced by the SESSION 7 app (recorded in CLAUDE.md), with what the session 7 decoder
+// Links produced by the SESSION 7 app (recorded in docs/history.md), with what the session 7 decoder
 // returned for them (captured by running commit 76a284f in a temporary worktree). The only allowed
 // difference now is the scenario version (3), since they migrate forward.
 const GOLDEN = {
