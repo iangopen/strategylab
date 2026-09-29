@@ -132,9 +132,15 @@ Read the relevant section BEFORE changing that area. These files are plain paths
 - `docs/spec.md`: full folder map; chart rule implementation notes (fan zoom, label knockouts, colors); how to add a strategy (with the Strategy specs and test kit) and how to add a stat; the **rule language** (grammar, evaluation order, limits, worked examples); the **URL scenario format** (key map, limits, loading, history); **sports odds** (conversions, de-vig, format toggle, cents rounding / carry, link representation); **multi-outcome games** (model, one draw per round, payouts, Kelly generalized, editor, replay strip, scenario v4); the roadmap.
 - `docs/history.md`: the STATUS log (sessions 1-14, verification items numbered 1-126, referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
 
-## Current state (session 14, 2026-09-26)
+## Current state (session 15, 2026-09-29)
 
-All roadmap sessions 1-14 are done and verified: 717 unit/stats tests pass (5 skipped), `npm run build`, `npm run lint` and 41 Playwright specs pass, CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. `src/engine/` was untouched in session 14. Only record in STATUS what was actually verified.
+All roadmap sessions are done and verified: 719 unit/stats tests pass (5 skipped), `npm run build`, `npm run lint` and 43 Playwright specs pass, CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 portfolio hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
+- **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep these regions always mounted. The link banner is named "Opened link"; select status regions by role AND name in specs, since the page has several.
+- **Third-party licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build from the bundled packages (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
+- `.claude/settings.local.json` is git-ignored here.
+- **Local gotcha:** if Playwright lists far fewer than 43 tests, check for OneDrive cloud-file reparse points left in the working tree (Node sees them as symlinks and skips them); see STATUS 133.
+
+Only record in STATUS what was actually verified.
 
 ## Still open
 
