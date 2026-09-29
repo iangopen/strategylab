@@ -75,7 +75,7 @@ test("build the ticket game in the editor, run it, replay a session, copy the li
   const other = await context.newPage();
   const otherProblems = watchPage(other);
   await other.goto(copied);
-  await expect(other.getByRole("status")).toContainText("Loaded the scenario from the link.");
+  await expect(other.getByRole("status", { name: "Opened link" })).toContainText("Loaded the scenario from the link.");
   await expect(other.getByRole("combobox", { name: "Game", exact: true })).toHaveValue("outcomes");
   await expect(other.getByRole("textbox", { name: "Outcome 1 probability" })).toHaveValue("1/6");
   await expectTicketReadout(other);

@@ -53,3 +53,26 @@ export function formatElapsed(ms: number): string {
 
 /** Shown under a binaryOnly strategy field (e.g. Kelly's assumed win probability) on a multi-outcome game. */
 export const BINARY_ONLY_NOTE = "Applies only to win/lose games; ignored here.";
+
+/**
+ * The sentence a screen reader hears when a run finishes (the table itself is not a live region):
+ * the headline EV per $ wagered next to the theory, and P(profit > 0), per strategy.
+ */
+export function runAnnouncement(columns: readonly { label: string; stats: Record<string, number> }[]): string {
+  const said = (format: StatDef["format"], v: number | undefined) => {
+    const s = formatStat(format, v);
+    return s === "—" ? "not defined (no bets placed)" : s;
+  };
+  const per = (id: string, format: StatDef["format"]) => columns.map((c) => `${c.label} ${said(format, c.stats[id])}`).join(", ");
+  const theory = columns[0]?.stats["evTheory"];
+  return (
+    `Results ready. EV per $ wagered: ${per("evPerWagered", "pct")}` +
+    (theory === undefined ? "." : `; theory ${said("pct", theory)}.`) +
+    ` P(profit > 0): ${per("pProfit", "pct")}. The full table follows.`
+  );
+}
+
+/** What a screen reader hears when a replay is drawn: the same per-strategy lines as the replay legend. */
+export function replayAnnouncement(session: number, lines: readonly string[]): string {
+  return `Replay of session ${int.format(session)}: ${lines.join("; ")}.`;
+}

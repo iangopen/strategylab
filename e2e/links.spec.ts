@@ -31,7 +31,7 @@ test("SUB-PATH: open a #s= link at /strategylab/, run, Copy link; the copied URL
   const problems = watchPage(page);
   await openApp(page, fragmentFor(SCENARIO));
   expect(new URL(page.url()).pathname).toBe(BASE_PATH);
-  await expect(page.getByRole("status")).toContainText("Loaded the scenario from the link.");
+  await expect(page.getByRole("status", { name: "Opened link" })).toContainText("Loaded the scenario from the link.");
   // Opening a link never runs anything.
   await expect(page.getByText("Run a simulation to see results.")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Base bet", exact: true })).toHaveValue("5");
@@ -49,7 +49,7 @@ test("SUB-PATH: open a #s= link at /strategylab/, run, Copy link; the copied URL
   const other = await context.newPage();
   const otherProblems = watchPage(other);
   await other.goto(copied);
-  await expect(other.getByRole("status")).toContainText("Loaded the scenario from the link.");
+  await expect(other.getByRole("status", { name: "Opened link" })).toContainText("Loaded the scenario from the link.");
   await expect(other.getByRole("textbox", { name: "Base bet", exact: true })).toHaveValue("5");
   expect(await ruleJsonIn(other, 1)).toEqual(RULE);
   const decoded = decodeScenarioLink(new URL(copied).hash);
@@ -129,13 +129,13 @@ test("session 7 (5): Copy link is disabled with its reason while a setting is in
 test("session 7 (6): the ready-made links — v1 with Kelly 0, a partially valid link, and a newer-version link", async ({ page }) => {
   const v1 = "#s=eyJ2IjoxLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6MTEwMCwiciI6MTAwMCwibiI6MTAwMDAsInNkIjoxMjM0NSwic3QiOltbImZsYXQiXSxbImtlbGx5Iix7ImFzc3VtZWRXaW5Qcm9iIjowLCJmcmFjdGlvbiI6MC41fV1dfQ";
   await openApp(page, v1);
-  await expect(page.getByRole("status")).toContainText("It was made with an older version (1) and was upgraded.");
+  await expect(page.getByRole("status", { name: "Opened link" })).toContainText("It was made with an older version (1) and was upgraded.");
   await expect(page.getByRole("textbox", { name: "Assumed win probability", exact: true })).toHaveValue("");
   await expect(page.getByRole("textbox", { name: "Kelly fraction", exact: true })).toHaveValue("0.5");
 
   const partial = "#s=eyJ2IjoyLCJnIjoiZXVyb3BlYW4iLCJiIjoxMDAwLCJiYiI6MTAsInRuIjoxLCJzdyI6OTAwLCJyIjoxMDAwLCJuIjoxMDAwMCwic2QiOjEyMzQ1LCJzdCI6W1siZmxhdCJdLFsiZG91YmxlVXBTeXN0ZW0iXSxbImtlbGx5Iix7ImFzc3VtZWRXaW5Qcm9iIjo1fV1dfQ";
   await openApp(page, partial);
-  const status = page.getByRole("status");
+  const status = page.getByRole("status", { name: "Opened link" });
   await expect(status).toContainText("Loaded the scenario from the link, except 3 items:");
   await expect(status.locator("li")).toHaveText([
     'Strategy 2: unknown strategy "doubleUpSystem"; left out',
@@ -157,5 +157,5 @@ test("session 7 (7): Back to an already-loaded link does not load it a second ti
   await expect(page).toHaveURL(/#s=/);
   // The link at this history entry was already applied: the edit must survive.
   await expect(page.getByRole("textbox", { name: "Base bet", exact: true })).toHaveValue("9");
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Opened link" })).toHaveCount(0);
 });

@@ -15,7 +15,7 @@ export function LinkBanner({ notice, onDismiss }: Props) {
   );
   if (notice.kind === "error") {
     return (
-      <section className="panel link-banner is-error" role="alert">
+      <section className="panel link-banner is-error" role="alert" aria-label="Opened link">
         <div className="link-banner-head">
           <strong>Couldn’t load a scenario from this link.</strong>
           {dismiss}
@@ -27,7 +27,7 @@ export function LinkBanner({ notice, onDismiss }: Props) {
   }
   const upgraded = notice.fromVersion < SCENARIO_VERSION ? ` It was made with an older version (${notice.fromVersion}) and was upgraded.` : "";
   return (
-    <section className={`panel link-banner${notice.dropped.length > 0 ? " is-partial" : ""}`} role="status">
+    <section className={`panel link-banner${notice.dropped.length > 0 ? " is-partial" : ""}`} role="status" aria-label="Opened link">
       <div className="link-banner-head">
         <strong>{notice.dropped.length === 0 ? "Loaded the scenario from the link." : `Loaded the scenario from the link, except ${notice.dropped.length === 1 ? "one item" : `${notice.dropped.length} items`}:`}</strong>
         {dismiss}

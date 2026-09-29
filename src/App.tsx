@@ -14,7 +14,7 @@ import { baseUrl, bootFromLocation, canonicalizeAddressBar, noticeOf, pageLinkLo
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls, type CopyStatus } from "./ui/RunControls";
 import { copyBlocker, encodeScenarioLink } from "./share/link";
-import { formatElapsed, instanceLabel } from "./ui/format";
+import { formatElapsed, instanceLabel, runAnnouncement } from "./ui/format";
 import { previewContextOf } from "./ui/rules/preview";
 import { StrategyPicker } from "./ui/StrategyPicker";
 import { applyThemePref, loadThemePref, type ThemePref } from "./ui/theme";
@@ -43,6 +43,7 @@ export default function App() {
   // null until the first run starts: the counter shows "—" rather than claiming a run took "<0.1s".
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
   const [run, setRun] = useState<CompletedRun | null>(null);
   const client = useRef<SimClient | null>(null);
   // UI preference, not scenario state.
@@ -132,14 +133,16 @@ export default function App() {
     setProgress(0);
     setElapsedMs(0);
     setStatus(null);
+    setAnnouncement(null);
     try {
       const request = toSimRequest(snapshot);
       const result = await c.run(request, setProgress);
       const ms = performance.now() - started;
       setElapsedMs(ms);
+      const labels = snapshot.strategies.map((_, i) => instanceLabel(snapshot.strategies, i));
       setRun({
         result,
-        labels: snapshot.strategies.map((_, i) => instanceLabel(snapshot.strategies, i)),
+        labels,
         scenarioJson: JSON.stringify(snapshot),
         request,
         refs: { start: request.session.startBankroll, stopWin: request.session.stopWin, stopLoss: request.session.stopLoss },
@@ -147,6 +150,7 @@ export default function App() {
       setSelectedSession(null);
       setReplay(null);
       setReplayStatus(null);
+      setAnnouncement(runAnnouncement(result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats }))));
       setStatus(`Done: ${result.nSessions.toLocaleString("en-US")} sessions in ${formatElapsed(ms)}.`);
     } catch (err) {
       setStatus(err instanceof CancelledError ? "Cancelled. Previous results (if any) are kept." : `Error: ${(err as Error).message}`);
@@ -208,6 +212,7 @@ export default function App() {
             progress={progress}
             elapsedMs={elapsedMs}
             status={status}
+            announcement={announcement}
             onRun={() => void handleRun()}
             onCancel={() => client.current?.cancel()}
             copyBlocker={linkBlocker}

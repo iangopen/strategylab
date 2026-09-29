@@ -13,6 +13,8 @@ interface Props {
   /** null before the first run. */
   elapsedMs: number | null;
   status: string | null;
+  /** Extra words for screen readers when a run finishes (the results table is not a live region). */
+  announcement: string | null;
   onRun: () => void;
   onCancel: () => void;
   /** Why Copy link is unavailable right now, or null. */
@@ -21,7 +23,7 @@ interface Props {
   onCopyLink: () => void;
 }
 
-export function RunControls({ running, canRun, progress, elapsedMs, status, onRun, onCancel, copyBlocker, copyStatus, onCopyLink }: Props) {
+export function RunControls({ running, canRun, progress, elapsedMs, status, announcement, onRun, onCancel, copyBlocker, copyStatus, onCopyLink }: Props) {
   return (
     <section className="panel run-controls">
       <div className="run-row">
@@ -41,11 +43,16 @@ export function RunControls({ running, canRun, progress, elapsedMs, status, onRu
           </button>
         </span>
       </div>
-      {status && (
-        <div className="status" data-testid="run-status">
-          {status}
-        </div>
-      )}
+      {/* Mounted before any text arrives, so screen readers announce each change (a region that
+          appears together with its text is often not read). */}
+      <div role="status" aria-atomic="true" data-testid="run-announcer">
+        {status && (
+          <div className="status" data-testid="run-status">
+            {status}
+          </div>
+        )}
+        {announcement && <span className="sr-only"> {announcement}</span>}
+      </div>
       {!canRun && !running && <div className="error">Fix the highlighted fields to run.</div>}
       {copyBlocker && (
         <div id="copy-link-why" className="help">

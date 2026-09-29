@@ -132,6 +132,8 @@ button.link { border: none; background: none; color: var(--accent); padding: 0; 
 .run-row progress { flex: 1; min-width: 120px; height: 12px; }
 .mono { font-variant-numeric: tabular-nums; min-width: 4ch; }
 .status { margin-top: 8px; font-size: 0.9rem; }
+/* Read by screen readers, not shown. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 .stale { color: var(--error); }
 
 .table-wrap { overflow-x: auto; }

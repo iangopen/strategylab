@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Replay } from "../../engine/replay";
-import { formatStat } from "../format";
+import { formatStat, replayAnnouncement } from "../format";
 import { effectiveTheme, useThemeVersion } from "../theme";
 import {
   countTick,
@@ -61,7 +61,14 @@ export const ReplayChart = memo(function ReplayChart({ nSessions, labels, refs, 
         </button>
       </form>
       {draft !== "" && !valid && <div className="error">Enter a whole number from 0 to {nSessions - 1}.</div>}
-      {status && <div className="status">{status}</div>}
+      <div role="status" aria-atomic="true" data-testid="replay-announcer">
+        {status && <div className="status">{status}</div>}
+        {!status && replay && (
+          <span className="sr-only">
+            {replayAnnouncement(replay.session, replay.strategies.map((s, k) => `${labels[k] ?? s.strategyId}: ${endText(s.endReason, s.rounds)}, final bankroll ${formatStat("money", s.finalBankroll)}`))}
+          </span>
+        )}
+      </div>
       {!replay && !status && <p className="help">Pick a session number, or click a thin line in the bankroll chart above.</p>}
       {replay && layout && (
         <>
