@@ -35,7 +35,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: **`iangopen/strategylab`** (the account was renamed during session 10; `origin` points at `https://github.com/iangopen/strategylab.git` since session 11). GitHub redirects the old repo and git URLs, but NOT the old Pages address. **Public**, intentionally, since session 9. Product name: **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." (session 14; it was "Betting Lab (working name)"). Used in the README, `<title>`, `og:title`, the repo description and the app header. **License: MIT** (`LICENSE`, © 2026 Ian Gopen). gh CLI is authenticated.
+- GitHub: **`iangopen/strategylab`** (the account was renamed during session 10; `origin` points at `https://github.com/iangopen/strategylab.git` since session 11). GitHub redirects the old repo and git URLs, but NOT the old Pages address. **Public**, intentionally, since session 9. Product name: **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." (session 14; the earlier placeholder was "Betting Lab"). Used in the README, `<title>`, `og:title`, the repo description and the app header. **License: MIT** (`LICENSE`, © 2026 Ian Gopen). gh CLI is authenticated.
 - **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/**. **Links made with the pre-rename Pages address are permanently broken:** GitHub Pages does not redirect after an account rename, so they return 404 forever. Re-share such links with the new address (the `#s=` fragment is unchanged).
   - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
   - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
@@ -141,6 +141,22 @@ All roadmap sessions are done and verified: 719 unit/stats tests pass (5 skipped
 - **Local gotcha:** if Playwright lists far fewer than 43 tests, check for OneDrive cloud-file reparse points left in the working tree (Node sees them as symlinks and skips them); see STATUS 133.
 
 Only record in STATUS what was actually verified.
+
+## Docs and disclosures (session 16, 2026-09-29)
+
+Verified this session (docs/history.md STATUS 134-140):
+- **README** follows the portfolio reference structure. Every number in it maps to a file or to a run from session 16 (the list is in STATUS 136). It describes scale (sessions and rounds per run), never speed. It has no test count other than the one `npm run test` and `npx playwright test --list` print; **update those two numbers (719 Vitest, 44 Playwright in 10 spec files) when tests are added.**
+- **Privacy:** no PRIVACY.md, because nothing leaves the browser: the only requests are same-origin GETs for the app's own files, no cookies, and one localStorage key (`betting-lab.theme`, kept under its old name so saved themes survive). The README says so in one line. Adding any network call, storage or analytics means writing a PRIVACY.md first.
+- **Disclaimer:** the footer line stays. A second line under the tagline says: adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** with a link to https://www.ncpgambling.org/help-treatment/. NCPG's own page lists that number (checked in a browser on 2026-09-29; curl gets a 403 from its bot protection). The README carries the same line. `e2e/app.spec.ts` checks it.
+- **Credits:** README table (React/react-dom/scheduler, Comlink, mulberry32 CC0, the Okabe-Ito palette); full texts in the generated `third-party-licenses.txt`. The favicon was the Vite logo from the scaffold; it is now an original icon.
+- **LICENSE** is GitHub's MIT text with only year and name ("2026", "Ian Gopen"); `package.json` has `"license": "MIT"`, the description and the author.
+- **GitHub About:** "A Monte Carlo simulator that compares betting strategies on identical random outcomes." (86 characters), website = the live URL, 8 topics.
+
+Only Ian can supply (nothing was published as a placeholder):
+- Real usage numbers (visitors, users). The README has none.
+- A personal one-line pitch. The README uses the product subtitle instead.
+- Whether to name a non-US helpline as well. Only the US line is given.
+- Whether 1-800-MY-RESET is the number he wants (the session prompt suggested 1-800-GAMBLER; NCPG now lists MY-RESET).
 
 ## Still open
 
