@@ -53,6 +53,8 @@ test("keyboard only: Run, then the results and a replay are announced through st
   await expect(replayRegion).toHaveText(expectedReplay);
   console.log(`The replay region reads: ${expectedReplay}`);
 
+  // The fan canvas's mouse-only click-to-replay names its keyboard route.
+  await expect(page.getByTestId("fan-canvas").first()).toHaveAttribute("aria-label", /by keyboard, type a session number under "Replay one session"/);
   expect(problems).toEqual([]);
 });
 

@@ -253,7 +253,7 @@ const FanPanel = memo(function FanPanel({ index, label, series, x, y, fullX, zoo
           onPointerCancel={() => (drag.current = null)}
           onPointerLeave={clearHover}
           onDoubleClick={() => onZoom(null)}
-          role="img" aria-label={`${label}: bankroll over time, percentile bands and 50 sample sessions`} />
+          role="img" aria-label={`${label}: bankroll over time, percentile bands and 50 sample sessions. Clicking a line replays that session; by keyboard, type a session number under "Replay one session".`} />
         <canvas ref={overlay} aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />
       </div>
       <div className="chart-readout">
