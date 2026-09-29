@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { licenseNotices } from './scripts/licenseNotices.ts'
 
 // The public base path comes from VITE_BASE (default "/"). GitHub Pages serves the app under
 // "/strategylab/" (npm run build:pages, and CI's deploy and E2E builds); a host at the domain
@@ -11,11 +12,14 @@ if (!base.startsWith('/') || !base.endsWith('/')) {
   throw new Error(`VITE_BASE must start and end with "/" (got "${base}")`)
 }
 
+// Third-party licence notices, served as <base>third-party-licenses.txt (scripts/licenseNotices.ts).
+const notices = licenseNotices()
+
 // https://vite.dev/config/
 export default defineConfig({
   base,
-  plugins: [react()],
-  worker: { format: 'es' },
+  plugins: [react(), notices.main],
+  worker: { format: 'es', plugins: () => [notices.worker] },
   // Two Vitest projects (session 13). "unit": fast tests, full parallelism, the 5 s default timeout.
   // "stats": Monte Carlo-heavy tests (*.stats.test.ts: invariant tables, equivalence, fuzz, goldens,
   // frequency and property tests). They run AFTER unit (groupOrder), on a few workers so they do not

@@ -244,7 +244,9 @@ export default function App() {
           )}
         </div>
       </main>
-      <footer className="help">Educational simulation. No real money, no casino links.</footer>
+      <footer className="help">
+        Educational simulation. No real money, no casino links. <a href={`${import.meta.env.BASE_URL}third-party-licenses.txt`}>Third-party licences</a>
+      </footer>
     </div>
   );
 }
