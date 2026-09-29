@@ -2,6 +2,9 @@
   "name": "strategylab",
   "private": true,
   "version": "0.0.0",
+  "description": "A Monte Carlo simulator for betting strategies.",
+  "license": "MIT",
+  "author": "Ian Gopen",
   "type": "module",
   "scripts": {
     "dev": "vite",
