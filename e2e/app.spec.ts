@@ -108,3 +108,21 @@ test("fan hover: the crosshair round and the readout follow the mouse; leaving c
   await expect(fan).not.toHaveAttribute("data-hover-round", /.*/);
   await expect(readout).toHaveText("Hover for percentile and sample-path values.");
 });
+
+test("the adults-only disclaimer and helpline sit near the top, above Run, and the footer stays", async ({ page }) => {
+  await openApp(page);
+  const disclaimer = page.getByTestId("disclaimer");
+  await expect(disclaimer).toBeVisible();
+  await expect(disclaimer).toContainText("An educational simulation for adults (18+). No real money is involved");
+  await expect(disclaimer).toContainText("call or text 1-800-MY-RESET, the US National Problem Gambling Helpline");
+  const link = disclaimer.getByRole("link", { name: "ncpgambling.org" });
+  await expect(link).toHaveAttribute("href", "https://www.ncpgambling.org/help-treatment/");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  const top = (await disclaimer.boundingBox())!.y;
+  const run = (await page.getByRole("button", { name: "Run", exact: true }).boundingBox())!.y;
+  expect(top).toBeLessThan(run);
+  await expect(page.locator("footer")).toContainText("Educational simulation. No real money, no casino links.");
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect(disclaimer).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});

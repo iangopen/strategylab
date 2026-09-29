@@ -198,6 +198,11 @@ export default function App() {
           In a game with a house edge, every bet loses <em>edge × stake</em> on average. No betting strategy changes that; it only
           reshapes the spread of outcomes. Compare strategies here on identical simulated outcomes.
         </p>
+        <p className="disclaimer" data-testid="disclaimer">
+          An educational simulation for adults (18+). No real money is involved, and nothing here is betting advice. If gambling
+          is causing problems for you or someone you know, call or text 1-800-MY-RESET, the US National Problem Gambling Helpline
+          (<a href="https://www.ncpgambling.org/help-treatment/" target="_blank" rel="noopener noreferrer">ncpgambling.org</a>).
+        </p>
       </header>
       {linkNotice && <LinkBanner notice={linkNotice} onDismiss={() => setLinkNotice(null)} />}
       <main className="layout">
