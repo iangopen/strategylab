@@ -13,7 +13,7 @@ In a game with a house edge, every bet loses edge × stake on average, whatever 
 - **8 built-in strategies:** Flat, Martingale, Paroli, D'Alembert, Fibonacci, Labouchère, Oscar's Grind and Kelly. Up to 8 strategies run side by side, and you can write your own as a rule.
 - **Scale:** one run simulates up to 1,000,000 sessions of up to 1,000,000 rounds each. Every strategy plays the same random outcomes in each session.
 - **Games:** European and American roulette, a fair coin, any win/lose game, sports odds (American or decimal, two-way market, vig removed proportionally), or a game with up to 12 outcomes and their own payouts.
-- **Results:** EV per $ wagered next to its theoretical value and standard error, P(profit), P(bust), final-bankroll percentiles, drawdowns and losing streaks.
+- **Results:** EV per $ wagered next to its theoretical value and standard error; P(profit) and P(bust), each with a 95% Wilson interval; how many rounds busted sessions lasted (median and 10th percentile); final-bankroll percentiles; drawdowns, including how often a session fell to half its starting bankroll; and losing streaks.
 - **Charts and replay:** percentile bands over time, final-bankroll histograms, and a replay of any one session for every strategy. Every panel of a chart shares the same axes.
 - **Links:** Copy link puts the whole scenario, custom rules included, in the URL.
 
@@ -47,7 +47,7 @@ The rule and link code contain no `eval`, `new Function` or dynamic `import`, an
 
 ## Testing
 
-- **Unit and statistical tests:** `npm run test` runs 719 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Five more (benchmarks and fixture writers) are opt-in.
+- **Unit and statistical tests:** `npm run test` runs 740 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Five more (benchmarks and fixture writers) are opt-in.
 - **Tolerances come from the data.** A statistical test passes when the measured value is within 4 standard errors of the expected one, with the standard error computed from the simulated sessions. Seeds are fixed, so each run gives the same numbers.
 - **The EV invariant:** for every strategy, EV per $ wagered must equal −edge. [`invariant.stats.test.ts`](src/engine/invariant.stats.test.ts) checks 9 strategies (the 8 built-ins and a custom rule) on 8 games with 20,000 sessions each: house-edge, fair and player-edge games, sports odds and multi-outcome games. The largest deviation is 2.78 standard errors. Kelly refuses to bet on the two house-edge multi-outcome games, and the test asserts that instead.
 - **A bug the tolerance caught:** before the sub-cent carry, a flat $5 bettor at −110 odds measured 5.29 standard errors from theory over 100,000 sessions. With the carry it measures 0.55 ([`runner.regression.stats.test.ts`](src/engine/runner.regression.stats.test.ts)).
