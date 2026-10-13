@@ -1,6 +1,6 @@
 # StrategyLab: an author's guide to the codebase
 
-This guide is for reading the code, not for changing the rules. The rules live in `CLAUDE.md`, the detailed specs in `docs/spec.md`, and the record of what was verified and when in `docs/history.md`. Where this guide and those files disagree, they win. Line numbers were checked on 2026-10-13 (commit `b14f63d`); they drift as code changes, so search for the named function if a number is off.
+This guide is for reading the code, not for changing the rules. The rules live in `CLAUDE.md`, the detailed specs in `docs/spec.md`, and the record of what was verified and when in `docs/history.md`. Where this guide and those files disagree, they win. Line numbers were checked on 2026-10-13 (commit `b14f63d`, and again after the session 18 changes); they drift as code changes, so search for the named function if a number is off.
 
 Suggested reading plan: evening 1, sections 1 and 2. Evening 2, section 3 (the core ideas), with the files open beside it. Evening 3, sections 4 and 5, then run the tests once and read their output.
 
@@ -77,7 +77,7 @@ Follow this with the files open. It is the single most useful thing to understan
 5. **The worker turns data back into strategies.** `api.run` (`src/worker/sim.worker.ts:25`) calls `resolveStrategies` (`src/worker/resolve.ts:13`): built-ins are looked up in the registry, and custom rules are validated and compiled right here (`src/worker/resolve.ts:17`). A bad rule fails the run with a readable message.
 6. **Monte Carlo loops over sessions.** `runMonteCarlo` (`src/engine/montecarlo.ts:59`) validates its inputs, then for each session `i` computes one seed (`src/engine/montecarlo.ts:94`) and runs EVERY strategy on that same seed (`src/engine/montecarlo.ts:95-119`). The first 2,000 sessions get an observer that records percentile bands; the first 50 also record a downsampled path for the spaghetti lines (`src/engine/montecarlo.ts:101-114`). Every other session pays only an `if` check.
 7. **One session is played.** `runSession` (`src/engine/runner.ts:60`) creates the random generator and hands off to `runSessionWithRng` (`src/engine/runner.ts:92`). Each round: check the stop conditions, ask the strategy for a bet, apply table rules, draw ONE random number, pay out, and tell the strategy what happened (`src/engine/runner.ts:121-169`).
-8. **Each session's result is folded into an accumulator.** `addSession` (`src/engine/stats/accumulator.ts:56`) adds running sums and writes one number per session into three typed-array columns (final bankroll, max drawdown, longest losing streak). Paths are never kept.
+8. **Each session's result is folded into an accumulator.** `addSession` (`src/engine/stats/accumulator.ts:72`) adds running sums and writes one number per session into four typed-array columns (final bankroll, max drawdown, longest losing streak, and rounds played if the session busted). Paths are never kept.
 9. **Progress is reported about every 2%.** `src/engine/montecarlo.ts:120-126`. The callback is the proxied function from step 4, so each call is a message back to the page, which updates the progress bar.
 10. **Statistics are computed once at the end.** Every registered stat runs on each strategy's accumulator (`src/engine/montecarlo.ts:141`). The histogram uses one set of bins for all strategies (`src/engine/montecarlo.ts:131`).
 11. **The result goes back without copying.** `Comlink.transfer(result, resultTransferables(result))` (`src/worker/sim.worker.ts:30`) hands the typed arrays' memory to the page instead of copying it. The per-session columns are not in the result at all; they never leave the worker.
@@ -96,6 +96,8 @@ Follow this with the files open. It is the single most useful thing to understan
 **Where.** `src/engine/rng.ts`. `mulberry32` (line 15) is a small, fast 32-bit generator: give it a seed and it returns a function that produces numbers in [0, 1). `splitmix32` (line 7) is a hash that scrambles a number thoroughly. `sessionSeed` (line 29) combines them: session `i`'s seed is `splitmix32(masterSeed ^ splitmix32(i))`.
 
 **Why.** Two reasons. First, reproducibility: the same seed always gives the same run, down to the last cent, so a shared link reproduces the exact numbers someone else saw, and a test can assert exact values. Second, independence between sessions: the obvious choice, `masterSeed + i`, is a known trap with mulberry32, because seeds that differ by one produce correlated streams. Hashing the index first spreads neighbouring sessions across the whole seed space.
+
+**Is the generator itself any good?** `src/engine/rng.stats.test.ts` runs a chi-square goodness-of-fit test: 1,000,000 draws in 100 equal bins, compared with the 1-in-10,000 critical value for 99 degrees of freedom (160.17). One long mulberry32 stream scores 74.2, and the first draw across 1,000,000 consecutive session seeds scores 92.2; both are well inside. Two deliberately broken stubs (`u^1.05`, and one that never lands in one bin) score 2,530 and 20,516, which proves the test can fail. What it does not check: independence between successive draws. That is covered indirectly, by the invariant and CRN tests in 3.2 and 3.8.
 
 **How it is enforced.** `Math.random` is banned in the engine, and a test scans every engine file for it (`src/engine/isolation.test.ts:15`). The same test bans React and DOM globals, which keeps the engine runnable in Node tests and in the worker alike.
 
@@ -128,7 +130,7 @@ Follow this with the files open. It is the single most useful thing to understan
 - **Only data crosses the boundary.** Strategies are objects with functions, which cannot be posted to a worker. So the request carries a registry id or rule JSON, and the worker rebuilds the strategy (`src/worker/resolve.ts:10-26`). A side effect is security: the worker validates every rule itself instead of trusting the page.
 - **Transfer, not copy.** The result's typed arrays are transferred (`src/engine/montecarlo.ts:158-165`), which moves their memory instead of copying it.
 - **Cancel = terminate and respawn** (`src/worker/client.ts:58`), because a synchronous loop cannot be interrupted by a message.
-- **Memory does not grow with run length.** Per session the engine keeps three numbers per strategy. Bands keep only checkpoint values for 2,000 sessions, and sample paths are downsampled to at most 1,000 points (`MAX_PATH_POINTS`, `src/engine/montecarlo.ts:18`). The owner rejected storing full paths in session 3: 2,000 full paths at 1,000,000 rounds would be about 16 GB (`docs/history.md`, Decisions).
+- **Memory does not grow with run length.** Per session the engine keeps four numbers per strategy. Bands keep only checkpoint values for 2,000 sessions, and sample paths are downsampled to at most 1,000 points (`MAX_PATH_POINTS`, `src/engine/montecarlo.ts:18`). The owner rejected storing full paths in session 3: 2,000 full paths at 1,000,000 rounds would be about 16 GB (`docs/history.md`, Decisions).
 
 ### 3.5 The rule compiler and its safety limits
 
@@ -174,11 +176,13 @@ Opening a link never starts a simulation. **Tests:** `src/share/malicious.test.t
 
 ### 3.7 Statistics as plug-ins
 
-**Where.** `src/engine/stats/registry.ts:57` (`STATS`, the ordered list the results table renders), `src/engine/stats/accumulator.ts` (the single-pass collector), `src/engine/stats/quantile.ts:12` (`quantileSorted`, the one percentile function).
+**Where.** `src/engine/stats/registry.ts:71` (`STATS`, the ordered list the results table renders), `src/engine/stats/accumulator.ts` (the single-pass collector), `src/engine/stats/quantile.ts:12` (`quantileSorted`, the one percentile function).
 
 **Why.** Adding a statistic should be one line, not a UI change. The table loops over `STATS` (`src/ui/ResultsTable.tsx:44`), so a new entry appears automatically, and the E2E helper compares every row to the engine. All percentiles go through one function so they are consistent (the "type 7" definition, the same as numpy's default).
 
-The headline: `evPerWagered` and its standard error `evPerWageredSE` (`registry.ts:7` and `registry.ts:13`). EV per $ is a ratio (total profit ÷ total wagered), so its SE uses the delta method from running sums (`sumProfitSq`, `sumWageredSq`, `sumProfitWagered` in the accumulator) rather than storing every session.
+The headline: `evPerWagered` and its standard error `evPerWageredSE` (`registry.ts:8` and `registry.ts:14`). EV per $ is a ratio (total profit ÷ total wagered), so its SE uses the delta method from running sums (`sumProfitSq`, `sumWageredSq`, `sumProfitWagered` in the accumulator) rather than storing every session.
+
+**Risk metrics with honest uncertainty** (session 18). P(profit > 0) and P(bust) each get a 95% interval from `wilsonInterval` (`src/engine/stats/interval.ts:11`). The Wilson score interval is used instead of the textbook p ± 1.96·SE because it stays inside [0, 1] and still gives a real upper bound when nothing happened: 0 busts in 10 sessions gives [0%, 27.8%], not [0%, 0%]. "Rounds to bust" (median and 10th percentile) looks only at sessions that busted. It uses a fourth per-session column, `bustRounds`, which holds the rounds played for a busted session and NaN for every other one. Sorting puts the NaNs last, so the first `bustCount` sorted values are exactly the busted sessions (`sortedBustRounds`, `src/engine/stats/accumulator.ts:102`), and the percentile still goes through `quantileSorted`. "P(max drawdown ≥ 50% of start)" reuses the drawdown column. In the default run these show the core contrast in a new way: Martingale ×2 busts in 17.07% of sessions (95% interval 16.35% to 17.82%), and half of those busts happen by round 14; Flat's busts come at a median of round 874.
 
 ### 3.8 The statistical tests and their tolerances
 
@@ -190,11 +194,11 @@ A Monte Carlo result is never exactly the theoretical value; it wobbles. The que
 - `evPerWageredWithSE` (`src/engine/testUtils.ts:188`) computes the ratio and its SE from per-session samples.
 - `describeEvInvariant` (`src/engine/testUtils.ts:159`) is the per-strategy check, on three games including a positive-edge one (so a sign bug cannot hide), 20,000 sessions each (`INVARIANT_SESSIONS`, `testUtils.ts:148`).
 - `src/engine/invariant.stats.test.ts` is the full table: 8 built-ins plus a custom rule on 8 games, including sports odds, multi-outcome tickets and a game with pushes. The assertion is at line 99.
-- `src/engine/strategies/martingale.stats.test.ts:12` compares Martingale's bust rate with the exact formula `(1 − p)^k`.
+- `src/engine/strategies/martingale.stats.test.ts:13` compares Martingale's bust rate with the exact formula `(1 − p)^k`, both with a 4 SE z-check and by requiring a Wilson interval at z = 4 to contain it.
 
 **What the house rules forbid.** Raising the session count or widening the tolerance to make a test pass. If an invariant fails, the engine is presumed wrong. This rule earned its keep: the cents-rounding bias in 3.3 was found because a test sat at about 2 SE and the session did not loosen it.
 
-**Exact tests sit beside the statistical ones.** Goldens catch any unintended change bit for bit: `src/engine/runner.golden.stats.test.ts` (sessions recorded before the carry existed) and `src/engine/montecarlo.golden.stats.test.ts` (whole runs recorded before the band schedule changed; compared at line 101). `src/engine/runner.carry.stats.test.ts:91` checks the carry against exact fractions in BigInt arithmetic after every round.
+**Exact tests sit beside the statistical ones.** Goldens catch any unintended change bit for bit: `src/engine/runner.golden.stats.test.ts` (sessions recorded before the carry existed) and `src/engine/montecarlo.golden.stats.test.ts` (whole runs recorded before the band schedule changed; compared at line 111, where stats registered after the capture are checked separately). `src/engine/runner.carry.stats.test.ts:91` checks the carry against exact fractions in BigInt arithmetic after every round.
 
 **Two test projects.** `vite.config.ts:28-38` defines `unit` (fast, Vitest's 5-second default) and `stats` (`*.stats.test.ts`, 2 workers, one 120-second timeout, run after `unit`). Heavy tests go in a `.stats.test.ts` file; no test sets its own timeout.
 
@@ -224,7 +228,7 @@ Spec: `docs/spec.md` "How to add a strategy", "Strategy specs", "Strategy test k
 1. If it needs data the accumulator does not collect, add it there (a running sum, or a new per-session column).
 2. Add a `StatDef` to `STATS` in `src/engine/stats/registry.ts` at the row where it should appear. Percentiles must use `quantileSorted(sortedColumn(acc, key), p)`. Return `NaN` for "undefined"; the table shows a dash.
 3. Test it on a hand-built accumulator in `src/engine/stats/stats.test.ts`, and update the row-order test there.
-4. Watch out: `src/engine/montecarlo.golden.stats.test.ts:101` compares the whole `stats` object of each strategy, so a new stat will fail that golden. Do not regenerate the golden to fix it (that would also hide changes to existing stats); change the comparison to cover the stored keys and assert the new key separately.
+4. Add the new id to `STATS_ADDED_AFTER_CAPTURE` in `src/engine/montecarlo.golden.stats.test.ts:35`. The golden compares every stored stat exactly (line 111) and requires the extra keys to be exactly that list, so a new stat fails the golden until it is listed. Do not regenerate the golden instead: that would also accept any change to the existing stats.
 Spec: `docs/spec.md` "How to add a stat".
 
 ### Add a game
@@ -247,7 +251,10 @@ All commands work in PowerShell.
 | `npm run build` | Strict type check of app, config and E2E specs, then the production build. The gate before any push. |
 | `npm run lint` | oxlint. |
 | `npm run e2e` | Playwright: builds under `/strategylab/`, serves on port 4180, runs `e2e/*.spec.ts`. Run `npx playwright install chromium` once per machine. |
+| `npm run bench` | One fixed, seeded run, timed (`src/engine/bench.stats.test.ts`; skipped by `npm run test`). |
 | `npx vitest run src/engine/runner.test.ts` | One test file. Add `-t "draws"` to filter by test name. |
+
+**Benchmark: one machine's result, not a guarantee.** `npm run bench` runs the app's default scenario (European roulette, $1,000 bankroll, $10 base bet, stop at $1,100, 1,000 max rounds, Flat and Martingale ×2) at 100,000 sessions with seed 12345: a warm-up, then three timed runs. It checks that the three runs give identical results. On 2026-10-13 on an Intel Core i7-12700KF (20 logical cores, 16 GB, Windows, Node 24.14.1), in Node on a single thread, with other work possibly running on the machine, it printed: runs of 2.45 s, 2.82 s and 2.70 s, a median of **2.70 s**, so **37,063 sessions per second** (each played by both strategies), or about 21.9 million rounds per second. The browser runs the same code in a worker; in a focused tab it measured within about 10% of Node (`docs/history.md` STATUS 77). Expect different numbers on another machine, and use the command rather than these figures when comparing changes.
 
 ### What each suite protects
 
@@ -259,7 +266,8 @@ All commands work in PowerShell.
 | EV invariant | `invariant.stats.test.ts`, `strategies/*.stats.test.ts`, `rules/fuzz.stats.test.ts` | the engine's money flow (payouts, carry, wagered totals). Presumed an engine bug, never a tolerance problem |
 | Goldens | `runner.golden.stats.test.ts`, `montecarlo.golden.stats.test.ts`, `src/v3links.golden.test.ts` | any unintended change to results or to how old links decode |
 | Rule compiler equivalence | `rules/equivalence.stats.test.ts`, `rules/compile.test.ts`, `rules/validate.test.ts` | the compiler or validator |
-| Stats | `stats/stats.test.ts`, `stats/quantile.test.ts`, `stats/*.stats.test.ts` | a formula, percentile definition, or table row order |
+| Stats | `stats/stats.test.ts`, `stats/quantile.test.ts`, `stats/interval.test.ts`, `stats/*.stats.test.ts` | a formula, percentile or interval definition, or table row order |
+| Generator quality | `src/engine/rng.test.ts`, `src/engine/rng.stats.test.ts` | the seed formula, or a generator whose outputs are not uniform (chi-square) |
 | Links | `src/share/*.test.ts` | encoding, size budget, migration, hostile input handling |
 | Chart maths | `src/ui/charts/adapters.stats.test.ts` | shared scales, zoom, label placement |
 | Tone | `src/ui/sportsReadout.test.ts:45-64` | banned words (picks, sharp, value bet, guarantee, winning system, sportsbook and lottery names, URLs) in the sports and outcome-editor sources |
