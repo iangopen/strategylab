@@ -141,7 +141,7 @@ All roadmap sessions are done and verified (test counts: see "Docs and disclosur
 - **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep them always mounted. Select status regions by role AND name in specs (the link banner is "Opened link").
 - **Licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
 - `.claude/settings.local.json` is git-ignored here.
-- **Session 18 (STATUS 145-152):** risk rows (Wilson 95% intervals on P(profit) and P(bust), rounds to bust over busted sessions, P(drawdown ≥ 50%)); the Monte Carlo golden lists stats added after its capture in `STATS_ADDED_AFTER_CAPTURE` (add new ids there; never regenerate the golden); an RNG chi-square test (`rng.stats.test.ts`); `npm run bench`.
+- **Session 18 (STATUS 145-154):** risk rows (Wilson 95% intervals on P(profit) and P(bust), rounds to bust over busted sessions, P(drawdown ≥ 50%)); the Monte Carlo golden lists stats added after its capture in `STATS_ADDED_AFTER_CAPTURE` (add new ids there; never regenerate the golden); an RNG chi-square test (`rng.stats.test.ts`); `npm run bench`.
 - **Local gotcha:** if Playwright lists far fewer than 44 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
 
 Only record in STATUS what was actually verified.
