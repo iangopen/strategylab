@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GAME_PRESETS } from "../games";
 import { runMonteCarlo } from "../montecarlo";
+import { wilsonInterval } from "../stats/interval";
 import { describeEvInvariant, sessionConfig } from "../testUtils";
 import { martingale } from "./martingale";
 
@@ -38,6 +39,16 @@ describe("martingale: analytic one-cycle bust probability", () => {
         expect(se).toBeGreaterThan(0);
         expect(Math.abs(measured - expected)).toBeLessThan(4 * se);
         expect(counts.stopWin).toBe(n - counts.insufficientFunds);
+        // The interval method on the same run: a Wilson interval at z = 4 (the 4 SE house rule) must
+        // contain the exact bust probability. Fails if the interval is mis-centred or too narrow.
+        const ci = wilsonInterval(counts.insufficientFunds, n, 4);
+        console.log(`[martingale analytic] Wilson z=4: [${ci.low.toFixed(5)}, ${ci.high.toFixed(5)}] contains ${expected.toFixed(5)}`);
+        expect(ci.low).toBeLessThanOrEqual(expected);
+        expect(ci.high).toBeGreaterThanOrEqual(expected);
+        // The run's own 95% rows are the same interval at z = 1.96.
+        const stats = r.perStrategy[0]!.stats;
+        expect(stats.pBustLow).toBe(wilsonInterval(counts.insufficientFunds, n).low);
+        expect(stats.pBustHigh).toBe(wilsonInterval(counts.insufficientFunds, n).high);
       });
     }
   }

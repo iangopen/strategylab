@@ -1,5 +1,6 @@
 import { END_REASONS, type EndReason } from "../types";
-import { sortedColumn, type Accumulator, type ColumnKey } from "./accumulator";
+import { bustCount, sortedBustRounds, sortedColumn, type Accumulator, type ColumnKey } from "./accumulator";
+import { wilsonInterval } from "./interval";
 import { quantileSorted } from "./quantile";
 import type { RunContext, StatDef } from "./types";
 
@@ -35,10 +36,23 @@ function columnSum(acc: Accumulator, key: ColumnKey): number {
   return s;
 }
 
-/** Fraction of sessions ending strictly above the starting bankroll (final === start is NOT profit). */
-function pProfit(acc: Accumulator): number {
+/** Sessions ending strictly above the starting bankroll (final === start is NOT profit). */
+function profitCount(acc: Accumulator): number {
   let k = 0;
   for (let i = 0; i < acc.count; i++) if (acc.finals[i]! > acc.startBankroll) k++;
+  return k;
+}
+
+/** Wilson 95% bounds on the proportion of sessions counted by `count`. NaN when there are no sessions. */
+const interval = (count: (acc: Accumulator) => number, bound: "low" | "high") => (acc: Accumulator) => wilsonInterval(count(acc), acc.count)[bound];
+
+/** Rounds-to-bust percentile over the busted sessions only; NaN when no session busted. */
+const bustRoundsPct = (p: number) => (acc: Accumulator) => quantileSorted(sortedBustRounds(acc), p);
+
+/** Fraction of sessions whose max drawdown reached at least half the starting bankroll (exactly half counts). */
+function pDrawdownHalf(acc: Accumulator): number {
+  let k = 0;
+  for (let i = 0; i < acc.count; i++) if (2 * acc.maxDrawdowns[i]! >= acc.startBankroll) k++;
   return frac(k, acc);
 }
 
@@ -61,8 +75,14 @@ export const STATS: readonly StatDef[] = [
   { id: "evTheory", label: "Theoretical EV per $ (−edge)", format: "pct", compute: (_a, ctx) => -ctx.edge },
   { id: "evZ", label: "z vs theory", format: "ratio", compute: evZ },
   // Risk
-  { id: "pProfit", label: "P(profit > 0)", format: "pct", compute: pProfit },
-  { id: "pBust", label: "P(bust: ruin or couldn't cover bet)", format: "pct", compute: (a) => frac(a.endReasons.ruin + a.endReasons.insufficientFunds, a) },
+  { id: "pProfit", label: "P(profit > 0)", format: "pct", compute: (a) => frac(profitCount(a), a) },
+  { id: "pProfitLow", label: "P(profit > 0), 95% interval low", format: "pct", compute: interval(profitCount, "low") },
+  { id: "pProfitHigh", label: "P(profit > 0), 95% interval high", format: "pct", compute: interval(profitCount, "high") },
+  { id: "pBust", label: "P(bust: ruin or couldn't cover bet)", format: "pct", compute: (a) => frac(bustCount(a), a) },
+  { id: "pBustLow", label: "P(bust), 95% interval low", format: "pct", compute: interval(bustCount, "low") },
+  { id: "pBustHigh", label: "P(bust), 95% interval high", format: "pct", compute: interval(bustCount, "high") },
+  { id: "bustRoundsMedian", label: "Median rounds to bust (busted sessions only)", format: "ratio", compute: bustRoundsPct(0.5) },
+  { id: "bustRoundsP10", label: "p10 rounds to bust (busted sessions only)", format: "ratio", compute: bustRoundsPct(0.1) },
   { id: "pHitWin", label: "P(hit win target)", format: "pct", compute: (a, ctx) => (ctx.config.stopWin === null ? NaN : frac(a.endReasons.stopWin, a)) },
   // Final bankroll
   { id: "finalP5", label: "Final bankroll p5", format: "money", compute: pct("finals", 0.05) },
@@ -74,6 +94,7 @@ export const STATS: readonly StatDef[] = [
   // Pain
   { id: "meanMaxDrawdown", label: "Mean max drawdown", format: "money", compute: (a) => mean(columnSum(a, "maxDrawdowns"), a) },
   { id: "p95MaxDrawdown", label: "p95 max drawdown", format: "money", compute: pct("maxDrawdowns", 0.95) },
+  { id: "pDrawdownHalf", label: "P(max drawdown ≥ 50% of start)", format: "pct", compute: pDrawdownHalf },
   { id: "meanLongestStreak", label: "Mean longest losing streak", format: "ratio", compute: (a) => mean(columnSum(a, "longestStreaks"), a) },
   { id: "maxLongestStreak", label: "Max longest losing streak", format: "int", compute: pct("longestStreaks", 1) },
   // Volume

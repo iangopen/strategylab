@@ -2,7 +2,17 @@ import { END_REASONS, type EndReason, type SessionResult } from "../types";
 import { sortedCopy } from "./quantile";
 
 /** Per-session columns kept for exact percentiles. One number per session each. */
-export type ColumnKey = "finals" | "maxDrawdowns" | "longestStreaks";
+export type ColumnKey = "finals" | "maxDrawdowns" | "longestStreaks" | "bustRounds";
+
+/** End reasons that count as a bust (the pBust stat counts the same two). */
+export function isBust(r: EndReason): boolean {
+  return r === "ruin" || r === "insufficientFunds";
+}
+
+/** Number of busted sessions so far. */
+export function bustCount(acc: Accumulator): number {
+  return acc.endReasons.ruin + acc.endReasons.insufficientFunds;
+}
 
 /**
  * Single-pass summary of all sessions for one strategy: running sums plus one Float64Array
@@ -24,6 +34,11 @@ export interface Accumulator {
   readonly finals: Float64Array;
   readonly maxDrawdowns: Float64Array;
   readonly longestStreaks: Float64Array;
+  /**
+   * Rounds played by a busted session (ruin or insufficientFunds); NaN for every other session.
+   * Sorting puts the NaNs last, so the first bustCount(acc) sorted values are the busted sessions.
+   */
+  readonly bustRounds: Float64Array;
   /** Sorted copies, built at most once per column (see sortedColumn). */
   sortedCache: Partial<Record<ColumnKey, Float64Array>>;
 }
@@ -48,6 +63,7 @@ export function createAccumulator(capacity: number, startBankroll: number): Accu
     finals: new Float64Array(capacity),
     maxDrawdowns: new Float64Array(capacity),
     longestStreaks: new Float64Array(capacity),
+    bustRounds: new Float64Array(capacity),
     sortedCache: {},
   };
 }
@@ -60,6 +76,7 @@ export function addSession(acc: Accumulator, r: SessionResult): void {
   acc.finals[i] = r.finalBankroll;
   acc.maxDrawdowns[i] = r.maxDrawdown;
   acc.longestStreaks[i] = r.longestLosingStreak;
+  acc.bustRounds[i] = isBust(r.endReason) ? r.rounds : NaN;
   acc.count++;
   acc.sumFinal += r.finalBankroll;
   acc.sumWagered += r.totalWagered;
@@ -68,7 +85,7 @@ export function addSession(acc: Accumulator, r: SessionResult): void {
   acc.sumWageredSq += r.totalWagered * r.totalWagered;
   acc.sumProfitWagered += profit * r.totalWagered;
   acc.endReasons[r.endReason]++;
-  if (acc.sortedCache.finals || acc.sortedCache.maxDrawdowns || acc.sortedCache.longestStreaks) acc.sortedCache = {};
+  if (Object.keys(acc.sortedCache).length > 0) acc.sortedCache = {};
 }
 
 /** Ascending copy of a column's filled part. Sorted once per column, then reused by every stat. */
@@ -79,4 +96,9 @@ export function sortedColumn(acc: Accumulator, key: ColumnKey): Float64Array {
     acc.sortedCache[key] = s;
   }
   return s;
+}
+
+/** Sorted rounds of the busted sessions only: a view of the cached sorted column, without its NaN tail. */
+export function sortedBustRounds(acc: Accumulator): Float64Array {
+  return sortedColumn(acc, "bustRounds").subarray(0, bustCount(acc));
 }

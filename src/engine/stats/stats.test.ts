@@ -117,6 +117,25 @@ describe("session 3 stats on a hand-built accumulator", () => {
     expect(noTarget).toBeNaN(); // shown as a dash when the win target is off
   });
 
+  it("risk: 95% Wilson intervals on P(profit) and P(bust), from the same counts as the point values", () => {
+    // 2 of 5 for both; reference values computed independently from the Wilson formula.
+    for (const id of ["pProfit", "pBust"]) {
+      expect(v[`${id}Low`]).toBeCloseTo(0.117618, 5);
+      expect(v[`${id}High`]).toBeCloseTo(0.76928, 5);
+      expect(v[`${id}Low`]!).toBeLessThan(v[id]!);
+      expect(v[`${id}High`]!).toBeGreaterThan(v[id]!);
+    }
+  });
+
+  it("risk: rounds to bust counts busted sessions only (ruin at 30 rounds, couldn't cover at 5)", () => {
+    expect(v.bustRoundsMedian).toBe(17.5); // [5, 30], h = 0.5
+    expect(v.bustRoundsP10).toBeCloseTo(7.5, 12); // h = 0.1: 5 + 0.1 * 25
+  });
+
+  it("pain: P(max drawdown ≥ 50% of start) over drawdowns [100, 1000, 300, 200, 0]", () => {
+    expect(v.pDrawdownHalf).toBe(1 / 5);
+  });
+
   it("final bankroll percentiles are type 7 on the sorted finals [0, 900, 1000, 1100, 1200]", () => {
     expect(v.finalP5).toBeCloseTo(180, 9); // h = 0.2
     expect(v.finalP25).toBe(900); // h = 1
@@ -147,13 +166,65 @@ describe("session 3 stats on a hand-built accumulator", () => {
   });
 });
 
+describe("rounds to bust: busted sessions only", () => {
+  const stat = (id: string) => STATS.find((s) => s.id === id)!;
+  const build = (rows: [number, SessionResult["endReason"]][]) => {
+    const acc = createAccumulator(rows.length, 1000);
+    for (const [rounds, end] of rows) addSession(acc, session(500, 100, rounds, end));
+    return acc;
+  };
+
+  it("excludes stopWin and maxRounds sessions: busts [5, 12, 30] give median 12 and p10 6.4", () => {
+    // Over ALL five sessions ([5, 12, 30, 50, 1000]) the answers would be 30 and 7.8 instead.
+    const acc = build([[30, "ruin"], [50, "stopWin"], [5, "insufficientFunds"], [1000, "maxRounds"], [12, "insufficientFunds"]]);
+    const ctx = testCtx(5, 1000);
+    expect(stat("bustRoundsMedian").compute(acc, ctx)).toBe(12);
+    expect(stat("bustRoundsP10").compute(acc, ctx)).toBeCloseTo(6.4, 12);
+  });
+
+  it("the column holds rounds for busted sessions and NaN otherwise; sorting puts the NaNs last", () => {
+    const acc = build([[30, "ruin"], [50, "stopWin"], [5, "insufficientFunds"]]);
+    expect(Array.from(acc.bustRounds.subarray(0, 3))).toEqual([30, NaN, 5]);
+    expect(Array.from(sortedColumn(acc, "bustRounds"))).toEqual([5, 30, NaN]);
+  });
+
+  it("NaN (a dash) when no session busted, including strategyStop and stopLoss endings", () => {
+    const acc = build([[10, "stopWin"], [0, "strategyStop"], [7, "stopLoss"]]);
+    expect(stat("bustRoundsMedian").compute(acc, testCtx(3, 1000))).toBeNaN();
+    expect(stat("bustRoundsP10").compute(acc, testCtx(3, 1000))).toBeNaN();
+  });
+});
+
+describe("P(max drawdown ≥ 50% of start): the boundary counts", () => {
+  const stat = STATS.find((s) => s.id === "pDrawdownHalf")!;
+  const withDrawdowns = (dds: number[]) => {
+    const acc = createAccumulator(dds.length, 1000);
+    for (const dd of dds) addSession(acc, { ...session(500, 100, 1, "maxRounds"), maxDrawdown: dd });
+    return stat.compute(acc, testCtx(dds.length, 1000));
+  };
+  it("exactly 50% counts, just under does not, just over does", () => {
+    expect(withDrawdowns([500])).toBe(1);
+    expect(withDrawdowns([499])).toBe(0);
+    expect(withDrawdowns([501])).toBe(1);
+    expect(withDrawdowns([499, 500, 501, 1000, 0])).toBe(3 / 5);
+  });
+  it("odd starting bankroll: 50% of 1001 is 500.5, so 500 does not count and 501 does", () => {
+    const acc = createAccumulator(2, 1001);
+    addSession(acc, { ...session(500, 100, 1, "maxRounds"), maxDrawdown: 500 });
+    addSession(acc, { ...session(500, 100, 1, "maxRounds"), maxDrawdown: 501 });
+    expect(stat.compute(acc, testCtx(2, 1001))).toBe(1 / 2);
+  });
+});
+
 describe("registry row order", () => {
   it("renders in the specified order, with P(profit > 0) directly under the headline block", () => {
     expect(STATS.map((s) => s.id)).toEqual([
       "evPerWagered", "evSE", "evTheory", "evZ",
-      "pProfit", "pBust", "pHitWin",
+      "pProfit", "pProfitLow", "pProfitHigh",
+      "pBust", "pBustLow", "pBustHigh", "bustRoundsMedian", "bustRoundsP10",
+      "pHitWin",
       "finalP5", "finalP25", "medianFinal", "finalP75", "finalP95", "meanFinal",
-      "meanMaxDrawdown", "p95MaxDrawdown", "meanLongestStreak", "maxLongestStreak",
+      "meanMaxDrawdown", "p95MaxDrawdown", "pDrawdownHalf", "meanLongestStreak", "maxLongestStreak",
       "meanWagered", "meanRounds",
       "end_ruin", "end_insufficientFunds", "end_stopWin", "end_stopLoss", "end_maxRounds", "end_strategyStop",
     ]);
