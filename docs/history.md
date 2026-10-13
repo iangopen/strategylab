@@ -1,6 +1,6 @@
 # StrategyLab: history
 
-Moved out of CLAUDE.md in session 15. This is the STATUS log and the decisions record, in the original wording, unchanged. Sections: "Real and verified" (sessions 1-14), "Built but not yet verified", "Still open" (the full original list, closed items included; the live items are summarized in CLAUDE.md), and "Decisions made outside the spec".
+Moved out of CLAUDE.md in session 15. This is the STATUS log and the decisions record, in the original wording, unchanged. Sections: "Real and verified" (sessions 1-17), "Built but not yet verified", "Still open" (the full original list, closed items included; the live items are summarized in CLAUDE.md), and "Decisions made outside the spec".
 
 ## STATUS
 
@@ -692,6 +692,28 @@ Session 16 (2026-09-29, Windows / PowerShell). Docs and disclosures for a 60-sec
 138. **LICENSE:** `gh api licenses/mit` with `[year]`/`[fullname]` filled in equals `LICENSE` except for one trailing newline in the API body; it also equals spellingbee's LICENSE. `package.json` gained `description`, `license: "MIT"` and `author: "Ian Gopen"` (`32783c8`; the lockfile root got `license`).
 139. **Screenshots** from a local production build (`SCREENSHOT_URL=http://localhost:4180/strategylab/ npm run screenshots`, 2 passed; the script asserts the table equals the engine first). The favicon (the create-vite copy of the Vite logo) was replaced with an original icon (`ab04d06`).
 140. **GitHub About** (`gh repo edit`): description (86 characters), website https://iangopen.github.io/strategylab/, topics betting-strategies, monte-carlo, probability, react, simulation, statistics, typescript, web-worker (removed vite and education). "Working name" removed from CLAUDE.md and this file (a historical mention reworded to "placeholder").
+
+Session 17 (2026-10-13, Windows; Git Bash for read-only commands). Documents only: no code, test, config or site change, so no test, build, browser or server was run (by instruction: another heavy session was running on the machine). Delivered: `docs/guide.md` (author's guide), plus two local files outside the repo, `C:\devwork\portfolio-audit\strategylab\INTERVIEW-PREP.md` and `NEXT-STEPS.md`.
+
+141. **Guide citations checked against the source at `b14f63d`.** Ten `file:line` citations drawn at random from the 63 distinct ones in `docs/guide.md` (`shuf` with a fixed seed), each printed with `sed -n` and compared:
+
+    | Citation | Line holds | Result |
+    |---|---|---|
+    | `validate.ts:225` | `function deepFreeze` | correct |
+    | `src/engine/runner.ts:92` | `export function runSessionWithRng(` | correct |
+    | `src/engine/replay.ts:69` | `export function replaySession(` | correct |
+    | `src/engine/rules/limits.ts:9-29` | `export const RULE_LIMITS = {` … `} as const` | correct |
+    | `link.ts:124` | the plain-object check after `JSON.parse` | correct |
+    | `src/engine/outcomeEditor.ts:129` | `export function ticketExample()` | correct |
+    | `src/engine/rules/validate.ts:238` | `export function validateRule(` | correct |
+    | `src/engine/stats/accumulator.ts:56` | `export function addSession(` | correct |
+    | `src/engine/runner.ts:131-136` | `let bet = Math.max(...)` … the all-in branch's closing brace | correct |
+    | `src/engine/montecarlo.ts:18` | `export const MAX_PATH_POINTS = 1000;` | correct |
+
+    Eight further hand-picked checks (`montecarlo.golden.stats.test.ts:101`, `noEval.test.ts:18-26`, `isolation.test.ts:15`, `stats.test.ts:77`, `ResultsTable.tsx:44`, `martingale.stats.test.ts:12`, `sportsReadout.test.ts`) found one error: the tone test block ends at line 64, not 63. Fixed in the guide and in NEXT-STEPS.md.
+142. **AI-use facts quoted in INTERVIEW-PREP.md:** `git rev-list --count HEAD` = 123 commits; 122 carry a `Co-Authored-By: Claude` trailer (only `f291b01 first commit` does not); commit dates 2026-09-22 to 2026-09-29.
+143. **CLAUDE.md:** 20,675 → 20,069 characters (`wc -m`). Pointers to the guide and the audit-folder files added; the session 16 disclosures section and two Stack bullets condensed without dropping a rule; the Ubuntu 26 note replaced, because every CI job pins `runs-on: ubuntu-24.04` (`.github/workflows/ci.yml`, six jobs).
+144. **Doc drift noticed, not changed:** `docs/spec.md` still names some test files by their pre-session-13 names (e.g. `runner.golden.test.ts`, `runner.carry.test.ts`, `runner.regression.test.ts`, `invariant.test.ts`; now `*.stats.test.ts`). The guide uses the real names.
 
 ### Built but not yet verified
 

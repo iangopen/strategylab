@@ -35,8 +35,8 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: **`iangopen/strategylab`** (the account was renamed during session 10; `origin` points at `https://github.com/iangopen/strategylab.git` since session 11). GitHub redirects the old repo and git URLs, but NOT the old Pages address. **Public**, intentionally, since session 9. Product name: **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." (session 14; the earlier placeholder was "Betting Lab"). Used in the README, `<title>`, `og:title`, the repo description and the app header. **License: MIT** (`LICENSE`, © 2026 Ian Gopen). gh CLI is authenticated.
-- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/**. **Links made with the pre-rename Pages address are permanently broken:** GitHub Pages does not redirect after an account rename, so they return 404 forever. Re-share such links with the new address (the `#s=` fragment is unchanged).
+- GitHub: **`iangopen/strategylab`** (account renamed in session 10; `origin` = `https://github.com/iangopen/strategylab.git`). Old repo and git URLs redirect; the old Pages address does NOT. **Public** since session 9. Product name **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." (README, `<title>`, `og:title`, repo description, app header; the placeholder was "Betting Lab"). **License: MIT.** gh CLI is authenticated.
+- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/**. Links made with the pre-rename Pages address 404 forever; re-share them with the new address (the `#s=` fragment is unchanged).
   - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
   - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
   - A failing test never deploys. The Pages source is "GitHub Actions" (`build_type: workflow`).
@@ -130,33 +130,29 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 Read the relevant section BEFORE changing that area. These files are plain paths, deliberately not @imports.
 
 - `docs/spec.md`: full folder map; chart rule implementation notes (fan zoom, label knockouts, colors); how to add a strategy (with the Strategy specs and test kit) and how to add a stat; the **rule language** (grammar, evaluation order, limits, worked examples); the **URL scenario format** (key map, limits, loading, history); **sports odds** (conversions, de-vig, format toggle, cents rounding / carry, link representation); **multi-outcome games** (model, one draw per round, payouts, Kelly generalized, editor, replay strip, scenario v4); the roadmap.
-- `docs/history.md`: the STATUS log (sessions 1-14, verification items numbered 1-126, referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
+- `docs/history.md`: the STATUS log (sessions 1-17, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
+- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were checked at `b14f63d`; refresh any you move.
+- Outside the repo (local only, never committed here): `C:\devwork\portfolio-audit\strategylab\INTERVIEW-PREP.md` and `NEXT-STEPS.md` (scored candidates, recommended order, the stage 1 prompt).
 
 ## Current state (session 15, 2026-09-29)
 
-All roadmap sessions are done and verified: 719 unit/stats tests pass (5 skipped), `npm run build`, `npm run lint` and 43 Playwright specs pass, CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 portfolio hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
-- **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep these regions always mounted. The link banner is named "Opened link"; select status regions by role AND name in specs, since the page has several.
-- **Third-party licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build from the bundled packages (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
+All roadmap sessions are done and verified (test counts: see "Docs and disclosures"), CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
+- **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep them always mounted. Select status regions by role AND name in specs (the link banner is "Opened link").
+- **Licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
 - `.claude/settings.local.json` is git-ignored here.
-- **Local gotcha:** if Playwright lists far fewer than 43 tests, check for OneDrive cloud-file reparse points left in the working tree (Node sees them as symlinks and skips them); see STATUS 133.
+- **Local gotcha:** if Playwright lists far fewer than 44 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
 
 Only record in STATUS what was actually verified.
 
 ## Docs and disclosures (session 16, 2026-09-29)
 
-Verified this session (docs/history.md STATUS 134-140):
-- **README** follows the portfolio reference structure. Every number in it maps to a file or to a run from session 16 (the list is in STATUS 136). It describes scale (sessions and rounds per run), never speed. It has no test count other than the one `npm run test` and `npx playwright test --list` print; **update those two numbers (719 Vitest, 44 Playwright in 10 spec files) when tests are added.**
-- **Privacy:** no PRIVACY.md, because nothing leaves the browser: the only requests are same-origin GETs for the app's own files, no cookies, and one localStorage key (`betting-lab.theme`, kept under its old name so saved themes survive). The README says so in one line. Adding any network call, storage or analytics means writing a PRIVACY.md first.
-- **Disclaimer:** the footer line stays. A second line under the tagline says: adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** with a link to https://www.ncpgambling.org/help-treatment/. NCPG's own page lists that number (checked in a browser on 2026-09-29; curl gets a 403 from its bot protection). The README carries the same line. `e2e/app.spec.ts` checks it.
-- **Credits:** README table (React/react-dom/scheduler, Comlink, mulberry32 CC0, the Okabe-Ito palette); full texts in the generated `third-party-licenses.txt`. The favicon was the Vite logo from the scaffold; it is now an original icon.
-- **LICENSE** is GitHub's MIT text with only year and name ("2026", "Ian Gopen"); `package.json` has `"license": "MIT"`, the description and the author.
-- **GitHub About:** "A Monte Carlo simulator that compares betting strategies on identical random outcomes." (86 characters), website = the live URL, 8 topics.
+Verified (docs/history.md STATUS 134-140):
+- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (719 Vitest, 44 Playwright in 10 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
+- **Privacy:** no PRIVACY.md, because nothing leaves the browser (same-origin GETs only, no cookies, one localStorage key `betting-lab.theme`, kept under its old name). Adding any network call, storage or analytics means writing a PRIVACY.md first.
+- **Disclaimer:** the footer line stays; a line under the tagline says adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** (https://www.ncpgambling.org/help-treatment/, checked in a browser 2026-09-29). The README carries it; `e2e/app.spec.ts` checks it.
+- **Credits** table in the README, full texts in the generated `third-party-licenses.txt`; original favicon. **LICENSE** is MIT ("2026", "Ian Gopen"), matching `package.json`. **GitHub About:** an 86-character description, the live URL, 8 topics.
 
-Only Ian can supply (nothing was published as a placeholder):
-- Real usage numbers (visitors, users). The README has none.
-- A personal one-line pitch. The README uses the product subtitle instead.
-- Whether to name a non-US helpline as well. Only the US line is given.
-- Whether 1-800-MY-RESET is the number he wants (the session prompt suggested 1-800-GAMBLER; NCPG now lists MY-RESET).
+Only Ian can supply (no placeholders were published): real usage numbers; a personal one-line pitch (the README uses the subtitle); whether to add a non-US helpline; and confirming 1-800-MY-RESET (the prompt had suggested 1-800-GAMBLER; NCPG lists MY-RESET).
 
 ## Still open
 
@@ -166,5 +162,6 @@ Only Ian can supply (nothing was published as a placeholder):
 - Sports mode stores decimal prices at full precision after a format switch; the field shows 2 decimals, the readout shows the real payout (by design).
 - The address bar is not kept in sync while editing: after opening a link and editing, a reload restores the LINK until Copy link is clicked again.
 - Rule language gaps by design: one action per entry, no step-back, no payout-capped bet, no bankroll-proportional stake (those stay built-ins). Only Martingale x2 is proven bit-identical to its rule form.
-- Links made with the pre-rename Pages address are permanently dead (no redirect). CI `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19; nothing to do unless a run breaks.
+- Links made with the pre-rename Pages address are permanently dead (no redirect). (The Ubuntu 26 `ubuntu-latest` notice does not apply: every CI job pins `ubuntu-24.04`.)
+- Next directions (session 17 plan, nothing built): risk metrics with intervals, then a reproducible one-page report, then parameter sweeps; see `NEXT-STEPS.md` in the audit folder.
 - Replay zoom is x-only; hover values go to a text readout, not an on-canvas tooltip. Cosmetic: a 1,000-session run reports "in 0.0s".
