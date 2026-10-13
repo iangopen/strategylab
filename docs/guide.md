@@ -70,9 +70,9 @@ flowchart LR
 
 Follow this with the files open. It is the single most useful thing to understand.
 
-1. **The user edits the form.** Every edit replaces the `ScenarioConfig` held in React state in `App` (`src/App.tsx:37`). Nothing about the scenario is hidden in a component's own state, which is why a link can capture all of it.
-2. **Validation runs on every change.** `validateScenario` (`src/scenario.ts:194`) returns field errors; `canRun` is true only when there are none (`src/App.tsx:96-97`). The Run button is disabled otherwise.
-3. **Run is clicked.** `handleRun` (`src/App.tsx:127`) snapshots the scenario and calls `toSimRequest` (`src/scenario.ts:291`), which converts dollars to integer cents with `toCents` (`src/scenario.ts:172`) and turns each strategy into plain data: a built-in is `{ strategyId, config }`, a custom rule is the rule's JSON. Functions cannot be sent to a worker, so nothing in the request is code.
+1. **The user edits the form.** Every edit replaces the `ScenarioConfig` held in React state in `App` (`src/App.tsx:40`). Nothing about the scenario is hidden in a component's own state, which is why a link can capture all of it.
+2. **Validation runs on every change.** `validateScenario` (`src/scenario.ts:194`) returns field errors; `canRun` is true only when there are none (`src/App.tsx:109-110`). The Run button is disabled otherwise.
+3. **Run is clicked.** `handleRun` (`src/App.tsx:140`) snapshots the scenario and calls `toSimRequest` (`src/scenario.ts:291`), which converts dollars to integer cents with `toCents` (`src/scenario.ts:172`) and turns each strategy into plain data: a built-in is `{ strategyId, config }`, a custom rule is the rule's JSON. Functions cannot be sent to a worker, so nothing in the request is code.
 4. **The client sends it to the worker.** `SimClient.run` (`src/worker/client.ts:35`) calls the worker through Comlink and wraps the progress callback in `Comlink.proxy` (`src/worker/client.ts:39`), so the worker can call it back across threads.
 5. **The worker turns data back into strategies.** `api.run` (`src/worker/sim.worker.ts:25`) calls `resolveStrategies` (`src/worker/resolve.ts:13`): built-ins are looked up in the registry, and custom rules are validated and compiled right here (`src/worker/resolve.ts:17`). A bad rule fails the run with a readable message.
 6. **Monte Carlo loops over sessions.** `runMonteCarlo` (`src/engine/montecarlo.ts:59`) validates its inputs, then for each session `i` computes one seed (`src/engine/montecarlo.ts:94`) and runs EVERY strategy on that same seed (`src/engine/montecarlo.ts:95-119`). The first 2,000 sessions get an observer that records percentile bands; the first 50 also record a downsampled path for the spaghetti lines (`src/engine/montecarlo.ts:101-114`). Every other session pays only an `if` check.
@@ -81,7 +81,7 @@ Follow this with the files open. It is the single most useful thing to understan
 9. **Progress is reported about every 2%.** `src/engine/montecarlo.ts:120-126`. The callback is the proxied function from step 4, so each call is a message back to the page, which updates the progress bar.
 10. **Statistics are computed once at the end.** Every registered stat runs on each strategy's accumulator (`src/engine/montecarlo.ts:141`). The histogram uses one set of bins for all strategies (`src/engine/montecarlo.ts:131`).
 11. **The result goes back without copying.** `Comlink.transfer(result, resultTransferables(result))` (`src/worker/sim.worker.ts:30`) hands the typed arrays' memory to the page instead of copying it. The per-session columns are not in the result at all; they never leave the worker.
-12. **The page draws.** `handleRun` stores the result (`src/App.tsx:143`). `ResultsTable` renders one row per registered stat. `FanChart` computes ONE set of axes for all panels with `fanScales` (`src/ui/charts/FanChart.tsx:28`, defined at `src/ui/charts/adapters.ts:89`), so Martingale's panel and Flat's panel are drawn on the same scale.
+12. **The page draws.** `handleRun` stores the result (`src/App.tsx:156`). `ResultsTable` renders one row per registered stat, with each 95% interval shown in its stat's row. `FanChart` computes ONE set of axes for all panels with `fanScales` (`src/ui/charts/FanChart.tsx:28`, defined at `src/ui/charts/adapters.ts:89`), so Martingale's panel and Flat's panel are drawn on the same scale.
 
 **Cancel** works differently from a normal "stop" button. The worker is running one long synchronous loop and cannot receive a message mid-loop, so `cancel` simply kills the worker and starts a fresh one (`src/worker/client.ts:58-64`).
 
@@ -178,7 +178,7 @@ Opening a link never starts a simulation. **Tests:** `src/share/malicious.test.t
 
 **Where.** `src/engine/stats/registry.ts:71` (`STATS`, the ordered list the results table renders), `src/engine/stats/accumulator.ts` (the single-pass collector), `src/engine/stats/quantile.ts:12` (`quantileSorted`, the one percentile function).
 
-**Why.** Adding a statistic should be one line, not a UI change. The table loops over `STATS` (`src/ui/ResultsTable.tsx:44`), so a new entry appears automatically, and the E2E helper compares every row to the engine. All percentiles go through one function so they are consistent (the "type 7" definition, the same as numpy's default).
+**Why.** Adding a statistic should be one line, not a UI change. The table loops over `TABLE_ROWS` (`src/ui/ResultsTable.tsx:43`), which is `STATS` in order with each interval's low/high rows folded into its point row (`INTERVAL_ROWS` and `TABLE_ROWS`, `src/ui/format.ts:54` and `:76`), so a new entry appears automatically, and the E2E helper compares every row to the engine. All percentiles go through one function so they are consistent (the "type 7" definition, the same as numpy's default).
 
 The headline: `evPerWagered` and its standard error `evPerWageredSE` (`registry.ts:8` and `registry.ts:14`). EV per $ is a ratio (total profit ÷ total wagered), so its SE uses the delta method from running sums (`sumProfitSq`, `sumWageredSq`, `sumProfitWagered` in the accumulator) rather than storing every session.
 
@@ -200,7 +200,7 @@ A Monte Carlo result is never exactly the theoretical value; it wobbles. The que
 
 **Exact tests sit beside the statistical ones.** Goldens catch any unintended change bit for bit: `src/engine/runner.golden.stats.test.ts` (sessions recorded before the carry existed) and `src/engine/montecarlo.golden.stats.test.ts` (whole runs recorded before the band schedule changed; compared at line 111, where stats registered after the capture are checked separately). `src/engine/runner.carry.stats.test.ts:91` checks the carry against exact fractions in BigInt arithmetic after every round.
 
-**Two test projects.** `vite.config.ts:28-38` defines `unit` (fast, Vitest's 5-second default) and `stats` (`*.stats.test.ts`, 2 workers, one 120-second timeout, run after `unit`). Heavy tests go in a `.stats.test.ts` file; no test sets its own timeout.
+**Two test projects.** `vite.config.ts:43-54` defines `unit` (fast, Vitest's 5-second default) and `stats` (`*.stats.test.ts`, 2 workers, one 120-second timeout, run after `unit`). Heavy tests go in a `.stats.test.ts` file; no test sets its own timeout.
 
 ### 3.9 Charts on shared axes
 
@@ -209,6 +209,22 @@ A Monte Carlo result is never exactly the theoretical value; it wobbles. The que
 **Why.** If each panel scaled itself, Martingale's rare $0 sessions and Flat's gentle drift would look alike. So every panel of a chart shares one x and one y range, zoom applies to all panels at once, and y never rescales. Each strategy keeps one colour everywhere, always paired with a text label, from a colourblind-safe palette. Keeping all the maths in `adapters.ts` means it is unit-tested (`adapters.stats.test.ts`) without a browser.
 
 ---
+
+### 3.10 The one-page report (session 19)
+
+**What it is.** After a run, the Report button opens a print-laid-out page for that run: takeaway sentences, key statistics with 95% intervals, the bankroll chart, every setting in words, and how to reproduce it (seed, build commit, share link). "Print / save as PDF" just calls `window.print()` (`src/report/ReportView.tsx:61`); there is no PDF library. `docs/report-sample.pdf` is the default run, printed from the live site by `npm run screenshots`.
+
+**Where.**
+- `src/report/ReportView.tsx:45` lays the page out. It uses the run's own snapshot of the scenario (stored when Run was clicked, `src/App.tsx:156`), never the live form, so the link it prints (`encodeScenarioLink`, `ReportView.tsx:50`) reruns exactly these numbers. While open it draws in the light theme (`useLightTheme`, line 33), so the screen matches the paper.
+- `src/report/takeaways.ts:178` turns the numbers into 3 to 5 sentences. It is pure TypeScript with no React, so every sentence is unit-tested (`takeaways.test.ts`).
+- `src/report/summary.ts:58` writes the configuration in words, and `REPORT_ROWS` (line 77) picks the key statistics.
+- `src/ui/format.ts:42` is `formatInterval`, the ONE interval display ("17.1% (16.4–17.8%)"), shared by the report and the results table.
+- The build commit comes from `vite.config.ts:19` (`commitHash`, injected with `define` at line 35). A build from a working tree with uncommitted changes is labelled "+local changes".
+- The print rules are `@page { size: letter; margin: 0.5in }` and `@media print` (`src/index.css:284-285`). Above four strategies the page switches to denser type (`DENSE_ABOVE`, `ReportView.tsx:21`; CSS from `index.css:269`), and the chart panels are sized by `reportChartLayout` (`src/report/layout.ts:4`) so that eight strategies still fit two rows.
+
+**Why the sentences are careful.** A reviewer will read the sentences, not the intervals. So the generator never names a winner unless the numbers support one. If an EV interval includes zero, the sentence says the result "is not clearly different from zero at this sample size". If two strategies' intervals overlap, it says the difference "isn't clear at this sample size" (`overlaps`, `takeaways.ts:38`). Overlap is a conservative test: two intervals can overlap even when a careful paired test would find a difference. A difference is named only when the intervals are fully separated. Rounds-to-bust sentences always begin "Counting busted sessions only". The EV interval is the estimate ± 1.96 standard errors (`evInterval`, line 43). Above three strategies (`LIST_LIMIT`, line 53) each sentence gives the lowest and highest rather than every strategy, so the page still fits.
+
+**Tests.** `e2e/report.spec.ts:38` prints the default report to a Letter PDF and requires exactly one page. Line 77 does the same with all eight strategies. Line 89 opens the report's link in a new page, reruns it and compares every results-table cell's `data-raw` (the exact `String(double)` of each number) with the original run: bit for bit. The unit tests were each shown failing when the hedging logic was broken on purpose (`docs/history.md`, session 19).
 
 ## 4. How to extend it
 
@@ -227,7 +243,7 @@ Spec: `docs/spec.md` "How to add a strategy", "Strategy specs", "Strategy test k
 
 1. If it needs data the accumulator does not collect, add it there (a running sum, or a new per-session column).
 2. Add a `StatDef` to `STATS` in `src/engine/stats/registry.ts` at the row where it should appear. Percentiles must use `quantileSorted(sortedColumn(acc, key), p)`. Return `NaN` for "undefined"; the table shows a dash.
-3. Test it on a hand-built accumulator in `src/engine/stats/stats.test.ts`, and update the row-order test there.
+3. Test it on a hand-built accumulator in `src/engine/stats/stats.test.ts`, and update the row-order test there. If the stat is the low or high bound of an interval, add it to `INTERVAL_ROWS` (`src/ui/format.ts:54`) so the table shows it inside its point row.
 4. Add the new id to `STATS_ADDED_AFTER_CAPTURE` in `src/engine/montecarlo.golden.stats.test.ts:35`. The golden compares every stored stat exactly (line 111) and requires the extra keys to be exactly that list, so a new stat fails the golden until it is listed. Do not regenerate the golden instead: that would also accept any change to the existing stats.
 Spec: `docs/spec.md` "How to add a stat".
 
@@ -267,11 +283,12 @@ All commands work in PowerShell.
 | Goldens | `runner.golden.stats.test.ts`, `montecarlo.golden.stats.test.ts`, `src/v3links.golden.test.ts` | any unintended change to results or to how old links decode |
 | Rule compiler equivalence | `rules/equivalence.stats.test.ts`, `rules/compile.test.ts`, `rules/validate.test.ts` | the compiler or validator |
 | Stats | `stats/stats.test.ts`, `stats/quantile.test.ts`, `stats/interval.test.ts`, `stats/*.stats.test.ts` | a formula, percentile or interval definition, or table row order |
+| Report | `src/report/*.test.ts`, `src/ui/format.test.ts`, `e2e/report.spec.ts` | a takeaway claiming more than its intervals support, the interval display, the page no longer fitting one Letter page, or a link that no longer reruns the same numbers |
 | Generator quality | `src/engine/rng.test.ts`, `src/engine/rng.stats.test.ts` | the seed formula, or a generator whose outputs are not uniform (chi-square) |
 | Links | `src/share/*.test.ts` | encoding, size budget, migration, hostile input handling |
 | Chart maths | `src/ui/charts/adapters.stats.test.ts` | shared scales, zoom, label placement |
 | Tone | `src/ui/sportsReadout.test.ts:45-64` | banned words (picks, sharp, value bet, guarantee, winning system, sportsbook and lottery names, URLs) in the sports and outcome-editor sources |
-| End to end | `e2e/*.spec.ts` | the real page: numbers equal the engine's (`e2e/helpers.ts:44`), shared axes, links survive reload, keyboard and screen-reader paths, responsiveness during a run |
+| End to end | `e2e/*.spec.ts` | the real page: numbers equal the engine's (`e2e/helpers.ts:43`), shared axes, links survive reload, keyboard and screen-reader paths, responsiveness during a run |
 
 ### Debugging tips
 

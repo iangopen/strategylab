@@ -44,7 +44,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
   - Never hardcode a base path in app code. Assets and the worker resolve via `new URL(..., import.meta.url)`. Share links are built from `location.origin + location.pathname`.
   - `#s=` links need no 404 fallback: a fragment never reaches the server, and the app has no client-side routes.
 - **Line endings:** `.gitattributes` enforces LF (`text=auto eol=lf`) in the repo and working copies (session 9).
-- **Background dev/preview servers:** stopping the task that ran `npx vite preview` (or `vite`) can leave vite's `node` child alive and holding the port. E2E uses port 4180 (`npm run preview:pages`). Before starting a server, check the port; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
+- **Background dev/preview servers:** stopping the task that ran `vite`/`vite preview` can leave vite's `node` child holding the port (E2E uses 4180). Check the port first; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
 - **Never create files with `echo > file` in PowerShell.** Windows PowerShell 5 writes UTF-16 LE, which git treats as binary (this happened to the first `README.md`). Use the editor/file tools, or `Set-Content -Encoding utf8`.
 
 ### Commands
@@ -131,38 +131,40 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 Read the relevant section BEFORE changing that area. These files are plain paths, deliberately not @imports.
 
 - `docs/spec.md`: full folder map; chart rule implementation notes (fan zoom, label knockouts, colors); how to add a strategy (with the Strategy specs and test kit) and how to add a stat; the **rule language** (grammar, evaluation order, limits, worked examples); the **URL scenario format** (key map, limits, loading, history); **sports odds** (conversions, de-vig, format toggle, cents rounding / carry, link representation); **multi-outcome games** (model, one draw per round, payouts, Kelly generalized, editor, replay strip, scenario v4); the roadmap.
-- `docs/history.md`: the STATUS log (sessions 1-18, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
-- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were re-checked in session 18; refresh any you move.
+- `docs/history.md`: the STATUS log (sessions 1-19, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
+- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were re-checked in session 19; refresh any you move.
 - Outside the repo (local only, never committed here): `C:\devwork\portfolio-audit\strategylab\INTERVIEW-PREP.md` and `NEXT-STEPS.md` (scored candidates, recommended order, the stage 1 prompt).
 
-## Current state (session 18, 2026-10-13)
+## Current state (session 19, 2026-10-13)
 
 All roadmap sessions are done and verified (test counts: see "Docs and disclosures"), CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
 - **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep them always mounted. Select status regions by role AND name in specs (the link banner is "Opened link").
 - **Licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
 - `.claude/settings.local.json` is git-ignored here.
-- **Session 18 (STATUS 145-154):** risk rows (Wilson 95% intervals on P(profit) and P(bust), rounds to bust over busted sessions, P(drawdown ≥ 50%)); the Monte Carlo golden lists stats added after its capture in `STATS_ADDED_AFTER_CAPTURE` (add new ids there; never regenerate the golden); an RNG chi-square test (`rng.stats.test.ts`); `npm run bench`.
-- **Local gotcha:** if Playwright lists far fewer than 44 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
+- **Session 19 (STATUS 155-162): one-page report** (`src/report/`, guide 3.10): built from the run's snapshot, printed with `window.print()`; takeaways are pure and hedge when intervals include zero or overlap; ONE interval display (`formatInterval`), also in the results table (`TABLE_ROWS`; cells carry `data-raw`); build commit via Vite `define`. `docs/report-sample.pdf` comes from `npm run screenshots`.
+- **Session 18 (STATUS 145-154):** risk rows; a new stat id goes in `STATS_ADDED_AFTER_CAPTURE` (never regenerate the Monte Carlo golden); RNG chi-square test; `npm run bench`.
+- **Local gotcha:** if Playwright lists far fewer than 47 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
 
 Only record in STATUS what was actually verified.
 
 ## Docs and disclosures (session 16, 2026-09-29)
 
 Verified (docs/history.md STATUS 134-140):
-- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (747 Vitest with 6 opt-in skipped, 44 Playwright in 10 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
+- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (770 Vitest with 6 opt-in skipped, 47 Playwright in 11 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
 - **Privacy:** no PRIVACY.md, because nothing leaves the browser (same-origin GETs only, no cookies, one localStorage key `betting-lab.theme`, kept under its old name). Adding any network call, storage or analytics means writing a PRIVACY.md first.
 - **Disclaimer:** the footer line stays; a line under the tagline says adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** (https://www.ncpgambling.org/help-treatment/, checked in a browser 2026-09-29). The README carries it; `e2e/app.spec.ts` checks it.
 - **Credits** in the README and `third-party-licenses.txt`; original favicon; MIT LICENSE matching `package.json`; GitHub About set (description, URL, 8 topics).
 
-Only Ian can supply (no placeholders were published): real usage numbers; a personal one-line pitch (the README uses the subtitle); whether to add a non-US helpline; and confirming 1-800-MY-RESET (the prompt had suggested 1-800-GAMBLER; NCPG lists MY-RESET).
+Only Ian can supply: real usage numbers, a personal pitch, a non-US helpline, and confirming 1-800-MY-RESET (NCPG's listed number).
 
 ## Still open
 
-- Result allocation: the per-round `RoundResult` object costs about 8% on the benchmark (STATUS 116). Reusing one mutable object recovers about half but weakens purity; owner decision, not taken.
-- Candidates beyond the roadmap: three-way sports lines (needs a three-way de-vig spec), parlays (needs a leg-correlation spec), other de-vig methods (power, Shin, additive), optional Vercel deploy (`VITE_BASE=/`).
+- Result allocation: the per-round `RoundResult` costs about 8% (STATUS 116); a mutable reuse weakens purity. Owner decision, not taken.
+- Beyond the roadmap: three-way sports lines and parlays (each needs a spec), other de-vig methods, optional Vercel deploy (`VITE_BASE=/`).
 - Oscar's Grind on multi-outcome games uses an approximation (mean winning net); the invariant still holds. Kelly always stops on a house-edge multi-outcome game (`assumedWinProb` is binary-only), by design.
 - Sports mode stores decimal prices at full precision after a format switch; the field shows 2 decimals, the readout shows the real payout (by design).
 - The address bar is not kept in sync while editing: after opening a link and editing, a reload restores the LINK until Copy link is clicked again.
 - Rule language gaps by design: one action per entry, no step-back, no payout-capped bet, no bankroll-proportional stake (those stay built-ins). Only Martingale x2 is proven bit-identical to its rule form.
-- Next directions (`NEXT-STEPS.md` in the audit folder): stage 1, risk metrics, is DONE (session 18); next a reproducible one-page report, then parameter sweeps.
+- Next directions (`NEXT-STEPS.md` in the audit folder): stages 1 (risk metrics, session 18) and 2 (report, session 19) are DONE; next parameter sweeps.
+- Report limits: one page is tested for the default run and 8 built-ins, not for long links (big custom rules). "Not clear" uses interval overlap, which is conservative (a paired CRN test could separate some pairs).
 - Replay zoom is x-only; hover values go to a text readout, not an on-canvas tooltip.
