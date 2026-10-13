@@ -47,7 +47,7 @@ The rule and link code contain no `eval`, `new Function` or dynamic `import`, an
 
 ## Testing
 
-- **Unit and statistical tests:** `npm run test` runs 746 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Five more (benchmarks and fixture writers) are opt-in.
+- **Unit and statistical tests:** `npm run test` runs 747 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Six more (benchmarks and fixture writers) are opt-in.
 - **Tolerances come from the data.** A statistical test passes when the measured value is within 4 standard errors of the expected one, with the standard error computed from the simulated sessions. Seeds are fixed, so each run gives the same numbers.
 - **The EV invariant:** for every strategy, EV per $ wagered must equal −edge. [`invariant.stats.test.ts`](src/engine/invariant.stats.test.ts) checks 9 strategies (the 8 built-ins and a custom rule) on 8 games with 20,000 sessions each: house-edge, fair and player-edge games, sports odds and multi-outcome games. The largest deviation is 2.78 standard errors. Kelly refuses to bet on the two house-edge multi-outcome games, and the test asserts that instead.
 - **A bug the tolerance caught:** before the sub-cent carry, a flat $5 bettor at −110 odds measured 5.29 standard errors from theory over 100,000 sessions. With the carry it measures 0.55 ([`runner.regression.stats.test.ts`](src/engine/runner.regression.stats.test.ts)).
@@ -67,6 +67,7 @@ npm run lint
 npm run build                     # strict type check and production build
 npx playwright install chromium   # once per machine
 npm run e2e                       # Playwright against the production build under /strategylab/
+npm run bench                     # one fixed 100,000-session run, timed (numbers depend on the machine)
 ```
 
 `npm run screenshots` regenerates the README images and `public/og-image.png` from the live site, or from `SCREENSHOT_URL` if set. It first checks that the results table equals the engine's numbers.
