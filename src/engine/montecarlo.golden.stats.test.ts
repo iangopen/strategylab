@@ -2,7 +2,7 @@
 // band checkpoint schedule (commit 44151cf). Checkpoints only change what the band observer records,
 // so every stat, end-reason count, histogram and sample path must stay bit-identical. If one moves,
 // the observer is leaking into the simulation.
-// Regenerate only on purpose: $env:GOLDEN_MC="write"; npx vitest run src/engine/montecarlo.golden.test.ts
+// Regenerate only on purpose: $env:GOLDEN_MC="write"; npx vitest run src/engine/montecarlo.golden.stats.test.ts
 import { describe, expect, it } from "vitest";
 import golden from "./montecarlo.golden.json";
 import { GAME_PRESETS, type Game } from "./games";

@@ -1,5 +1,5 @@
 // Example rules shipped in the builder. The first four reproduce built-in strategies EXACTLY
-// (bit-identical SessionResults, see equivalence.test.ts); they are the compiler's correctness proof.
+// (bit-identical SessionResults, see equivalence.stats.test.ts); they are the compiler's correctness proof.
 import type { ProgressionRule, Rule, SequenceRule } from "./types";
 
 /** Martingale ×2: double after a loss, back to 1 unit after a win. */

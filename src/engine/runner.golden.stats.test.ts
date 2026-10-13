@@ -1,7 +1,7 @@
 // Golden SessionResults on even-money and INTEGER-payout games, captured from the runner as it was
 // BEFORE the session 11 sub-cent carry (commit 5d01387). On these games bet × netPayout is a whole
 // number of cents, so the carry is always exactly 0 and every session must be bit-identical.
-// Regenerate only on purpose: $env:GOLDEN="write"; npx vitest run src/engine/runner.golden.test.ts
+// Regenerate only on purpose: $env:GOLDEN="write"; npx vitest run src/engine/runner.golden.stats.test.ts
 import { describe, expect, it } from "vitest";
 import golden from "./runner.golden.json";
 import { edge, GAME_PRESETS, type Game } from "./games";
