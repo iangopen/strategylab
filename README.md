@@ -16,6 +16,7 @@ In a game with a house edge, every bet loses edge × stake on average, whatever 
 - **Results:** EV per $ wagered next to its theoretical value and standard error; P(profit) and P(bust), each with a 95% Wilson interval; how many rounds busted sessions lasted (median and 10th percentile); final-bankroll percentiles; drawdowns, including how often a session fell to half its starting bankroll; and losing streaks.
 - **Charts and replay:** percentile bands over time, final-bankroll histograms, and a replay of any one session for every strategy. Every panel of a chart shares the same axes.
 - **Links:** Copy link puts the whole scenario, custom rules included, in the URL.
+- **Report:** a one-page summary of a run, ready to print or save as PDF: the takeaways in plain sentences, the key statistics with 95% intervals, the bankroll chart, every setting, the seed, the build's commit and the link that reruns it to the same numbers. [Sample report (PDF)](docs/report-sample.pdf) of the default run.
 
 The default run is European roulette (house edge 1/37 = 2.703%), a $1,000 bankroll, a $10 base bet, a stop at $1,100 and 10,000 sessions with seed 12345. Martingale ends in profit in 82.930% of sessions and Flat in 53.760%. Their EV per $ wagered is −2.909% and −2.758%, against a theoretical −2.703%. Martingale's many small wins are paid for by rare large losses: it busts in 17.070% of sessions, Flat in 1.600%.
 
@@ -47,12 +48,12 @@ The rule and link code contain no `eval`, `new Function` or dynamic `import`, an
 
 ## Testing
 
-- **Unit and statistical tests:** `npm run test` runs 747 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Six more (benchmarks and fixture writers) are opt-in.
+- **Unit and statistical tests:** `npm run test` runs 770 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Six more (benchmarks and fixture writers) are opt-in.
 - **Tolerances come from the data.** A statistical test passes when the measured value is within 4 standard errors of the expected one, with the standard error computed from the simulated sessions. Seeds are fixed, so each run gives the same numbers.
 - **The EV invariant:** for every strategy, EV per $ wagered must equal −edge. [`invariant.stats.test.ts`](src/engine/invariant.stats.test.ts) checks 9 strategies (the 8 built-ins and a custom rule) on 8 games with 20,000 sessions each: house-edge, fair and player-edge games, sports odds and multi-outcome games. The largest deviation is 2.78 standard errors. Kelly refuses to bet on the two house-edge multi-outcome games, and the test asserts that instead.
 - **A bug the tolerance caught:** before the sub-cent carry, a flat $5 bettor at −110 odds measured 5.29 standard errors from theory over 100,000 sessions. With the carry it measures 0.55 ([`runner.regression.stats.test.ts`](src/engine/runner.regression.stats.test.ts)).
 - **Golden files:** stored session and Monte Carlo results must reproduce bit for bit after engine changes.
-- **End-to-end:** 44 Playwright tests in 10 spec files run against the production build, served under the same `/strategylab/` path as the live site. Every number the page shows is compared with the engine run in Node on the same scenario. One test runs the app by keyboard only and checks what a screen reader announces.
+- **End-to-end:** 47 Playwright tests in 11 spec files run against the production build, served under the same `/strategylab/` path as the live site. Every number the page shows is compared with the engine run in Node on the same scenario. One test runs the app by keyboard only and checks what a screen reader announces.
 - **CI:** GitHub Actions runs lint, the Vitest suites, a strict build and the Playwright tests. Only a `main` commit that passes all four deploys to GitHub Pages.
 
 ## Get started
@@ -70,7 +71,7 @@ npm run e2e                       # Playwright against the production build unde
 npm run bench                     # one fixed 100,000-session run, timed (numbers depend on the machine)
 ```
 
-`npm run screenshots` regenerates the README images and `public/og-image.png` from the live site, or from `SCREENSHOT_URL` if set. It first checks that the results table equals the engine's numbers.
+`npm run screenshots` regenerates the README images, `public/og-image.png` and `docs/report-sample.pdf` from the live site, or from `SCREENSHOT_URL` if set. It first checks that the results table equals the engine's numbers.
 
 ## Repository map
 
