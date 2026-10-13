@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { execSync } from 'node:child_process'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { licenseNotices } from './scripts/licenseNotices.ts'
@@ -12,12 +13,26 @@ if (!base.startsWith('/') || !base.endsWith('/')) {
   throw new Error(`VITE_BASE must start and end with "/" (got "${base}")`)
 }
 
+// The commit this build was made from, shown on the report so a result can be traced to its code.
+// "+local changes" marks a build from a working tree that differs from that commit; "unknown" a build
+// without git. CI builds from a clean checkout.
+function commitHash(): string {
+  try {
+    const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
+    const dirty = execSync('git status --porcelain', { encoding: 'utf8' }).trim() !== ''
+    return dirty ? `${hash}+local changes` : hash
+  } catch {
+    return 'unknown'
+  }
+}
+
 // Third-party licence notices, served as <base>third-party-licenses.txt (scripts/licenseNotices.ts).
 const notices = licenseNotices()
 
 // https://vite.dev/config/
 export default defineConfig({
   base,
+  define: { __COMMIT_HASH__: JSON.stringify(commitHash()) },
   plugins: [react(), notices.main],
   worker: { format: 'es', plugins: () => [notices.worker] },
   // Two Vitest projects (session 13). "unit": fast tests, full parallelism, the 5 s default timeout.

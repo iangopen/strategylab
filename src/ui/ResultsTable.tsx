@@ -45,7 +45,7 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
                 <th scope="row">{row.label}</th>
                 {columns.map((c, i) => (
                   <td key={i} data-col={i} data-raw={row.raw(c.outcome.stats)}>
-                    {row.cell(c.outcome.stats)}
+                    <Cell text={row.cell(c.outcome.stats)} />
                   </td>
                 ))}
               </tr>
@@ -54,5 +54,16 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
         </table>
       </div>
     </section>
+  );
+}
+
+/** A cell's text; an interval's bracket stays on one line when a narrow screen wraps the cell. */
+function Cell({ text }: { text: string }) {
+  const at = text.indexOf(" (");
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)} <span className="interval">{text.slice(at + 1)}</span>
+    </>
   );
 }

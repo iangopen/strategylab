@@ -21,9 +21,13 @@ interface Props {
   copyBlocker: string | null;
   copyStatus: CopyStatus | null;
   onCopyLink: () => void;
+  /** A finished run is displayed and nothing is running: the report can open. */
+  reportAvailable: boolean;
+  onOpenReport: () => void;
+  reportButtonRef: React.RefObject<HTMLButtonElement | null>;
 }
 
-export function RunControls({ running, canRun, progress, elapsedMs, status, announcement, onRun, onCancel, copyBlocker, copyStatus, onCopyLink }: Props) {
+export function RunControls({ running, canRun, progress, elapsedMs, status, announcement, onRun, onCancel, copyBlocker, copyStatus, onCopyLink, reportAvailable, onOpenReport, reportButtonRef }: Props) {
   return (
     <section className="panel run-controls">
       <div className="run-row">
@@ -40,6 +44,11 @@ export function RunControls({ running, canRun, progress, elapsedMs, status, anno
         <span className="copy-link" title={copyBlocker ?? "Copy a link to this scenario. Opening it restores these settings and strategies."}>
           <button type="button" disabled={copyBlocker !== null} onClick={onCopyLink} aria-describedby={copyBlocker ? "copy-link-why" : undefined}>
             Copy link
+          </button>
+        </span>
+        <span title={reportAvailable ? "A one-page report of the last run, ready to print or save as PDF." : "Run a simulation first; the report describes the last finished run."}>
+          <button type="button" ref={reportButtonRef} disabled={!reportAvailable} onClick={onOpenReport}>
+            Report
           </button>
         </span>
       </div>

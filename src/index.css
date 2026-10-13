@@ -145,6 +145,14 @@ table.results th, table.results td { padding: 6px 10px; border-bottom: 1px solid
 table.results th[scope="row"], table.results thead th:first-child { text-align: left; font-weight: normal; color: var(--muted); }
 table.results tr.emphasis { background: var(--emphasis-bg); font-weight: 700; }
 table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700; }
+/* Narrow screens: labels and interval cells wrap ("17.070%" over "(16.345–17.820%)") so values stay in view. */
+table.results .interval { white-space: nowrap; }
+@media (max-width: 640px) {
+  table.results { font-size: 0.8rem; }
+  table.results th[scope="row"] { white-space: normal; min-width: 7.5em; }
+  table.results td { white-space: normal; }
+  table.results th, table.results td { padding: 5px 5px; }
+}
 
 .chart-placeholder {
   min-height: 140px; border: 1px dashed var(--border); border-radius: 6px;
@@ -220,3 +228,65 @@ table.results tr.emphasis th[scope="row"] { color: var(--text); font-weight: 700
   .outcome-row-tools { flex-direction: row; justify-content: space-between; align-items: center; padding-top: 0; }
 }
 .strip-levels { margin: 4px 0 0; padding-left: 1.2em; font-size: 0.8rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0 16px; }
+
+/* One-page report (session 19). On screen it is a 7.5in-wide sheet (the printable width of US Letter
+   with 0.5in margins); in print it fills the page. Black and white safe: no meaning in color alone
+   (every chart panel and table column carries its text label), borders instead of fills. */
+.report-page { padding: 16px; }
+.report-tools { max-width: 7.5in; margin: 0 auto 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.report {
+  max-width: 7.5in; margin: 0 auto; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.4in 0.45in;
+  font-size: 9pt; line-height: 1.35;
+}
+.report h1 { font-size: 15pt; margin: 0 0 2px; }
+.report h1:focus { outline: none; }
+.report h1:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.report h2 { font-size: 10pt; margin: 0 0 3px; text-transform: none; border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.report-sub { margin: 0; color: var(--muted); font-size: 8pt; }
+.report-head { margin-bottom: 8px; }
+.report-section { margin-top: 8px; break-inside: avoid; }
+.report-takeaways { margin: 2px 0 0; padding-left: 1.2em; }
+.report-takeaways li { margin-bottom: 2px; }
+.report-note { margin: 2px 0; color: var(--muted); font-size: 7.5pt; }
+.report-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 8pt; }
+.report-table th, .report-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); text-align: right; vertical-align: top; }
+.report-table thead th { font-weight: 600; white-space: nowrap; }
+.report-table th[scope="row"], .report-table thead th:first-child { text-align: left; font-weight: normal; color: var(--muted); }
+.report-table .swatch { width: 8px; height: 8px; margin-right: 4px; }
+.report-config { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1px 16px; font-size: 8pt; }
+.report-config div { display: flex; gap: 6px; min-width: 0; }
+/* The strategy list is the longest line: it spans both columns. */
+.report-config div.wide { grid-column: 1 / -1; }
+.report-config dt { color: var(--muted); flex: none; }
+.report-config dt::after { content: ":"; }
+.report-config dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.report-link { margin: 2px 0 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 6.5pt; line-height: 1.25; overflow-wrap: anywhere; word-break: break-all; }
+.report-chart { display: grid; gap: 4px 10px; margin-top: 2px; }
+.report-chart .chart-panel figcaption { font-size: 8pt; margin-bottom: 0; }
+.report-chart .canvas-box canvas { cursor: default; }
+/* More than four strategies: smaller type in the table and the takeaways, so eight columns fit one page. */
+.report.dense .report-takeaways { font-size: 8pt; }
+.report.dense .report-table { font-size: 6.8pt; line-height: 1.15; }
+.report.dense .report-table th, .report.dense .report-table td { padding: 1px 3px; }
+.report.dense .report-table th[scope="row"] { width: 18%; }
+.report.dense .report-section { margin-top: 5px; }
+.report.dense .report-takeaways li { margin-bottom: 1px; line-height: 1.25; }
+.report.dense .report-config { font-size: 7.5pt; }
+@media (max-width: 640px) {
+  .report-page { padding: 8px; }
+  .report { padding: 12px; font-size: 10pt; }
+  .report-config { grid-template-columns: minmax(0, 1fr); }
+  .report-section { overflow-x: auto; }
+  .report-chart { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+@page { size: letter; margin: 0.5in; }
+@media print {
+  :root { background: #fff; }
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  .report-page { padding: 0; }
+  .report { max-width: none; border: none; border-radius: 0; padding: 0; }
+  .report a { color: inherit; text-decoration: none; }
+}

@@ -15,6 +15,7 @@ import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls, type CopyStatus } from "./ui/RunControls";
 import { copyBlocker, encodeScenarioLink } from "./share/link";
 import { formatElapsed, instanceLabel, runAnnouncement } from "./ui/format";
+import { ReportView } from "./report/ReportView";
 import { previewContextOf } from "./ui/rules/preview";
 import { StrategyPicker } from "./ui/StrategyPicker";
 import { applyThemePref, loadThemePref, type ThemePref } from "./ui/theme";
@@ -24,6 +25,8 @@ import type { SimRequest } from "./worker/sim.worker";
 interface CompletedRun {
   result: MonteCarloResult;
   labels: string[];
+  /** The scenario exactly as it was when Run was clicked (the report and its link use it). */
+  scenario: ScenarioConfig;
   /** JSON of the scenario that produced this result, to flag stale results. */
   scenarioJson: string;
   /** The exact request that produced this result (charts and replay use it, not the live form). */
@@ -54,6 +57,16 @@ export default function App() {
   const [replay, setReplay] = useState<Replay | null>(null);
   const [replayStatus, setReplayStatus] = useState<string | null>(null);
   const replayRequestId = useRef(0);
+  // The one-page report for the displayed run. View state, not scenario state.
+  const [reportOpen, setReportOpen] = useState(false);
+  const reportButton = useRef<HTMLButtonElement | null>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (!reportOpen && returnFocus.current) {
+      returnFocus.current = false;
+      reportButton.current?.focus();
+    }
+  }, [reportOpen]);
 
   useEffect(() => applyThemePref(theme), [theme]);
 
@@ -143,6 +156,7 @@ export default function App() {
       setRun({
         result,
         labels,
+        scenario: snapshot,
         scenarioJson: JSON.stringify(snapshot),
         request,
         refs: { start: request.session.startBankroll, stopWin: request.session.stopWin, stopLoss: request.session.stopLoss },
@@ -178,6 +192,21 @@ export default function App() {
   }, [run, selectedSession, running]);
 
   const columns = useMemo(() => (run ? run.result.perStrategy.map((outcome, i) => ({ label: run.labels[i] ?? outcome.strategyId, outcome, colorIndex: i })) : []), [run]);
+
+  if (reportOpen && run) {
+    return (
+      <ReportView
+        result={run.result}
+        labels={run.labels}
+        scenario={run.scenario}
+        refs={run.refs}
+        onClose={() => {
+          returnFocus.current = true;
+          setReportOpen(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -223,6 +252,9 @@ export default function App() {
             copyBlocker={linkBlocker}
             copyStatus={copyStatus}
             onCopyLink={() => void handleCopyLink()}
+            reportAvailable={run !== null && !running}
+            onOpenReport={() => setReportOpen(true)}
+            reportButtonRef={reportButton}
           />
           <ResultsTable columns={columns} nSessions={run?.result.nSessions ?? 0} stale={run !== null && run.scenarioJson !== JSON.stringify(scenario)} />
           {run ? (
