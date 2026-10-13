@@ -31,6 +31,9 @@ const SPECS: StrategySpec[] = [
   { strategy: CUSTOM, config: {} },
 ];
 
+/** Stats registered after the golden capture (session 18, risk metrics), in registry order. */
+const STATS_ADDED_AFTER_CAPTURE = ["pProfitLow", "pProfitHigh", "pBustLow", "pBustHigh", "bustRoundsMedian", "bustRoundsP10", "pDrawdownHalf"];
+
 /** 2,500 sessions: more than the 2,000-session band subset, so observed and unobserved sessions both count. */
 const N = 2500;
 const SCENARIOS: [string, Game, SessionConfig, number][] = [
@@ -98,7 +101,18 @@ describe("runMonteCarlo outputs other than the bands are bit-identical to the pr
   });
   for (const s of SCENARIOS) {
     it(`${s[0]}: 9 strategies x ${N} sessions`, () => {
-      expect(run(s)).toEqual(stored[s[0]]);
+      const got = run(s);
+      const want = stored[s[0]]!;
+      // Every stat in the golden file must still match exactly. Stats registered after the capture are
+      // checked separately below; the golden file is never regenerated to admit them, because that
+      // would also accept any change to the stored numbers.
+      const storedKeys = Object.keys(want.stats[0]!);
+      const onlyStored = got.stats.map((st) => Object.fromEntries(storedKeys.map((k) => [k, st[k]])));
+      expect({ ...got, stats: onlyStored }).toEqual(want);
+      for (const st of got.stats) {
+        expect(Object.keys(st).filter((k) => !storedKeys.includes(k))).toEqual(STATS_ADDED_AFTER_CAPTURE);
+        for (const k of STATS_ADDED_AFTER_CAPTURE) expect(st[k] === "NaN" || Number.isFinite(Number(st[k])), `${k} = ${st[k]}`).toBe(true);
+      }
     });
   }
 });
