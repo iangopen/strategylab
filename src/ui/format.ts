@@ -1,4 +1,5 @@
 // Display helpers shared by UI components. Engine money is cents; converted here.
+import { STATS } from "../engine/stats/registry";
 import type { StatDef } from "../engine/stats/types";
 import { getStrategy } from "../engine/strategies/registry";
 import type { StrategyInstance } from "../scenario";
@@ -21,6 +22,69 @@ export function formatStat(format: StatDef["format"], v: number | undefined): st
       return int.format(v);
   }
 }
+
+const pctFormats = new Map<number, Intl.NumberFormat>();
+function pctWith(digits: number): Intl.NumberFormat {
+  let f = pctFormats.get(digits);
+  if (!f) {
+    f = new Intl.NumberFormat("en-US", { style: "percent", minimumFractionDigits: digits, maximumFractionDigits: digits });
+    pctFormats.set(digits, f);
+  }
+  return f;
+}
+
+/**
+ * THE interval display, shared by the results table and the report: "17.1% (16.4–17.8%)" for a
+ * proportion (fractions in, percent out). When a bound is negative the range is spelled out with "to"
+ * ("-2.76% (-2.84% to -2.67%)"), so a minus sign is never read as a dash. A missing point is "—";
+ * missing bounds leave the point alone.
+ */
+export function formatInterval(value: number | undefined, low: number | undefined, high: number | undefined, digits = 1): string {
+  if (value === undefined || !Number.isFinite(value)) return "—";
+  const f = pctWith(digits);
+  const point = f.format(value);
+  if (low === undefined || high === undefined || !Number.isFinite(low) || !Number.isFinite(high)) return point;
+  if (low < 0 || high < 0) return `${point} (${f.format(low)} to ${f.format(high)})`;
+  // "16.4–17.8%": the percent sign once, after the upper bound.
+  const lo = f.format(low).replace(/%$/, "");
+  return `${point} (${lo}–${f.format(high)})`;
+}
+
+/** Stats shown as one row with their 95% interval: point id -> [low id, high id]. */
+export const INTERVAL_ROWS: Readonly<Record<string, readonly [string, string]>> = {
+  pProfit: ["pProfitLow", "pProfitHigh"],
+  pBust: ["pBustLow", "pBustHigh"],
+};
+const INTERVAL_PARTS = new Set(Object.values(INTERVAL_ROWS).flat());
+
+/** Percent digits in the results table (the SE row needs three to be readable). */
+export const TABLE_PCT_DIGITS = 3;
+
+/** One row of the results table: a registered stat, with its interval folded in where it has one. */
+export interface TableRow {
+  /** The point stat's id (the row's data-stat). */
+  id: string;
+  label: string;
+  emphasis: boolean;
+  /** The cell text for one strategy's stats. */
+  cell: (stats: Readonly<Record<string, number>>) => string;
+  /** The exact numbers behind the cell, as String(double) (a bit-exact round trip), "|"-separated. */
+  raw: (stats: Readonly<Record<string, number>>) => string;
+}
+
+/** The results table's rows: registry order, each interval's low/high rows folded into its point row. */
+export const TABLE_ROWS: readonly TableRow[] = STATS.filter((s) => !INTERVAL_PARTS.has(s.id)).map((s): TableRow => {
+  const parts = INTERVAL_ROWS[s.id];
+  if (!parts) return { id: s.id, label: s.label, emphasis: s.emphasis === true, cell: (v) => formatStat(s.format, v[s.id]), raw: (v) => String(v[s.id]) };
+  const [lo, hi] = parts;
+  return {
+    id: s.id,
+    label: `${s.label}, with 95% interval`,
+    emphasis: s.emphasis === true,
+    cell: (v) => formatInterval(v[s.id], v[lo], v[hi], TABLE_PCT_DIGITS),
+    raw: (v) => [v[s.id], v[lo], v[hi]].map(String).join("|"),
+  };
+});
 
 export const CUSTOM_RULE_FALLBACK_LABEL = "Custom rule";
 

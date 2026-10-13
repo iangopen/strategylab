@@ -1,7 +1,6 @@
 import type { StrategyOutcome } from "../engine/montecarlo";
-import { STATS } from "../engine/stats/registry";
 import { seriesColorVar } from "./charts/adapters";
-import { formatStat } from "./format";
+import { TABLE_ROWS } from "./format";
 
 interface Props {
   /** colorIndex = the instance's index in the run: its ONE color everywhere (charts, replay, here). */
@@ -10,7 +9,7 @@ interface Props {
   stale: boolean;
 }
 
-/** One column per strategy instance, one row per REGISTERED stat. No per-stat code here. */
+/** One column per strategy instance, one row per REGISTERED stat (intervals folded in: TABLE_ROWS). No per-stat code here. */
 export function ResultsTable({ columns, nSessions, stale }: Props) {
   if (columns.length === 0) {
     return (
@@ -41,12 +40,12 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
             </tr>
           </thead>
           <tbody>
-            {STATS.map((stat) => (
-              <tr key={stat.id} data-stat={stat.id} className={stat.emphasis ? "emphasis" : undefined}>
-                <th scope="row">{stat.label}</th>
+            {TABLE_ROWS.map((row) => (
+              <tr key={row.id} data-stat={row.id} className={row.emphasis ? "emphasis" : undefined}>
+                <th scope="row">{row.label}</th>
                 {columns.map((c, i) => (
-                  <td key={i} data-col={i}>
-                    {formatStat(stat.format, c.outcome.stats[stat.id])}
+                  <td key={i} data-col={i} data-raw={row.raw(c.outcome.stats)}>
+                    {row.cell(c.outcome.stats)}
                   </td>
                 ))}
               </tr>

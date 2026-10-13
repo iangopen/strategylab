@@ -4,9 +4,8 @@
 // assertions only (no fixed sleeps).
 import { expect, type Locator, type Page } from "@playwright/test";
 import { runMonteCarlo } from "../src/engine/montecarlo";
-import { STATS } from "../src/engine/stats/registry";
 import { toSimRequest, type ScenarioConfig } from "../src/scenario";
-import { formatStat } from "../src/ui/format";
+import { TABLE_ROWS } from "../src/ui/format";
 import { resolveStrategies } from "../src/worker/resolve";
 
 export const BASE_PATH = "/strategylab/";
@@ -40,14 +39,14 @@ export async function runAndWait(page: Page, timeout = 120_000) {
   await expect(page.getByTestId("run-status")).toContainText(/^Done: /, { timeout });
 }
 
-/** Stat values as the results table would print them, computed by the engine in Node. */
+/** Stat values as the results table would print them (one entry per table row), computed by the engine in Node. */
 export function engineTable(s: ScenarioConfig): Record<string, string[]> {
   const req = toSimRequest(s);
   const r = runMonteCarlo(req.game, resolveStrategies(req.strategies), req.session, req.nSessions, req.masterSeed);
-  return Object.fromEntries(STATS.map((stat) => [stat.id, r.perStrategy.map((o) => formatStat(stat.format, o.stats[stat.id]))]));
+  return Object.fromEntries(TABLE_ROWS.map((row) => [row.id, r.perStrategy.map((o) => row.cell(o.stats))]));
 }
 
-/** The UI's results table must show exactly the engine's values, every registered stat, every column. */
+/** The UI's results table must show exactly the engine's values, every table row, every column. */
 export async function expectTableMatchesEngine(page: Page, s: ScenarioConfig) {
   const expected = engineTable(s);
   const table = page.getByTestId("results-table");
