@@ -104,8 +104,30 @@ describe("takeaways", () => {
     const kelly: TakeawayStrategy = { label: "Kelly", stats: { evPerWagered: NaN, evSE: NaN, pBust: 0, pBustLow: 0, pBustHigh: 0.000384, pProfit: 0, pProfitLow: 0, pProfitHigh: 0.000384, bustRoundsMedian: NaN, bustRoundsP10: NaN } };
     const t = takeaways({ edge: EDGE, nSessions: N, strategies: [flat, kelly] });
     expect(t[1]).toContain("Flat -2.76% (-2.84% to -2.68%) and Kelly placed no bets");
+    // A strategy that never bet is not "never bust": it is left out of the bust comparison.
+    expect(t[2]).toBe("Share of sessions that went bust (fell below the table minimum or could not cover the next bet), with 95% intervals: Flat 1.6% (1.4–1.9%).");
+    expect(t[2]).not.toContain("Kelly");
     expect(takeaways({ edge: 0, nSessions: N, strategies: [flat] })[0]).toMatch(/^This game is fair: /);
     expect(takeaways({ edge: -0.1, nSessions: N, strategies: [flat] })[0]).toMatch(/^Every bet in this game gains 10.00% of its stake on average \(a player edge\)/);
+  });
+
+  it("more than three strategies: each sentence gives the range (lowest and highest), not every strategy, so the page stays one page", () => {
+    const many = [
+      strat("S1", { ev: -0.026, se: 0.002, bust: [0.014, 0.009, 0.02], med: 938, p10: 763.6 }),
+      strat("S2", { ev: -0.016, se: 0.009, bust: [0.159, 0.144, 0.176], med: 14, p10: 6.7 }),
+      strat("S3", { ev: -0.028, se: 0.002, bust: [0.165, 0.149, 0.182], med: 644, p10: 394 }),
+      strat("S4", { ev: -0.031, se: 0.005, bust: [0.15, 0.135, 0.166], med: 43, p10: 26.9 }),
+      strat("S5", { ev: -0.027, se: 0.006, bust: [0.143, 0.128, 0.159], med: 13, p10: 10 }),
+    ];
+    const t = takeaways({ edge: EDGE, nSessions: 2000, strategies: many });
+    for (const s of t) console.log(`[takeaway, 5 strategies] ${s}`);
+    expect(t[1]).toContain("ranged from S4 -3.10% (-4.08% to -2.12%) to S2 -1.60% (-3.36% to 0.16%)");
+    expect(t[1]).toContain("for S2 the result is not clearly different from zero at this sample size");
+    expect(t[1]).toContain("the difference between the strategies isn't clear at this sample size");
+    expect(t[2]).toContain("ranged from S1 1.4% (0.9–2.0%) to S3 16.5% (14.9–18.2%)");
+    expect(t[2]).toContain("S3 went bust more often than S1, and their intervals do not overlap");
+    expect(t[3]).toBe("Counting busted sessions only, the median bust came as early as round 13 (S5) and as late as round 938 (S1).");
+    for (const s of t) expect(s.length, s).toBeLessThan(330);
   });
 
   it("tone: no advice, tipster or 'winning' language in any generated sentence", () => {

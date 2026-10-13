@@ -48,6 +48,14 @@ export function evInterval(stats: Readonly<Record<string, number>>): Interval | 
 }
 
 const pct2 = (v: number) => formatInterval(v, undefined, undefined, 2);
+
+/** Up to this many strategies, sentences list each one; above it they give the range (lowest and highest). */
+export const LIST_LIMIT = 3;
+
+/** Names, or a count when there are more than LIST_LIMIT of them. */
+function names(items: readonly string[]): string {
+  return items.length > LIST_LIMIT ? `${items.length} strategies` : list(items);
+}
 const UNCLEAR = "isn't clear at this sample size";
 
 /** "A, B and C" */
@@ -70,22 +78,28 @@ function evSentence(input: TakeawayInput): string {
     return iv ? [{ label: s.label, ev: s.stats.evPerWagered!, iv }] : [];
   });
   const noBets = input.strategies.filter((s) => !evInterval(s.stats)).map((s) => `${s.label} placed no bets`);
-  const values = measured.map((m) => `${m.label} ${formatInterval(m.ev, m.iv.low, m.iv.high, 2)}`);
-  let sentence = `Measured EV per $ wagered, with 95% intervals: ${list([...values, ...noBets])}`;
+  const one = (m: (typeof measured)[number]) => `${m.label} ${formatInterval(m.ev, m.iv.low, m.iv.high, 2)}`;
+  const byEv = [...measured].sort((a, b) => a.ev - b.ev);
+  let sentence: string;
+  if (input.strategies.length <= LIST_LIMIT || measured.length < 2) {
+    sentence = `Measured EV per $ wagered, with 95% intervals: ${list([...measured.map(one), ...noBets])}`;
+  } else {
+    const none = noBets.length === 0 ? "" : ` (${names(input.strategies.filter((s) => !evInterval(s.stats)).map((s) => s.label))} placed no bets)`;
+    sentence = `Measured EV per $ wagered, with 95% intervals, ranged from ${one(byEv[0]!)} to ${one(byEv[byEv.length - 1]!)}${none}`;
+  }
   if (measured.length === 0) return `${sentence}, so there is no EV per $ to compare.`;
 
   const clauses: string[] = [];
   const misses = measured.filter((m) => !contains(m.iv, theory)).map((m) => m.label);
   if (misses.length === 0) clauses.push(`${measured.length === 1 ? "the interval includes" : "every interval includes"} the theoretical ${pct2(theory)}`);
-  else clauses.push(`for ${list(misses)} the interval misses the theoretical ${pct2(theory)}, which a 95% interval does by chance about one time in twenty`);
+  else clauses.push(`for ${names(misses)} the interval misses the theoretical ${pct2(theory)}, which a 95% interval does by chance about one time in twenty`);
   if (Math.abs(input.edge) >= 1e-12) {
     const nearZero = measured.filter((m) => contains(m.iv, 0)).map((m) => m.label);
-    if (nearZero.length > 0) clauses.push(`for ${list(nearZero)} the result is not clearly different from zero at this sample size`);
+    if (nearZero.length > 0) clauses.push(`for ${names(nearZero)} the result is not clearly different from zero at this sample size`);
   }
   if (measured.length >= 2) {
-    const sorted = [...measured].sort((a, b) => a.ev - b.ev);
-    const lo = sorted[0]!;
-    const hi = sorted[sorted.length - 1]!;
+    const lo = byEv[0]!;
+    const hi = byEv[byEv.length - 1]!;
     if (overlaps(lo.iv, hi.iv)) clauses.push(`the difference between the strategies ${UNCLEAR}`);
     else clauses.push(`${lo.label} measured a lower EV per $ than ${hi.label}, and their intervals do not overlap`);
   }
@@ -100,8 +114,10 @@ interface Bust {
   busts: number;
 }
 
+/** Bust rates of the strategies that placed bets (one that never bet cannot go bust, so it is not compared). */
 function busts(input: TakeawayInput): Bust[] {
   return input.strategies.flatMap((s) => {
+    if (!evInterval(s.stats)) return [];
     const { pBust: p, pBustLow: low, pBustHigh: high } = s.stats;
     if (p === undefined || low === undefined || high === undefined || ![p, low, high].every(Number.isFinite)) return [];
     return [{ label: s.label, p, iv: { low, high }, busts: Math.round(p * input.nSessions) }];
@@ -116,10 +132,10 @@ function bustSentence(input: TakeawayInput): string {
     const upper = Math.max(...b.map((x) => x.iv.high));
     return `No session went bust for ${b.length === 1 ? b[0]!.label : "any strategy"} in ${input.nSessions.toLocaleString("en-US")} sessions; the 95% interval still allows a bust rate of up to ${pct2(upper)}.`;
   }
-  const parts = b.map((x) => (x.busts === 0 ? `${x.label} never (interval up to ${pct2(x.iv.high)})` : `${x.label} ${formatInterval(x.p, x.iv.low, x.iv.high)}`));
-  let sentence = `${what}: ${list(parts)}`;
+  const one = (x: Bust) => (x.busts === 0 ? `${x.label} never (interval up to ${pct2(x.iv.high)})` : `${x.label} ${formatInterval(x.p, x.iv.low, x.iv.high)}`);
+  const sorted = [...b].sort((x, y) => x.p - y.p);
+  let sentence = b.length <= LIST_LIMIT ? `${what}: ${list(b.map(one))}` : `${what}, ranged from ${one(sorted[0]!)} to ${one(sorted[sorted.length - 1]!)}`;
   if (b.length >= 2) {
-    const sorted = [...b].sort((x, y) => x.p - y.p);
     const lo = sorted[0]!;
     const hi = sorted[sorted.length - 1]!;
     sentence += overlaps(lo.iv, hi.iv) ? `; the difference in bust rates ${UNCLEAR}` : `; ${hi.label} went bust more often than ${lo.label}, and their intervals do not overlap`;
@@ -128,14 +144,21 @@ function bustSentence(input: TakeawayInput): string {
 }
 
 function timingSentence(input: TakeawayInput): string | null {
-  const parts = input.strategies.flatMap((s) => {
+  const timed = input.strategies.flatMap((s) => {
     const med = s.stats.bustRoundsMedian;
     const p10 = s.stats.bustRoundsP10;
     if (med === undefined || p10 === undefined || !Number.isFinite(med) || !Number.isFinite(p10)) return [];
-    return [`half of ${s.label}'s busts came by round ${formatStat("ratio", med)} and the earliest tenth by round ${formatStat("ratio", p10)}`];
+    return [{ label: s.label, med, p10 }];
   });
-  if (parts.length === 0) return null;
-  return `Counting busted sessions only, ${parts.join("; ")}.`;
+  if (timed.length === 0) return null;
+  const r = (v: number) => formatStat("ratio", v);
+  if (timed.length > LIST_LIMIT) {
+    const byMed = [...timed].sort((a, b) => a.med - b.med);
+    const first = byMed[0]!;
+    const last = byMed[byMed.length - 1]!;
+    return `Counting busted sessions only, the median bust came as early as round ${r(first.med)} (${first.label}) and as late as round ${r(last.med)} (${last.label}).`;
+  }
+  return `Counting busted sessions only, ${timed.map((t) => `half of ${t.label}'s busts came by round ${r(t.med)} and the earliest tenth by round ${r(t.p10)}`).join("; ")}.`;
 }
 
 /** A strategy that clearly wins most sessions yet clearly loses per dollar: the core lesson, when the numbers show it. */
