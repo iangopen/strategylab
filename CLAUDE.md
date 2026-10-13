@@ -56,6 +56,7 @@ npm run build         # strict type check (app, config, E2E specs) + production 
 npm run lint          # oxlint
 npm run e2e           # Playwright: builds with VITE_BASE=/strategylab/, serves on :4180, runs e2e/*.spec.ts
 npm run build:pages   # the GitHub Pages build (VITE_BASE=/strategylab/)
+npm run bench         # one fixed, seeded 100k-session run, timed; prints sessions/s (one machine's numbers, never a claim)
 npm run screenshots   # regenerate docs/*.png + public/og-image.png from the LIVE site (SCREENSHOT_URL overrides); NOT a test
 npx playwright install chromium   # once per machine, before the first e2e run
 ```
@@ -94,9 +95,9 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 8. **runSession(game, strategy, config, seed, opts)** returns finalBankroll, rounds, totalWagered, peak, maxDrawdown, longestLosingStreak, endReason, and path only if `opts.recordPath`.
 
-9. **Stats are a plug-in layer** (`src/engine/stats/`). A stat is `{ id; label; format: "money" | "pct" | "ratio" | "int"; emphasis?: boolean; compute(acc: Accumulator, ctx: RunContext): number }`, where `RunContext` is read-only `{ game, edge, config, nSessions }` (session 3). The Accumulator is built in a single pass per strategy and holds running sums (final, wagered, rounds, sums of squares for SE), endReason counts, and one `Float64Array` per strategy for EACH per-session column: final bankroll, max drawdown, longest losing streak (session 3). These columns NEVER leave the worker; only derived outputs cross, typed arrays via `Comlink.transfer`. Every percentile goes through ONE function, `quantileSorted` (type 7) in `stats/quantile.ts`, on a sorted copy made once per column (`sortedColumn`). NEVER retain full paths for all sessions. Stats are registered in `stats/registry.ts`, and the results table renders purely from that registry.
+9. **Stats are a plug-in layer** (`src/engine/stats/`). A stat is `{ id; label; format: "money" | "pct" | "ratio" | "int"; emphasis?: boolean; compute(acc: Accumulator, ctx: RunContext): number }`, where `RunContext` is read-only `{ game, edge, config, nSessions }` (session 3). The Accumulator is built in a single pass per strategy and holds running sums (final, wagered, rounds, sums of squares for SE), endReason counts, and one `Float64Array` per strategy for EACH per-session column: final bankroll, max drawdown, longest losing streak (session 3), rounds to bust (session 18; NaN unless the session busted, so sorting puts busts first). These columns NEVER leave the worker; only derived outputs cross, typed arrays via `Comlink.transfer`. Every percentile goes through ONE function, `quantileSorted` (type 7) in `stats/quantile.ts`, on a sorted copy made once per column (`sortedColumn`). NEVER retain full paths for all sessions. Stats are registered in `stats/registry.ts`, and the results table renders purely from that registry.
 
-10. **runMonteCarlo(game, strategies[], config, nSessions, masterSeed, onProgress)** runs every strategy over the SAME session seeds and returns per strategy: stat values, raw endReason counts, the first 50 session paths (streaming min/max downsampled), final-bankroll histogram counts over ONE set of 50 bins shared by every strategy in the run, and p5/p25/p50/p75/p95 percentile bands at the ADAPTIVE checkpoints of `checkpoints.ts` (session 12: every round 0..min(maxRounds, 64), then +25% steps capped at ceil(maxRounds / 200), ending exactly at maxRounds; at most 287 checkpoints), from the first min(2000, n) sessions (the same indices for every strategy). Band and sample-path sessions are observed through the runner's optional per-round `observer`; every other session pays only a branch check. Memory per observed session is independent of maxRounds.
+10. **runMonteCarlo(game, strategies[], config, nSessions, masterSeed, onProgress)** runs every strategy over the SAME session seeds and returns per strategy: stat values, raw endReason counts, the first 50 session paths (streaming min/max downsampled), final-bankroll histogram counts over ONE set of 50 bins shared by every strategy in the run, and p5/p25/p50/p75/p95 percentile bands at the ADAPTIVE checkpoints of `checkpoints.ts` (session 12: dense to round 64, then geometric, ending exactly at maxRounds; at most 287), from the first min(2000, n) sessions (the same indices for every strategy). Band and sample-path sessions are observed through the runner's optional per-round `observer`; every other session pays only a branch check. Memory per observed session is independent of maxRounds.
 
 11. **Worker.** `src/worker/sim.worker.ts` exposes runMonteCarlo via Comlink. The progress callback is passed with `Comlink.proxy` and reported about every 2%. Cancel = `worker.terminate()`, then respawn (Comlink cannot interrupt a sync loop). The UI NEVER runs a simulation on the main thread. `client.ts` owns the worker lifecycle.
 
@@ -130,16 +131,17 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 Read the relevant section BEFORE changing that area. These files are plain paths, deliberately not @imports.
 
 - `docs/spec.md`: full folder map; chart rule implementation notes (fan zoom, label knockouts, colors); how to add a strategy (with the Strategy specs and test kit) and how to add a stat; the **rule language** (grammar, evaluation order, limits, worked examples); the **URL scenario format** (key map, limits, loading, history); **sports odds** (conversions, de-vig, format toggle, cents rounding / carry, link representation); **multi-outcome games** (model, one draw per round, payouts, Kelly generalized, editor, replay strip, scenario v4); the roadmap.
-- `docs/history.md`: the STATUS log (sessions 1-17, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
-- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were checked at `b14f63d`; refresh any you move.
+- `docs/history.md`: the STATUS log (sessions 1-18, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
+- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were re-checked in session 18; refresh any you move.
 - Outside the repo (local only, never committed here): `C:\devwork\portfolio-audit\strategylab\INTERVIEW-PREP.md` and `NEXT-STEPS.md` (scored candidates, recommended order, the stage 1 prompt).
 
-## Current state (session 15, 2026-09-29)
+## Current state (session 18, 2026-10-13)
 
 All roadmap sessions are done and verified (test counts: see "Docs and disclosures"), CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
 - **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep them always mounted. Select status regions by role AND name in specs (the link banner is "Opened link").
 - **Licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
 - `.claude/settings.local.json` is git-ignored here.
+- **Session 18 (STATUS 145-152):** risk rows (Wilson 95% intervals on P(profit) and P(bust), rounds to bust over busted sessions, P(drawdown ≥ 50%)); the Monte Carlo golden lists stats added after its capture in `STATS_ADDED_AFTER_CAPTURE` (add new ids there; never regenerate the golden); an RNG chi-square test (`rng.stats.test.ts`); `npm run bench`.
 - **Local gotcha:** if Playwright lists far fewer than 44 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
 
 Only record in STATUS what was actually verified.
@@ -147,10 +149,10 @@ Only record in STATUS what was actually verified.
 ## Docs and disclosures (session 16, 2026-09-29)
 
 Verified (docs/history.md STATUS 134-140):
-- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (719 Vitest, 44 Playwright in 10 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
+- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (747 Vitest with 6 opt-in skipped, 44 Playwright in 10 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
 - **Privacy:** no PRIVACY.md, because nothing leaves the browser (same-origin GETs only, no cookies, one localStorage key `betting-lab.theme`, kept under its old name). Adding any network call, storage or analytics means writing a PRIVACY.md first.
 - **Disclaimer:** the footer line stays; a line under the tagline says adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** (https://www.ncpgambling.org/help-treatment/, checked in a browser 2026-09-29). The README carries it; `e2e/app.spec.ts` checks it.
-- **Credits** table in the README, full texts in the generated `third-party-licenses.txt`; original favicon. **LICENSE** is MIT ("2026", "Ian Gopen"), matching `package.json`. **GitHub About:** an 86-character description, the live URL, 8 topics.
+- **Credits** in the README and `third-party-licenses.txt`; original favicon; MIT LICENSE matching `package.json`; GitHub About set (description, URL, 8 topics).
 
 Only Ian can supply (no placeholders were published): real usage numbers; a personal one-line pitch (the README uses the subtitle); whether to add a non-US helpline; and confirming 1-800-MY-RESET (the prompt had suggested 1-800-GAMBLER; NCPG lists MY-RESET).
 
@@ -162,6 +164,5 @@ Only Ian can supply (no placeholders were published): real usage numbers; a pers
 - Sports mode stores decimal prices at full precision after a format switch; the field shows 2 decimals, the readout shows the real payout (by design).
 - The address bar is not kept in sync while editing: after opening a link and editing, a reload restores the LINK until Copy link is clicked again.
 - Rule language gaps by design: one action per entry, no step-back, no payout-capped bet, no bankroll-proportional stake (those stay built-ins). Only Martingale x2 is proven bit-identical to its rule form.
-- Links made with the pre-rename Pages address are permanently dead (no redirect). (The Ubuntu 26 `ubuntu-latest` notice does not apply: every CI job pins `ubuntu-24.04`.)
-- Next directions (session 17 plan, nothing built): risk metrics with intervals, then a reproducible one-page report, then parameter sweeps; see `NEXT-STEPS.md` in the audit folder.
-- Replay zoom is x-only; hover values go to a text readout, not an on-canvas tooltip. Cosmetic: a 1,000-session run reports "in 0.0s".
+- Next directions (`NEXT-STEPS.md` in the audit folder): stage 1, risk metrics, is DONE (session 18); next a reproducible one-page report, then parameter sweeps.
+- Replay zoom is x-only; hover values go to a text readout, not an on-canvas tooltip.
