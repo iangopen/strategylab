@@ -1,4 +1,4 @@
-// Generates the README screenshots and the Open Graph image from the real app (not hand-made).
+// Generates the README screenshots, the Open Graph image and the sample report PDF from the real app (not hand-made).
 // Run: npm run screenshots   (captures https://iangopen.github.io/strategylab/ unless SCREENSHOT_URL is set)
 // Not part of the test suite: it lives outside e2e/ and runs only through playwright.screenshots.config.ts.
 //
@@ -85,4 +85,16 @@ test("Open Graph image: 1200 x 630, the same default run, results in view", asyn
   await page.evaluate(() => window.scrollTo(0, 0));
   await save(await page.screenshot(), "public/og-image.png");
   await page.close();
+});
+
+test("Sample report: the default run's one-page report as Chromium prints it (docs/report-sample.pdf)", async ({ page }) => {
+  await openAndRun(page);
+  await page.getByRole("button", { name: "Report", exact: true }).click();
+  await expect(page.getByTestId("report")).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  const pdf = await page.pdf({ format: "Letter", preferCSSPageSize: true, printBackground: true });
+  const pages = (pdf.toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
+  expect(pages, "the sample report must be one page").toBe(1);
+  writeFileSync(new URL("docs/report-sample.pdf", ROOT), pdf);
+  console.log(`[screenshots] docs/report-sample.pdf: ${pages} page, ${pdf.length.toLocaleString("en-US")} bytes, link ${await page.getByTestId("report-link").textContent()}`);
 });
