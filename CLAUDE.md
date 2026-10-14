@@ -35,17 +35,13 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
-- GitHub: **`iangopen/strategylab`** (account renamed in session 10; `origin` = `https://github.com/iangopen/strategylab.git`). Old repo and git URLs redirect; the old Pages address does NOT. **Public** since session 9. Product name **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." (README, `<title>`, `og:title`, repo description, app header; the placeholder was "Betting Lab"). **License: MIT.** gh CLI is authenticated.
-- **Deploy: GitHub Pages via Actions, after CI passes.** Live at **https://iangopen.github.io/strategylab/**. Links made with the pre-rename Pages address 404 forever; re-share them with the new address (the `#s=` fragment is unchanged).
-  - `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and pull request.
-  - Only a push to `main` that passes ALL four builds the Pages artifact (`npm run build:pages`) and deploys it (`actions/upload-pages-artifact` + `actions/deploy-pages`). The deploy job has exactly `pages: write` + `id-token: write`.
-  - A failing test never deploys. The Pages source is "GitHub Actions" (`build_type: workflow`).
+- GitHub: **`iangopen/strategylab`**, public, MIT, gh CLI authenticated (account renamed in session 10: old repo URLs redirect, the old Pages address does NOT). Product name **StrategyLab**, subtitle "A Monte Carlo simulator for betting strategies." in the README, `<title>`, `og:title`, repo description and app header.
+- **Deploy: GitHub Pages via Actions**, live at **https://iangopen.github.io/strategylab/**. `.github/workflows/ci.yml` runs lint, unit, build and E2E on every push and PR; only a `main` push passing ALL four builds (`npm run build:pages`) and deploys (`upload-pages-artifact` + `deploy-pages`; the deploy job has exactly `pages: write` + `id-token: write`; Pages source "GitHub Actions"). A failing test never deploys. Pre-rename Pages links 404; re-share with the new address (same `#s=`).
 - **Base path:** `vite.config.ts` reads `VITE_BASE` (default `/`; it must start and end with `/`). The Pages build and E2E use `/strategylab/`.
-  - Never hardcode a base path in app code. Assets and the worker resolve via `new URL(..., import.meta.url)`. Share links are built from `location.origin + location.pathname`.
-  - `#s=` links need no 404 fallback: a fragment never reaches the server, and the app has no client-side routes.
+  - Never hardcode a base path in app code: assets and the worker resolve via `new URL(..., import.meta.url)`, share links from `location.origin + location.pathname`. `#s=` links need no 404 fallback (fragments never reach the server; no client-side routes).
 - **Line endings:** `.gitattributes` enforces LF (`text=auto eol=lf`) in the repo and working copies (session 9).
-- **Background dev/preview servers:** stopping the task that ran `vite`/`vite preview` can leave vite's `node` child holding the port (E2E uses 4180). Check the port first; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
-- **Never create files with `echo > file` in PowerShell.** Windows PowerShell 5 writes UTF-16 LE, which git treats as binary (this happened to the first `README.md`). Use the editor/file tools, or `Set-Content -Encoding utf8`.
+- **Background dev/preview servers:** stopping the task that ran `vite` can leave its `node` child holding the port (E2E uses 4180). Check the port; stop a leftover only after confirming its command line is our own `vite ... --port <n>`.
+- **Never create files with `echo > file` in PowerShell:** PowerShell 5 writes UTF-16 LE, which git treats as binary. Use the file tools or `Set-Content -Encoding utf8`.
 
 ### Commands
 
@@ -75,7 +71,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 4. **Integer money, with a per-session sub-cent carry.** The engine works in integer cents. Bets returned by strategies are rounded to whole cents by the runner. The UI converts at the boundary. A win pays `Math.round(bet × netPayout + carry)` cents and keeps the remainder as the session's `carry` (session 11): the bankroll is always whole cents, `|carry| ≤ 0.5`, the carry starts at 0 in every session and never crosses sessions, and it never consumes or moves a draw. For integer payouts it is always exactly 0. Reason: no float drift in progressions, and no systematic cents-rounding bias in EV per $ on non-integer payouts (see "Cents rounding").
 
-5. **Game model** (`games.ts`). **Since session 13 a game is a list of 1–12 outcomes `{ prob, net }` (see "Multi-outcome games"); binary games are `[{p, n}, {1 − p, −1}]` and the text below describes them.** Originally: `interface Game { id; name; winProb; netPayout }`. `netPayout` = profit per unit staked on a win (even money = 1). Derived: `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom, and (session 8) sports odds, which COMPILE to a Game in `odds.ts` (see "Sports odds"). Validate `0 < winProb < 1` and `netPayout > 0`.
+5. **Game model** (`games.ts`). **A game is a list of 1–12 outcomes `{ prob, net }` (session 13, see "Multi-outcome games"); a binary game is `[{p, n}, {1 − p, −1}]`, described here.** `netPayout` = profit per unit staked on a win (even money = 1); `edge = 1 - winProb * (1 + netPayout)`. Presets: European roulette even-money (18/37, 1), American (18/38, 1), fair coin (0.5, 1), custom, and (session 8) sports odds, which COMPILE to a Game in `odds.ts` (see "Sports odds"). Validate `0 < winProb < 1` and `netPayout > 0`.
 
 6. **Strategy contract** (`strategies/types.ts`), registered in ONE place (`strategies/registry.ts`):
    ```ts
@@ -130,32 +126,32 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 
 Read the relevant section BEFORE changing that area. These files are plain paths, deliberately not @imports.
 
-- `docs/spec.md`: full folder map; chart rule implementation notes (fan zoom, label knockouts, colors); how to add a strategy (with the Strategy specs and test kit) and how to add a stat; the **rule language** (grammar, evaluation order, limits, worked examples); the **URL scenario format** (key map, limits, loading, history); **sports odds** (conversions, de-vig, format toggle, cents rounding / carry, link representation); **multi-outcome games** (model, one draw per round, payouts, Kelly generalized, editor, replay strip, scenario v4); the roadmap.
-- `docs/history.md`: the STATUS log (sessions 1-20, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
-- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were re-checked in session 20; refresh any you move.
+- `docs/spec.md`: folder map; chart rule notes; how to add a strategy (spec + test kit) or a stat; the **rule language**; the **URL scenario format**; **sports odds** (conversions, de-vig, cents carry); **multi-outcome games** (one draw per round, Kelly, scenario v4); the roadmap.
+- `docs/history.md`: the STATUS log (sessions 1-21, "STATUS n"), old browser checklists, the full "Still open" list, and every "Decisions made outside the spec" with its reasoning. Check it before undoing any earlier decision.
+- `docs/guide.md`: plain-language author's guide with file:line pointers (re-checked session 21; refresh any you move).
 - Outside the repo (local only, never committed here): `C:\devwork\portfolio-audit\strategylab\INTERVIEW-PREP.md` and `NEXT-STEPS.md` (scored candidates, recommended order, the stage 1 prompt).
 
-## Current state (session 20, 2026-10-13)
+## Current state (session 21, 2026-10-13): v1.0.0
 
-All roadmap sessions are done and verified (test counts: see "Docs and disclosures"), CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
+All roadmap sessions are done and verified, CI green with Pages deploy; **v1.0.0** is tagged on the commit that carries these docs, after its CI passed, with a GitHub release (session 21). The September 2026 audit's findings are fixed (STATUS 127-133):
 - **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep them always mounted. Select status regions by role AND name in specs (the link banner is "Opened link").
 - **Licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
 - `.claude/settings.local.json` is git-ignored here.
-- **Session 20 (STATUS 163-175): sweeps** (guide 3.11): each cell is a plain `runMonteCarlo` run seeded `cellSeed(base, k)` (independent cells, no CRN); caps in `share/limits.ts` enforced by `validateSweep` (inside `validateScenario`, so links drop an oversize sweep) AND `runSweep`; link key `sp`, version stays 4; the readout uses the Wilson UPPER bound. Cancel bumps a per-sweep token: a terminated worker's posted cell messages still arrive. Table: 1 decimal in intervals, 2 for EV per $.
+- **Session 21 (STATUS 176-180): v1.0 polish.** The sweep readout names a bankroll only when it AND every larger bankroll on its line pass (`lineAnswer`); non-contiguous passes say "unstable at this sample size" and name none. Results table decimals: 1 for every share of sessions, 2 for EV per $ and theory, 3 for its SE (`TABLE_PCT_DIGITS`; guide section 3 table). README top rewritten for a 30-second read.
+- **Session 20 (STATUS 163-175): sweeps** (guide 3.11): each cell is a plain `runMonteCarlo` run seeded `cellSeed(base, k)` (independent cells, no CRN); caps in `share/limits.ts` enforced by `validateSweep` (inside `validateScenario`, so links drop an oversize sweep) AND `runSweep`; link key `sp`, version stays 4; the readout uses the Wilson UPPER bound. Cancel bumps a per-sweep token: a terminated worker's posted cell messages still arrive.
 - **Report fonts (STATUS 173):** Arial / Liberation Sans (metric twins) so the page lays out the same on every OS. Print tests lay out at 720 px and assert width <= 720, height <= 960 BEFORE `page.pdf()`: Chromium silently shrinks a too-wide page (that hid a Linux overflow).
 - **Session 19 (STATUS 155-162): report** (guide 3.10): `window.print()` of the run's snapshot; pure hedged takeaways; ONE interval display (`formatInterval`); table cells carry `data-raw`; `docs/report-sample.pdf` comes from `npm run screenshots`.
-- **Session 18 (STATUS 145-154):** risk rows; a new stat id goes in `STATS_ADDED_AFTER_CAPTURE` (never regenerate the Monte Carlo golden); RNG chi-square test; `npm run bench`.
+- **Session 18 (STATUS 145-154):** a new stat id goes in `STATS_ADDED_AFTER_CAPTURE` (never regenerate the Monte Carlo golden).
 - **Local gotcha:** if Playwright lists far fewer than 50 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
 
 Only record in STATUS what was actually verified.
 
-## Docs and disclosures (session 16, 2026-09-29)
+## Docs and disclosures (session 16; STATUS 134-140)
 
-Verified (docs/history.md STATUS 134-140):
-- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (805 Vitest with 7 opt-in skipped, 50 Playwright in 12 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
+- **README:** every claim maps to a file, a log entry or a recorded run; it states scale, never speed. **Update its test counts (808 Vitest with 7 opt-in skipped, 51 Playwright in 12 spec files; top bullets AND Testing section, plus guide section 1) from `npm run test` and `npx playwright test --list` when tests are added.**
 - **Privacy:** no PRIVACY.md, because nothing leaves the browser (same-origin GETs only, no cookies, one localStorage key `betting-lab.theme`, kept under its old name). Adding any network call, storage or analytics means writing a PRIVACY.md first.
-- **Disclaimer:** the footer line stays; a line under the tagline says adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** (https://www.ncpgambling.org/help-treatment/, checked in a browser 2026-09-29). The README carries it; `e2e/app.spec.ts` checks it.
-- **Credits** in the README and `third-party-licenses.txt`; original favicon; MIT LICENSE matching `package.json`; GitHub About set (description, URL, 8 topics).
+- **Disclaimer:** the footer line stays; under the tagline: adults (18+), no real money, not betting advice, US National Problem Gambling Helpline **1-800-MY-RESET** (https://www.ncpgambling.org/help-treatment/, checked 2026-09-29). In the README too; `e2e/app.spec.ts` checks it.
+- **Credits** in the README and `third-party-licenses.txt`; original favicon; MIT LICENSE; GitHub About set.
 
 Only Ian can supply: real usage numbers, a personal pitch, a non-US helpline, and confirming 1-800-MY-RESET (NCPG's listed number).
 
@@ -164,10 +160,10 @@ Only Ian can supply: real usage numbers, a personal pitch, a non-US helpline, an
 - Result allocation: the per-round `RoundResult` costs about 8% (STATUS 116); a mutable reuse weakens purity. Owner decision, not taken.
 - Beyond the roadmap: three-way sports lines and parlays (each needs a spec), other de-vig methods, optional Vercel deploy (`VITE_BASE=/`).
 - Oscar's Grind on multi-outcome games uses an approximation (mean winning net); the invariant still holds. Kelly always stops on a house-edge multi-outcome game (`assumedWinProb` is binary-only), by design.
-- Sports mode stores decimal prices at full precision after a format switch; the field shows 2 decimals, the readout shows the real payout (by design).
-- The address bar is not kept in sync while editing: after opening a link and editing, a reload restores the LINK until Copy link is clicked again.
+- Sports mode keeps decimal prices at full precision after a format switch (field shows 2 decimals; by design).
+- The address bar isn't synced while editing: a reload restores the opened LINK until Copy link is clicked again.
 - Rule language gaps by design: one action per entry, no step-back, no payout-capped bet, no bankroll-proportional stake (those stay built-ins). Only Martingale x2 is proven bit-identical to its rule form.
-- Planned feature work is DONE: stages 1 (risk metrics, session 18), 2 (report, session 19) and 3 (sweeps, session 20) in the audit folder's `NEXT-STEPS.md`. Further work needs a new decision.
-- Sweep limits: no sweep section in the report (931 of 960 px used). Independent cells add noise between neighbours (CRN across cells not built). Axes: bankroll, base bet, max rounds only; the readout needs bankroll as an axis.
+- Planned feature work is DONE (stages 1-3 of the audit folder's `NEXT-STEPS.md`, sessions 18-20) and v1.0.0 is tagged. Further work needs a new decision.
+- Sweep limits: no sweep section in the report (931 of 960 px used). Independent cells add noise between neighbours (no CRN across cells). Axes: bankroll, base bet, max rounds. The readout's whole-line rule refuses self-contradicting lines but keeps 95% per cell (no Bonferroni widening).
 - Report limits: one page is tested for the default run and 8 built-ins, not for long links (big custom rules). "Not clear" uses interval overlap, which is conservative (a paired CRN test could separate some pairs).
 - Replay zoom is x-only; hover values go to a text readout, not an on-canvas tooltip.
