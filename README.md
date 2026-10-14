@@ -17,8 +17,9 @@ In a game with a house edge, every bet loses edge × stake on average, whatever 
 - **Charts and replay:** percentile bands over time, final-bankroll histograms, and a replay of any one session for every strategy. Every panel of a chart shares the same axes.
 - **Links:** Copy link puts the whole scenario, custom rules included, in the URL.
 - **Report:** a one-page summary of a run, ready to print or save as PDF: the takeaways in plain sentences, the key statistics with 95% intervals, the bankroll chart, every setting, the seed, the build's commit and the link that reruns it to the same numbers. [Sample report (PDF)](docs/report-sample.pdf) of the default run.
+- **Parameter sweeps:** vary two of starting bankroll, base bet and max rounds across a grid (up to 20 × 20 cells and 1,000,000 sessions) for one strategy, and see P(bust) in every cell as a heatmap with its 95% interval. A readout names the smallest bankroll on the grid, per base bet, whose P(bust) stays below a target (5% by default) even at the upper end of its interval. Each cell is an ordinary run with its own derived seed, so any cell reproduces on its own, and the sweep travels in the link.
 
-The default run is European roulette (house edge 1/37 = 2.703%), a $1,000 bankroll, a $10 base bet, a stop at $1,100 and 10,000 sessions with seed 12345. Martingale ends in profit in 82.930% of sessions and Flat in 53.760%. Their EV per $ wagered is −2.909% and −2.758%, against a theoretical −2.703%. Martingale's many small wins are paid for by rare large losses: it busts in 17.070% of sessions, Flat in 1.600%.
+The default run is European roulette (house edge 1/37 = 2.703%), a $1,000 bankroll, a $10 base bet, a stop at $1,100 and 10,000 sessions with seed 12345. Martingale ends in profit in 82.9% of sessions (95% interval 82.2–83.7%) and Flat in 53.8% (52.8–54.7%). Their EV per $ wagered is −2.91% and −2.76%, against a theoretical −2.70%. Martingale's many small wins are paid for by rare large losses: it busts in 17.1% of sessions (16.3–17.8%), Flat in 1.6% (1.4–1.9%).
 
 !["Bankroll over time" for the default run, zoomed to rounds 0 to 25 on Martingale: both panels share the same axes](docs/fan-fit-martingale.png)
 
@@ -27,6 +28,10 @@ The default run is European roulette (house edge 1/37 = 2.703%), a $1,000 bankro
 ![Results table for the default run: Flat and Martingale](docs/results.png)
 
 ![Replay of session 6: Martingale runs out of money after 9 rounds while Flat keeps playing](docs/replay-bust.png)
+
+![P(bust) heatmap for Flat: starting bankroll $100 to $1,000 across, base bet $5 to $25 up, with the bankroll readout below](docs/sweep.png)
+
+*The default sweep: Flat, starting bankroll by base bet, 10,000 sessions per cell. Darker cells bust more often; a dot marks the smallest bankroll on each row whose P(bust) interval stays below 5%.*
 
 ## How it works
 
@@ -48,12 +53,12 @@ The rule and link code contain no `eval`, `new Function` or dynamic `import`, an
 
 ## Testing
 
-- **Unit and statistical tests:** `npm run test` runs 770 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Six more (benchmarks and fixture writers) are opt-in.
+- **Unit and statistical tests:** `npm run test` runs 805 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Seven more (benchmarks and fixture writers) are opt-in.
 - **Tolerances come from the data.** A statistical test passes when the measured value is within 4 standard errors of the expected one, with the standard error computed from the simulated sessions. Seeds are fixed, so each run gives the same numbers.
 - **The EV invariant:** for every strategy, EV per $ wagered must equal −edge. [`invariant.stats.test.ts`](src/engine/invariant.stats.test.ts) checks 9 strategies (the 8 built-ins and a custom rule) on 8 games with 20,000 sessions each: house-edge, fair and player-edge games, sports odds and multi-outcome games. The largest deviation is 2.78 standard errors. Kelly refuses to bet on the two house-edge multi-outcome games, and the test asserts that instead.
 - **A bug the tolerance caught:** before the sub-cent carry, a flat $5 bettor at −110 odds measured 5.29 standard errors from theory over 100,000 sessions. With the carry it measures 0.55 ([`runner.regression.stats.test.ts`](src/engine/runner.regression.stats.test.ts)).
 - **Golden files:** stored session and Monte Carlo results must reproduce bit for bit after engine changes.
-- **End-to-end:** 47 Playwright tests in 11 spec files run against the production build, served under the same `/strategylab/` path as the live site. Every number the page shows is compared with the engine run in Node on the same scenario. One test runs the app by keyboard only and checks what a screen reader announces.
+- **End-to-end:** 50 Playwright tests in 12 spec files run against the production build, served under the same `/strategylab/` path as the live site. Every number the page shows is compared with the engine run in Node on the same scenario. One test runs the app by keyboard only and checks what a screen reader announces.
 - **CI:** GitHub Actions runs lint, the Vitest suites, a strict build and the Playwright tests. Only a `main` commit that passes all four deploys to GitHub Pages.
 
 ## Get started
@@ -68,10 +73,10 @@ npm run lint
 npm run build                     # strict type check and production build
 npx playwright install chromium   # once per machine
 npm run e2e                       # Playwright against the production build under /strategylab/
-npm run bench                     # one fixed 100,000-session run, timed (numbers depend on the machine)
+npm run bench                     # one fixed 100,000-session run and one max-size sweep, timed (numbers depend on the machine)
 ```
 
-`npm run screenshots` regenerates the README images, `public/og-image.png` and `docs/report-sample.pdf` from the live site, or from `SCREENSHOT_URL` if set. It first checks that the results table equals the engine's numbers.
+`npm run screenshots` regenerates the README images, `public/og-image.png` and `docs/report-sample.pdf` from the live site, or from `SCREENSHOT_URL` if set. It first checks that the results table and the sweep table equal the engine's numbers.
 
 ## Repository map
 
@@ -80,6 +85,8 @@ src/engine/    simulation engine, no React or DOM: RNG, games, runner, Monte Car
                strategies/, rules/ (the rule language), stats/
 src/worker/    the Web Worker and its client
 src/share/     scenario links: encode, decode, validate
+src/sweep/     parameter sweeps: grid, caps, cell seeds, the cell-by-cell runner
+src/report/    the one-page report and the takeaway and sweep-readout sentences
 src/ui/        React components; ui/charts/ draws with Canvas 2D
 e2e/           Playwright specs
 scripts/       the licence-notice build plugin and the screenshot script
