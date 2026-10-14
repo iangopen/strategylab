@@ -21,6 +21,13 @@ import { StrategyPicker } from "./ui/StrategyPicker";
 import { applyThemePref, loadThemePref, type ThemePref } from "./ui/theme";
 import { CancelledError, SimClient } from "./worker/client";
 import type { SimRequest } from "./worker/sim.worker";
+import { toSweepRequest } from "./sweep/request";
+import { sweepGrid } from "./sweep/sweep";
+import { isSweepErrorKey } from "./sweep/validate";
+import { SweepPanel, type SweepRun } from "./ui/sweep/SweepPanel";
+
+/** A scenario's identity for a plain run: everything but the sweep (editing the sweep doesn't stale a run). */
+const runKey = (s: ScenarioConfig) => JSON.stringify({ ...s, sweep: undefined });
 
 interface CompletedRun {
   result: MonteCarloResult;
@@ -53,6 +60,15 @@ export default function App() {
   const [theme, setTheme] = useState<ThemePref>(loadThemePref);
   // Which session is highlighted / replayed. View state, not scenario state.
   const [selectedSession, setSelectedSession] = useState<number | null>(null);
+
+  // The parameter sweep's progress and result. View state; the sweep SETUP is scenario.sweep.
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepProgress, setSweepProgress] = useState(0);
+  const [sweepStatus, setSweepStatus] = useState<string | null>(null);
+  const [sweepRun, setSweepRun] = useState<SweepRun | null>(null);
+  // Which sweep may still deliver cells. Cancel bumps it: cell messages the terminated worker had
+  // already posted can still arrive afterwards, and they must not fill in a cancelled sweep.
+  const sweepToken = useRef(0);
 
   const [replay, setReplay] = useState<Replay | null>(null);
   const [replayStatus, setReplayStatus] = useState<string | null>(null);
@@ -107,7 +123,8 @@ export default function App() {
   }, [running]);
 
   const errors = useMemo(() => validateScenario(scenario), [scenario]);
-  const canRun = Object.keys(errors).length === 0;
+  // A plain run ignores the sweep's errors; the sweep panel shows them.
+  const canRun = Object.keys(errors).every(isSweepErrorKey);
   const linkBlocker = useMemo(() => copyBlocker(scenario), [scenario]);
 
   // A plain "copied" confirmation is brief; errors and left-out warnings stay until the next copy.
@@ -126,6 +143,7 @@ export default function App() {
     }
     const url = baseUrl() + enc.fragment;
     const leftOut = enc.leftOut.map((i) => instanceLabel(scenario.strategies, i));
+    if (enc.sweepLeftOut) leftOut.push("the sweep");
     showInAddressBar(enc.fragment); // a reload now restores this scenario, custom rules included
     try {
       await navigator.clipboard.writeText(url);
@@ -139,7 +157,7 @@ export default function App() {
 
   async function handleRun() {
     const c = client.current;
-    if (!c || !canRun) return;
+    if (!c || !canRun || sweeping) return;
     const snapshot = scenario;
     const started = performance.now();
     setRunning(true);
@@ -157,7 +175,7 @@ export default function App() {
         result,
         labels,
         scenario: snapshot,
-        scenarioJson: JSON.stringify(snapshot),
+        scenarioJson: runKey(snapshot),
         request,
         refs: { start: request.session.startBankroll, stopWin: request.session.stopWin, stopLoss: request.session.stopLoss },
       });
@@ -173,10 +191,56 @@ export default function App() {
     }
   }
 
+  /** Runs the sweep in the worker cell by cell; each finished cell fills in at once. */
+  async function handleSweep() {
+    const c = client.current;
+    const sweep = scenario.sweep;
+    if (!c || !sweep || running || sweeping || Object.keys(errors).length > 0) return;
+    const snapshot = scenario;
+    const grid = sweepGrid(snapshot, sweep);
+    const index = snapshot.strategies.findIndex((i) => i.uid === sweep.strategyUid);
+    const started = performance.now();
+    const token = ++sweepToken.current;
+    let done = 0;
+    setSweepRun({ scenario: snapshot, sweep, grid, strategyLabel: instanceLabel(snapshot.strategies, index), cells: Array<null>(grid.cells).fill(null), complete: false, scenarioJson: JSON.stringify(snapshot) });
+    setSweeping(true);
+    setSweepProgress(0);
+    setSweepStatus(`Running ${grid.cells.toLocaleString("en-US")} cells...`);
+    try {
+      const all = await c.sweep(
+        toSweepRequest(snapshot, sweep),
+        (cell) => {
+          if (token !== sweepToken.current) return; // cancelled: a late message from the old worker
+          done++;
+          setSweepRun((prev) => {
+            if (!prev || prev.scenario !== snapshot) return prev;
+            const cells = prev.cells.slice();
+            cells[cell.index] = cell;
+            return { ...prev, cells };
+          });
+        },
+        (f) => {
+          if (token === sweepToken.current) setSweepProgress(f);
+        },
+      );
+      setSweepRun((prev) => (prev && prev.scenario === snapshot ? { ...prev, cells: all, complete: true } : prev));
+      setSweepProgress(1);
+      setSweepStatus(`Done: ${grid.cells.toLocaleString("en-US")} cells × ${grid.sessionsPerCell.toLocaleString("en-US")} sessions in ${formatElapsed(performance.now() - started)}.`);
+    } catch (err) {
+      setSweepStatus(
+        err instanceof CancelledError
+          ? `Cancelled after ${done.toLocaleString("en-US")} of ${grid.cells.toLocaleString("en-US")} cells. The finished cells are kept; the bankroll readout needs every cell.`
+          : `Error: ${(err as Error).message}`,
+      );
+    } finally {
+      setSweeping(false);
+    }
+  }
+
   // Replay the selected session for every strategy in the displayed run (re-simulated in the worker).
   useEffect(() => {
     const c = client.current;
-    if (!run || selectedSession === null || !c || running) return;
+    if (!run || selectedSession === null || !c || running || sweeping) return;
     const id = ++replayRequestId.current;
     setReplayStatus(`Replaying session ${selectedSession.toLocaleString("en-US")}...`);
     c.replay(run.request, selectedSession).then(
@@ -189,7 +253,7 @@ export default function App() {
         if (id === replayRequestId.current) setReplayStatus(`Replay failed: ${(err as Error).message}`);
       },
     );
-  }, [run, selectedSession, running]);
+  }, [run, selectedSession, running, sweeping]);
 
   const columns = useMemo(() => (run ? run.result.perStrategy.map((outcome, i) => ({ label: run.labels[i] ?? outcome.strategyId, outcome, colorIndex: i })) : []), [run]);
 
@@ -242,7 +306,7 @@ export default function App() {
         <div className="right">
           <RunControls
             running={running}
-            canRun={canRun}
+            canRun={canRun && !sweeping}
             progress={progress}
             elapsedMs={elapsedMs}
             status={status}
@@ -256,7 +320,7 @@ export default function App() {
             onOpenReport={() => setReportOpen(true)}
             reportButtonRef={reportButton}
           />
-          <ResultsTable columns={columns} nSessions={run?.result.nSessions ?? 0} stale={run !== null && run.scenarioJson !== JSON.stringify(scenario)} />
+          <ResultsTable columns={columns} nSessions={run?.result.nSessions ?? 0} stale={run !== null && run.scenarioJson !== runKey(scenario)} />
           {run ? (
             <FanChart result={run.result} labels={run.labels} refs={run.refs} onPickSession={setSelectedSession} selectedSession={selectedSession} />
           ) : (
@@ -284,6 +348,22 @@ export default function App() {
               description="Where each strategy's sessions end: the share of sessions finishing in each bankroll range, on bins shared by every strategy."
             />
           )}
+          <SweepPanel
+            scenario={scenario}
+            onChange={setScenario}
+            errors={errors}
+            baseValid={canRun}
+            busy={running || sweeping}
+            sweeping={sweeping}
+            progress={sweepProgress}
+            status={sweepStatus}
+            run={sweepRun}
+            onRun={() => void handleSweep()}
+            onCancel={() => {
+              sweepToken.current++;
+              client.current?.cancel();
+            }}
+          />
         </div>
       </main>
       <footer className="help">
