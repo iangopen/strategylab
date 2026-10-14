@@ -1,8 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { defaultScenario, type ScenarioConfig } from "../src/scenario";
+import { readoutInputOf, sweepReadout } from "../src/report/sweepReadout";
 import { encodeScenarioLink } from "../src/share/link";
 import { toSweepRequest } from "../src/sweep/request";
 import { runSweep } from "../src/sweep/run";
+import { sweepGrid } from "../src/sweep/sweep";
+import { readoutCell } from "../src/ui/sweep/heatmap";
 import { expectCanvasNotBlank, openApp, watchPage } from "./helpers";
 
 /** A small sweep: bankroll $200-$1,000 (3 values) by base bet $5-$20 (2 values), Martingale, 500 sessions per cell. */
@@ -62,6 +65,25 @@ test("a small sweep end to end: heatmap, readout, hover/tap values and the table
   await expect(readout.first()).toContainText("A bankroll counts only when the upper end of its 95% interval for P(bust) is below 5%");
   await expect(readout.nth(1)).toContainText(/^With a base bet of \$5, /);
   await expect(readout.nth(2)).toContainText(/^With a base bet of \$20, /);
+  // The sentences are the pure readout's, on the engine's numbers (the same request run in Node).
+  const sentences = sweepReadout(readoutInputOf(s.sweep!, sweepGrid(s, s.sweep!), expected.map(readoutCell)));
+  await expect(readout).toHaveText(sentences);
+  expect(problems).toEqual([]);
+});
+
+test("with no bankroll axis the readout says it needs one and marks no cell", async ({ page }) => {
+  const problems = watchPage(page);
+  const base = { ...defaultScenario(), sessions: 500 };
+  const s: ScenarioConfig = { ...base, sweep: { x: { field: "maxRounds", start: 100, end: 1000, steps: 2 }, y: { field: "baseBet", start: 5, end: 20, steps: 2 }, strategyUid: base.strategies[1]!.uid, targetPct: 5 } };
+  const e = encodeScenarioLink(s, "");
+  if (!e.ok) throw new Error(e.message);
+  await openApp(page, e.fragment);
+  await runSweepAndWait(page);
+  const canvas = page.getByTestId("sweep-canvas");
+  await expect(canvas).toHaveAttribute("data-filled", "4");
+  await expect(canvas).toHaveAttribute("data-marked", "");
+  await expect(page.getByTestId("sweep-readout").locator("li")).toHaveText(["The bankroll readout needs the starting bankroll as one of the two axes."]);
+  await expect(page.getByTestId("sweep-readout")).not.toContainText("smallest bankroll");
   expect(problems).toEqual([]);
 });
 

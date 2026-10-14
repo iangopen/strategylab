@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { SweepConfig } from "../sweep/sweep";
-import { bankrollLines, meetsTarget, readoutInputOf, smallestQualifying, sweepReadout, type ReadoutCell, type SweepReadoutInput } from "./sweepReadout";
+import { bankrollLines, lineAnswer, meetsTarget, readoutInputOf, sweepReadout, type ReadoutCell, type SweepReadoutInput } from "./sweepReadout";
 
 // Hand-built cells (no simulation): [P(bust), Wilson low, Wilson high].
 const c = (p: number, low: number, high: number): ReadoutCell => ({ pBust: p, pBustLow: low, pBustHigh: high });
 const BANKROLLS = [200, 400, 600, 800];
 const input = (groups: SweepReadoutInput["groups"], targetPct = 5): SweepReadoutInput => ({ targetPct, sessionsPerCell: 2500, bankrolls: BANKROLLS, groups });
 
-describe("sweep readout: smallest bankroll whose P(bust) upper bound is below the target", () => {
+describe("sweep readout: smallest bankroll from which every bankroll's P(bust) upper bound is below the target", () => {
   it("a qualifying bankroll is found, and the sentence says the test uses the upper end of the interval", () => {
     const t = sweepReadout(input([{ field: "baseBet", value: 10, cells: [c(0.3, 0.28, 0.32), c(0.09, 0.08, 0.1), c(0.031, 0.025, 0.038), c(0.01, 0.007, 0.014)] }]));
     for (const s of t) console.log(`[readout] ${s}`);
     expect(t[0]).toBe(
-      "Target: P(bust) below 5%. A bankroll counts only when the upper end of its 95% interval for P(bust) is below 5%, a conservative test: the estimate alone could make a smaller bankroll look safe. Each cell is a separate simulation of 2,500 sessions, and bankrolls between grid points were not simulated.",
+      "Target: P(bust) below 5%. A bankroll counts only when the upper end of its 95% interval for P(bust) is below 5%, a conservative test: the estimate alone could make a smaller bankroll look safe. A bankroll is named only when it and every larger bankroll on the grid count, because with many cells one can pass by chance. Each cell is a separate simulation of 2,500 sessions, and bankrolls between grid points were not simulated.",
     );
-    expect(t[1]).toBe("With a base bet of $10, the smallest bankroll on this grid that meets it is $600: P(bust) 3.1% (2.5–3.8%).");
+    expect(t[1]).toBe("With a base bet of $10, the smallest bankroll on this grid that meets it is $600: P(bust) 3.1% (2.5–3.8%), and every larger bankroll on this grid meets it too.");
   });
 
   it("no bankroll qualifies: 'no bankroll on this grid'", () => {
@@ -34,16 +34,43 @@ describe("sweep readout: smallest bankroll whose P(bust) upper bound is below th
 
   it("the point estimate never decides: a cell whose estimate is under the target but upper bound over is skipped for a larger one", () => {
     const cells = [c(0.045, 0.036, 0.056), c(0.02, 0.015, 0.026)];
-    expect(smallestQualifying(cells, 0.05)).toBe(1);
+    expect(lineAnswer(cells, 0.05)).toEqual({ kind: "from", index: 1 });
     const t = sweepReadout({ ...input([{ field: "baseBet", value: 5, cells }]), bankrolls: [300, 700] });
     expect(t[1]).toBe("With a base bet of $5, the smallest bankroll on this grid that meets it is $700: P(bust) 2.0% (1.5–2.6%).");
   });
 
-  it("a larger bankroll that misses after a smaller one met it is reported, not hidden", () => {
-    const t = sweepReadout(input([{ field: "baseBet", value: 10, cells: [c(0.2, 0.18, 0.22), c(0.04, 0.035, 0.048), c(0.05, 0.043, 0.057), c(0.03, 0.025, 0.036)] }]));
+  // Multiple comparisons (session 21): with ~20 independent cells per line, one borderline cell can
+  // pass by chance. The answer must hold for the named bankroll AND every larger one on the line.
+  const FAIL = c(0.2, 0.18, 0.22);
+  const LUCKY = c(0.04, 0.035, 0.048); // upper bound 4.8%: passes, barely
+  const MISS = c(0.05, 0.043, 0.057);
+  const PASS = c(0.03, 0.025, 0.036);
+
+  it("a lucky isolated passing cell below a failing one is NOT reported as the answer", () => {
+    const cells = [FAIL, LUCKY, MISS, PASS];
+    expect(lineAnswer(cells, 0.05)).toEqual({ kind: "unstable", pass: 1, miss: 2 });
+    const t = sweepReadout(input([{ field: "baseBet", value: 10, cells }]));
+    expect(t[1]).not.toContain("smallest bankroll on this grid that meets it");
+    expect(t[1]).not.toMatch(/meets it is \$/);
+  });
+
+  it("a contiguous passing run up to the largest bankroll is reported from its first cell", () => {
+    expect(lineAnswer([FAIL, MISS, LUCKY, PASS], 0.05)).toEqual({ kind: "from", index: 2 });
+    expect(lineAnswer([PASS, PASS, PASS, PASS], 0.05)).toEqual({ kind: "from", index: 0 });
+    expect(lineAnswer([FAIL, FAIL, FAIL, PASS], 0.05)).toEqual({ kind: "from", index: 3 });
+    const t = sweepReadout(input([{ field: "baseBet", value: 10, cells: [FAIL, MISS, LUCKY, PASS] }]));
+    expect(t[1]).toBe("With a base bet of $10, the smallest bankroll on this grid that meets it is $600: P(bust) 4.0% (3.5–4.8%), and every larger bankroll on this grid meets it too.");
+    // The largest bankroll alone: no "every larger" clause.
+    expect(sweepReadout(input([{ field: "baseBet", value: 10, cells: [FAIL, FAIL, FAIL, PASS] }]))[1]).toBe("With a base bet of $10, the smallest bankroll on this grid that meets it is $800: P(bust) 3.0% (2.5–3.6%).");
+  });
+
+  it("non-contiguous passes give the 'unstable' sentence and name no bankroll", () => {
+    const t = sweepReadout(input([{ field: "baseBet", value: 10, cells: [LUCKY, MISS, PASS, PASS] }]));
     expect(t[1]).toBe(
-      "With a base bet of $10, the smallest bankroll on this grid that meets it is $400: P(bust) 4.0% (3.5–4.8%). A larger bankroll on this grid, $600, did not meet it (5.0% (4.3–5.7%)), so where the target is first met isn't clear at this sample size.",
+      "With a base bet of $10, the result is unstable at this sample size, so no bankroll is named: $200 meets the target (4.0% (3.5–4.8%)) but a larger bankroll on this grid, $400, does not (5.0% (4.3–5.7%)). More sessions per cell would narrow the intervals.",
     );
+    // A run that passes and then fails at the largest bankroll is unstable too: no bankroll has every larger one passing.
+    expect(lineAnswer([FAIL, PASS, PASS, MISS], 0.05)).toEqual({ kind: "unstable", pass: 1, miss: 3 });
   });
 
   it("digits never contradict the claim: an upper bound of 4.96% prints as 4.96%, not 5.0%", () => {
@@ -63,7 +90,7 @@ describe("sweep readout: smallest bankroll whose P(bust) upper bound is below th
     });
     expect(t).toHaveLength(3);
     expect(t[0]).toMatch(/^Target: P\(bust\) below 2.5%\./);
-    expect(t[1]).toBe("With at most 100 rounds per session, the smallest bankroll on this grid that meets it is $200: P(bust) 2.0% (1.0–2.4%).");
+    expect(t[1]).toBe("With at most 100 rounds per session, the smallest bankroll on this grid that meets it is $200: P(bust) 2.0% (1.0–2.4%), and every larger bankroll on this grid meets it too.");
     expect(t[2]).toBe("With at most 1,000 rounds per session, no bankroll on this grid keeps the upper end of P(bust) below 2.5%.");
   });
 

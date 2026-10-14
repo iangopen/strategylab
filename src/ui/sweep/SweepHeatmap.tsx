@@ -156,7 +156,7 @@ export const SweepHeatmap = memo(function SweepHeatmap({ children, sweep, grid, 
         <span>
           <span className="legend-pending" /> not run yet
         </span>
-        {(sweep.x.field === "startBankroll" || sweep.y.field === "startBankroll") && <span>● smallest bankroll on its line meeting the target</span>}
+        {(sweep.x.field === "startBankroll" || sweep.y.field === "startBankroll") && <span>● the readout's answer: from here up, every bankroll on its line meets the target</span>}
       </div>
       {children}
       <details className="sweep-table-details">

@@ -3,8 +3,10 @@
 // - a bankroll counts only when the UPPER end of its 95% Wilson interval for P(bust) is below the
 //   target, and the sentences say so (an estimate alone below the target is not enough);
 // - "on this grid": bankrolls between grid points were not simulated, and each cell is its own run;
-// - when a larger bankroll on the grid misses the target after a smaller one met it, the sentence says
-//   the boundary isn't clear at this sample size instead of hiding it.
+// - a bankroll is named only when it AND every larger bankroll on the line count. Each line checks up
+//   to 20 independent cells, so one borderline cell can pass by chance below a larger one that fails;
+//   when the bankrolls that count are not one unbroken run up to the largest, the sentence says the
+//   result is unstable at this sample size and names no bankroll (session 21).
 import { formatAxisValue, type SweepConfig, type SweepField, type SweepGrid } from "../sweep/sweep";
 import { formatInterval } from "../ui/format";
 
@@ -36,10 +38,20 @@ export function meetsTarget(cell: ReadoutCell, target: number): boolean {
   return cell.pBustHigh < target;
 }
 
-/** Index of the smallest bankroll that meets the target, or null. `cells` are in ascending bankroll order. */
-export function smallestQualifying(cells: readonly ReadoutCell[], target: number): number | null {
-  const i = cells.findIndex((c) => meetsTarget(c, target));
-  return i < 0 ? null : i;
+/**
+ * One line's answer, `cells` in ascending bankroll order:
+ * - "from": every bankroll from `index` up to the largest meets the target, and none below it does;
+ * - "none": no bankroll meets it;
+ * - "unstable": some meet it but they are not one unbroken run up to the largest. `pass` is the
+ *   smallest that meets it and `miss` the first larger one that does not.
+ */
+export type LineAnswer = { kind: "from"; index: number } | { kind: "none" } | { kind: "unstable"; pass: number; miss: number };
+
+export function lineAnswer(cells: readonly ReadoutCell[], target: number): LineAnswer {
+  const pass = cells.findIndex((c) => meetsTarget(c, target));
+  if (pass < 0) return { kind: "none" };
+  const miss = cells.findIndex((c, j) => j > pass && !meetsTarget(c, target));
+  return miss < 0 ? { kind: "from", index: pass } : { kind: "unstable", pass, miss };
 }
 
 const targetText = (pct: number) => `${Number(pct.toPrecision(6))}%`;
@@ -79,17 +91,21 @@ export function sweepReadout(input: SweepReadoutInput): string[] {
   const money = (i: number) => formatAxisValue("startBankroll", bankrolls[i]!);
 
   const out = [
-    `Target: P(bust) below ${t}. A bankroll counts only when the upper end of its 95% interval for P(bust) is below ${t}, a conservative test: the estimate alone could make a smaller bankroll look safe. Each cell is a separate simulation of ${input.sessionsPerCell.toLocaleString("en-US")} sessions, and bankrolls between grid points were not simulated.`,
+    `Target: P(bust) below ${t}. A bankroll counts only when the upper end of its 95% interval for P(bust) is below ${t}, a conservative test: the estimate alone could make a smaller bankroll look safe. A bankroll is named only when it and every larger bankroll on the grid count, because with many cells one can pass by chance. Each cell is a separate simulation of ${input.sessionsPerCell.toLocaleString("en-US")} sessions, and bankrolls between grid points were not simulated.`,
   ];
   for (const g of groups) {
     const cells = g.cells as readonly ReadoutCell[];
     const lead = groupPhrase(g.field, g.value);
-    const i = smallestQualifying(cells, target);
-    if (i !== null) {
-      let s = `${lead}, the smallest bankroll on this grid that meets it is ${money(i)}: P(bust) ${show(cells[i]!, target)}.`;
-      const miss = cells.findIndex((c, j) => j > i && !meetsTarget(c, target));
-      if (miss >= 0) s += ` A larger bankroll on this grid, ${money(miss)}, did not meet it (${show(cells[miss]!, target)}), so where the target is first met isn't clear at this sample size.`;
-      out.push(s);
+    const a = lineAnswer(cells, target);
+    if (a.kind === "from") {
+      const rest = a.index === cells.length - 1 ? "" : ", and every larger bankroll on this grid meets it too";
+      out.push(`${lead}, the smallest bankroll on this grid that meets it is ${money(a.index)}: P(bust) ${show(cells[a.index]!, target)}${rest}.`);
+      continue;
+    }
+    if (a.kind === "unstable") {
+      out.push(
+        `${lead}, the result is unstable at this sample size, so no bankroll is named: ${money(a.pass)} meets the target (${show(cells[a.pass]!, target)}) but a larger bankroll on this grid, ${money(a.miss)}, does not (${show(cells[a.miss]!, target)}). More sessions per cell would narrow the intervals.`,
+      );
       continue;
     }
     let s = `${lead}, no bankroll on this grid keeps the upper end of P(bust) below ${t}.`;

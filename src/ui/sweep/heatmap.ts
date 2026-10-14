@@ -1,5 +1,5 @@
 // Pure heatmap helpers (no DOM): the colour scale, text contrast, hit-testing, labels. Unit-tested.
-import { bankrollLines, smallestQualifying, type ReadoutCell } from "../../report/sweepReadout";
+import { bankrollLines, lineAnswer, type ReadoutCell } from "../../report/sweepReadout";
 import type { SweepCellResult } from "../../sweep/run";
 import { SWEEP_FIELD_LABELS, SWEEP_FIELD_UNITS, type SweepConfig, type SweepGrid } from "../../sweep/sweep";
 import { formatInterval } from "../format";
@@ -88,15 +88,15 @@ export function cellText(c: SweepCellResult | null): string {
   return formatInterval(c.stats.pBust, c.stats.pBustLow, c.stats.pBustHigh, 1);
 }
 
-/** Cells that are the smallest bankroll meeting the target on their line (the readout's answer), once every cell on the line has run. */
+/** The readout's answer on each line (the smallest bankroll from which every larger one meets the target too), once every cell on the line has run. Unstable lines get no mark. */
 export function markedCells(sweep: SweepConfig, grid: SweepGrid, cells: readonly (SweepCellResult | null)[]): Set<number> {
   const out = new Set<number>();
   const t = sweep.targetPct / 100;
   for (const line of bankrollLines(sweep, grid) ?? []) {
     const results = line.cells.map((k) => cells[k] ?? null);
     if (results.some((c) => c === null)) continue;
-    const i = smallestQualifying(results.map((c) => readoutCell(c!)), t);
-    if (i !== null) out.add(line.cells[i]!);
+    const a = lineAnswer(results.map((c) => readoutCell(c!)), t);
+    if (a.kind === "from") out.add(line.cells[a.index]!);
   }
   return out;
 }

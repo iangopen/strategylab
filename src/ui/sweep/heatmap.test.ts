@@ -48,5 +48,7 @@ describe("readout markers", () => {
     expect([...markedCells(sweep, grid, cells)]).toEqual([1]);
     expect([...markedCells(sweep, grid, [cell(0, 0.01), null, null, null, null, null])]).toEqual([]);
     expect([...markedCells({ ...sweep, x: { ...sweep.x, field: "maxRounds" } }, grid, cells)]).toEqual([]);
+    // An unstable line (a pass, then a larger bankroll that misses) gets no mark.
+    expect([...markedCells(sweep, grid, [cell(0, 0.04), cell(1, 0.06), cell(2, 0.01), cell(3, 0.3), cell(4, 0.2), cell(5, 0.1)])]).toEqual([]);
   });
 });
