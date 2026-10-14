@@ -1,8 +1,25 @@
 # StrategyLab
 
-A Monte Carlo simulator for betting strategies. **Live at [iangopen.github.io/strategylab](https://iangopen.github.io/strategylab/).**
+A browser app that runs betting strategies side by side on the same simulated outcomes and measures, with 95% intervals, how much each one loses per dollar wagered and how often it goes bust.
+
+**Live:** [iangopen.github.io/strategylab](https://iangopen.github.io/strategylab/) · **Sample output:** [the one-page report for the default run (PDF)](docs/report-sample.pdf)
 
 [![CI](https://github.com/iangopen/strategylab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/iangopen/strategylab/actions/workflows/ci.yml)
+
+![P(bust) heatmap for Flat: starting bankroll $100 to $1,000 across, base bet $5 to $25 up, with the bankroll readout below](docs/sweep.png)
+
+*A parameter sweep: P(bust) for Flat across 50 combinations of starting bankroll and base bet, 10,000 sessions each. A dot marks, per base bet, the smallest bankroll from which every larger one keeps P(bust) below 5% at the upper end of its 95% interval.*
+
+![Results table for the default run: Flat and Martingale](docs/results.png)
+
+*The results table for the default run: EV per $ wagered is −2.76% for Flat and −2.91% for Martingale, 1.33 and 0.48 standard errors from the −2.70% the house edge predicts; Martingale ends ahead more often and busts about ten times as often.*
+
+**Engineering**
+
+- **Deterministic, seeded engine in a Web Worker.** The engine in [`src/engine/`](src/engine/) is plain TypeScript with integer-cent money; every random number comes from one seeded generator, and [a test](src/engine/isolation.test.ts) fails if an engine file uses `Math.random` or imports React or the DOM. Runs execute in a Web Worker, with progress and Cancel.
+- **Statistical tests that were shown to fail when broken.** Tolerances are 4 standard errors computed from the simulated sessions, never hand-picked. Key tests were run against deliberately broken code and seen to fail before the code was restored, and the failures are logged in [`docs/history.md`](docs/history.md) (for example STATUS 148, 165, 166 and 176). One caught a real bias: a $5 bettor at −110 odds measured 5.29 standard errors from theory until payouts carried their sub-cent remainders.
+- **Reproducible share links and reports.** Copy link puts the whole scenario, including custom rules and sweeps, in the URL. End-to-end tests open a copied link in a new page and check that the rerun gives the same numbers bit for bit; the report prints the seed, the build's commit and that link.
+- **CI with Playwright.** Every push runs lint, 808 Vitest tests, a strict type check and build, and 51 Playwright tests against the production build. Only a `main` commit that passes all of them deploys to GitHub Pages.
 
 StrategyLab is an educational simulation for adults (18+). No real money is involved, and nothing here is betting advice. If gambling is causing problems for you or someone you know, call or text 1-800-MY-RESET, the US National Problem Gambling Helpline ([ncpgambling.org](https://www.ncpgambling.org/help-treatment/)).
 
@@ -17,7 +34,7 @@ In a game with a house edge, every bet loses edge × stake on average, whatever 
 - **Charts and replay:** percentile bands over time, final-bankroll histograms, and a replay of any one session for every strategy. Every panel of a chart shares the same axes.
 - **Links:** Copy link puts the whole scenario, custom rules included, in the URL.
 - **Report:** a one-page summary of a run, ready to print or save as PDF: the takeaways in plain sentences, the key statistics with 95% intervals, the bankroll chart, every setting, the seed, the build's commit and the link that reruns it to the same numbers. [Sample report (PDF)](docs/report-sample.pdf) of the default run.
-- **Parameter sweeps:** vary two of starting bankroll, base bet and max rounds across a grid (up to 20 × 20 cells and 1,000,000 sessions) for one strategy, and see P(bust) in every cell as a heatmap with its 95% interval. A readout names the smallest bankroll on the grid, per base bet, whose P(bust) stays below a target (5% by default) even at the upper end of its interval. Each cell is an ordinary run with its own derived seed, so any cell reproduces on its own, and the sweep travels in the link.
+- **Parameter sweeps:** vary two of starting bankroll, base bet and max rounds across a grid (up to 20 × 20 cells and 1,000,000 sessions) for one strategy, and see P(bust) in every cell as a heatmap with its 95% interval. A readout names, per base bet, the smallest bankroll on the grid from which every larger one keeps P(bust) below a target (5% by default) even at the upper end of its interval, and says the result is unstable when the passing bankrolls are not one unbroken run. Each cell is an ordinary run with its own derived seed, so any cell reproduces on its own, and the sweep travels in the link.
 
 The default run is European roulette (house edge 1/37 = 2.703%), a $1,000 bankroll, a $10 base bet, a stop at $1,100 and 10,000 sessions with seed 12345. Martingale ends in profit in 82.9% of sessions (95% interval 82.2–83.7%) and Flat in 53.8% (52.8–54.7%). Their EV per $ wagered is −2.91% and −2.76%, against a theoretical −2.70%. Martingale's many small wins are paid for by rare large losses: it busts in 17.1% of sessions (16.3–17.8%), Flat in 1.6% (1.4–1.9%).
 
@@ -25,13 +42,7 @@ The default run is European roulette (house edge 1/37 = 2.703%), a $1,000 bankro
 
 *Bankroll over time for the default run, after "Fit to this strategy" on Martingale (rounds 0 to 25). Shaded bands are the middle 90% and 50% of sessions, thin lines are the first 50 sessions.*
 
-![Results table for the default run: Flat and Martingale](docs/results.png)
-
 ![Replay of session 6: Martingale runs out of money after 9 rounds while Flat keeps playing](docs/replay-bust.png)
-
-![P(bust) heatmap for Flat: starting bankroll $100 to $1,000 across, base bet $5 to $25 up, with the bankroll readout below](docs/sweep.png)
-
-*The default sweep: Flat, starting bankroll by base bet, 10,000 sessions per cell. Darker cells bust more often; a dot marks the smallest bankroll on each row whose P(bust) interval stays below 5%.*
 
 ## How it works
 
@@ -53,12 +64,12 @@ The rule and link code contain no `eval`, `new Function` or dynamic `import`, an
 
 ## Testing
 
-- **Unit and statistical tests:** `npm run test` runs 805 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Seven more (benchmarks and fixture writers) are opt-in.
+- **Unit and statistical tests:** `npm run test` runs 808 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Seven more (benchmarks and fixture writers) are opt-in.
 - **Tolerances come from the data.** A statistical test passes when the measured value is within 4 standard errors of the expected one, with the standard error computed from the simulated sessions. Seeds are fixed, so each run gives the same numbers.
 - **The EV invariant:** for every strategy, EV per $ wagered must equal −edge. [`invariant.stats.test.ts`](src/engine/invariant.stats.test.ts) checks 9 strategies (the 8 built-ins and a custom rule) on 8 games with 20,000 sessions each: house-edge, fair and player-edge games, sports odds and multi-outcome games. The largest deviation is 2.78 standard errors. Kelly refuses to bet on the two house-edge multi-outcome games, and the test asserts that instead.
 - **A bug the tolerance caught:** before the sub-cent carry, a flat $5 bettor at −110 odds measured 5.29 standard errors from theory over 100,000 sessions. With the carry it measures 0.55 ([`runner.regression.stats.test.ts`](src/engine/runner.regression.stats.test.ts)).
 - **Golden files:** stored session and Monte Carlo results must reproduce bit for bit after engine changes.
-- **End-to-end:** 50 Playwright tests in 12 spec files run against the production build, served under the same `/strategylab/` path as the live site. Every number the page shows is compared with the engine run in Node on the same scenario. One test runs the app by keyboard only and checks what a screen reader announces.
+- **End-to-end:** 51 Playwright tests in 12 spec files run against the production build, served under the same `/strategylab/` path as the live site. Every number the page shows is compared with the engine run in Node on the same scenario. One test runs the app by keyboard only and checks what a screen reader announces.
 - **CI:** GitHub Actions runs lint, the Vitest suites, a strict build and the Playwright tests. Only a `main` commit that passes all four deploys to GitHub Pages.
 
 ## Get started
