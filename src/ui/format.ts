@@ -57,8 +57,14 @@ export const INTERVAL_ROWS: Readonly<Record<string, readonly [string, string]>> 
 };
 const INTERVAL_PARTS = new Set(Object.values(INTERVAL_ROWS).flat());
 
-/** Percent digits in the results table (the SE row needs three to be readable). */
-export const TABLE_PCT_DIGITS = 3;
+/**
+ * Percent digits in the results table, matching the report: one inside intervals (a 95% interval from
+ * 10,000 sessions is about ±0.7 points wide, so a third decimal claims precision the run doesn't have),
+ * two for EV per $ wagered and its theoretical value. Other percent rows keep formatStat's three (the SE
+ * row needs them to be readable).
+ */
+export const TABLE_INTERVAL_DIGITS = 1;
+export const TABLE_PCT_DIGITS: Readonly<Record<string, number>> = { evPerWagered: 2, evTheory: 2 };
 
 /** One row of the results table: a registered stat, with its interval folded in where it has one. */
 export interface TableRow {
@@ -75,13 +81,17 @@ export interface TableRow {
 /** The results table's rows: registry order, each interval's low/high rows folded into its point row. */
 export const TABLE_ROWS: readonly TableRow[] = STATS.filter((s) => !INTERVAL_PARTS.has(s.id)).map((s): TableRow => {
   const parts = INTERVAL_ROWS[s.id];
-  if (!parts) return { id: s.id, label: s.label, emphasis: s.emphasis === true, cell: (v) => formatStat(s.format, v[s.id]), raw: (v) => String(v[s.id]) };
+  const digits = TABLE_PCT_DIGITS[s.id];
+  if (!parts) {
+    const cell = digits === undefined ? (v: Readonly<Record<string, number>>) => formatStat(s.format, v[s.id]) : (v: Readonly<Record<string, number>>) => formatInterval(v[s.id], undefined, undefined, digits);
+    return { id: s.id, label: s.label, emphasis: s.emphasis === true, cell, raw: (v) => String(v[s.id]) };
+  }
   const [lo, hi] = parts;
   return {
     id: s.id,
     label: `${s.label}, with 95% interval`,
     emphasis: s.emphasis === true,
-    cell: (v) => formatInterval(v[s.id], v[lo], v[hi], TABLE_PCT_DIGITS),
+    cell: (v) => formatInterval(v[s.id], v[lo], v[hi], TABLE_INTERVAL_DIGITS),
     raw: (v) => [v[s.id], v[lo], v[hi]].map(String).join("|"),
   };
 });
@@ -123,16 +133,17 @@ export const BINARY_ONLY_NOTE = "Applies only to win/lose games; ignored here.";
  * the headline EV per $ wagered next to the theory, and P(profit > 0), per strategy.
  */
 export function runAnnouncement(columns: readonly { label: string; stats: Record<string, number> }[]): string {
-  const said = (format: StatDef["format"], v: number | undefined) => {
-    const s = formatStat(format, v);
+  // The table's precision: two decimals for EV per $, one for P(profit).
+  const said = (v: number | undefined, digits: number) => {
+    const s = formatInterval(v, undefined, undefined, digits);
     return s === "—" ? "not defined (no bets placed)" : s;
   };
-  const per = (id: string, format: StatDef["format"]) => columns.map((c) => `${c.label} ${said(format, c.stats[id])}`).join(", ");
+  const per = (id: string, digits: number) => columns.map((c) => `${c.label} ${said(c.stats[id], digits)}`).join(", ");
   const theory = columns[0]?.stats["evTheory"];
   return (
-    `Results ready. EV per $ wagered: ${per("evPerWagered", "pct")}` +
-    (theory === undefined ? "." : `; theory ${said("pct", theory)}.`) +
-    ` P(profit > 0): ${per("pProfit", "pct")}. The full table follows.`
+    `Results ready. EV per $ wagered: ${per("evPerWagered", 2)}` +
+    (theory === undefined ? "." : `; theory ${said(theory, 2)}.`) +
+    ` P(profit > 0): ${per("pProfit", TABLE_INTERVAL_DIGITS)}. The full table follows.`
   );
 }
 

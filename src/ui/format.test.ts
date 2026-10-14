@@ -30,7 +30,7 @@ describe("announcements (screen-reader text)", () => {
       { label: "Kelly", stats: { evPerWagered: NaN, evTheory: -0.027027, pProfit: 0 } },
     ];
     expect(runAnnouncement(cols)).toBe(
-      "Results ready. EV per $ wagered: Flat -2.758%, Kelly not defined (no bets placed); theory -2.703%. P(profit > 0): Flat 53.760%, Kelly 0.000%. The full table follows.",
+      "Results ready. EV per $ wagered: Flat -2.76%, Kelly not defined (no bets placed); theory -2.70%. P(profit > 0): Flat 53.8%, Kelly 0.0%. The full table follows.",
     );
   });
 
@@ -72,13 +72,18 @@ describe("results table rows", () => {
     for (const id of parts) expect(STATS.some((s) => s.id === id), id).toBe(true);
   });
 
-  it("an interval row shows point (low–high%) at the table's 3 decimals; raw keeps all three numbers exactly", () => {
+  it("table precision matches the report: one decimal inside intervals, two for EV per $; raw keeps every number exactly", () => {
     const row = TABLE_ROWS.find((r) => r.id === "pBust")!;
     const stats = { pBust: 0.1707, pBustLow: 0.16345, pBustHigh: 0.1782 };
-    expect(row.cell(stats)).toBe("17.070% (16.345–17.820%)");
+    expect(row.cell(stats)).toBe("17.1% (16.3–17.8%)");
+    expect(TABLE_ROWS.find((r) => r.id === "pProfit")!.cell({ pProfit: 0.5376, pProfitLow: 0.52782, pProfitHigh: 0.54736 })).toBe("53.8% (52.8–54.7%)");
     expect(row.raw(stats)).toBe("0.1707|0.16345|0.1782");
     const ev = TABLE_ROWS.find((r) => r.id === "evPerWagered")!;
-    expect(ev.cell({ evPerWagered: -0.02758 })).toBe("-2.758%");
+    expect(ev.cell({ evPerWagered: -0.02758 })).toBe("-2.76%");
+    expect(TABLE_ROWS.find((r) => r.id === "evTheory")!.cell({ evTheory: -1 / 37 })).toBe("-2.70%");
+    expect(ev.cell({ evPerWagered: NaN })).toBe("—");
+    // The SE row keeps three decimals, or a typical 0.042% would read as 0.04%.
+    expect(TABLE_ROWS.find((r) => r.id === "evSE")!.cell({ evSE: 0.00042 })).toBe("0.042%");
     expect(ev.raw({ evPerWagered: 0.1 + 0.2 })).toBe("0.30000000000000004");
   });
 
