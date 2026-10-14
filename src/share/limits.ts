@@ -23,3 +23,15 @@ export const ORIGIN_ALLOWANCE = 60;
 
 /** Unknown top-level keys reported individually before summarising the rest. */
 export const MAX_REPORTED_UNKNOWN_KEYS = 5;
+
+// Parameter sweeps (session 20). Enforced by validateSweep (src/sweep/validate.ts), which
+// validateScenario runs, so the UI, the link loader and the worker's runSweep all apply the same caps.
+
+/** At most this many values per sweep axis: a sweep is at most 20 × 20 = 400 cells. */
+export const MAX_SWEEP_STEPS = 20;
+
+/** At most this many simulated sessions in one sweep, over all its cells. */
+export const MAX_SWEEP_SESSIONS = 1_000_000;
+
+/** Every cell gets at least this many sessions, or the sweep is rejected (never silently thinner). */
+export const MIN_SWEEP_CELL_SESSIONS = 500;

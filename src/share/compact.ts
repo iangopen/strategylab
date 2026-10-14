@@ -14,6 +14,7 @@ import { binaryScenarioGame, binaryView, editorScenarioGame, MAX_STRATEGIES, OUT
 import { editorGame, type OutcomeEditor } from "../engine/outcomeEditor";
 import { MAX_PROB_TEXT } from "../engine/probText";
 import { MAX_REPORTED_UNKNOWN_KEYS } from "./limits";
+import { SWEEP_FIELDS, type SweepAxis, type SweepConfig, type SweepField } from "../sweep/sweep";
 
 /** A field the link carried but that could not be loaded, and why. */
 export interface Dropped {
@@ -37,6 +38,14 @@ export const KEY_MAP = {
   sd: "seed",
   st: "strategies",
 } as const;
+
+/**
+ * The sweep (session 20, optional): [x field, start, end, steps, y field, start, end, steps,
+ * strategyIndex, targetPct]. Fields use their top-level short keys (b, bb, r); strategyIndex counts the
+ * strategies IN THE LINK. Not in KEY_MAP because it is not a plain top-level value.
+ */
+export const SWEEP_KEY = "sp";
+const SWEEP_FIELD_CODES: Record<SweepField, string> = { startBankroll: "b", baseBet: "bb", maxRounds: "r" };
 
 /** Condition codes: [code, value]. The two bankroll comparisons are separate codes. */
 const COND_CODES = { ws: "winStreak", ls: "lossStreak", cp: "cycleProfit", bu: "betUnits", bg: "bankroll>=", bl: "bankroll<=" } as const;
@@ -176,7 +185,41 @@ export function compactScenario(s: ScenarioConfig, include: (inst: ScenarioConfi
   return out;
 }
 
+/** A VALID sweep in compact form; `strategyIndex` is the swept strategy's position among the link's strategies. */
+export function compactSweep(sw: SweepConfig, strategyIndex: number): unknown[] {
+  const axis = (a: SweepAxis) => [SWEEP_FIELD_CODES[a.field], a.start, a.end, a.steps];
+  return [...axis(sw.x), ...axis(sw.y), strategyIndex, sw.targetPct];
+}
+
 // ------------------------------------------------------------------------------------ expansion
+
+/** A sweep as the link states it (types checked; the swept strategy still an index). Ranges and caps are validateSweep's job. */
+export interface ExpandedSweep {
+  x: SweepAxis;
+  y: SweepAxis;
+  strategyIndex: number;
+  targetPct: number;
+}
+
+/** Compact sweep -> sweep with a strategy index, or an error. Only the TYPES and shape are checked here. */
+export function expandSweep(raw: unknown): Expanded<ExpandedSweep> {
+  if (!Array.isArray(raw) || raw.length !== 10) return { ok: false, error: "a sweep must be [x field, start, end, steps, y field, start, end, steps, strategy, target]" };
+  const axis = (at: number, name: string): Expanded<SweepAxis> => {
+    const [code, start, end, steps] = raw.slice(at, at + 4) as unknown[];
+    const field = SWEEP_FIELDS.find((f) => SWEEP_FIELD_CODES[f] === code);
+    if (!field) return { ok: false, error: `${name}: unknown setting ${describeValue(code)}` };
+    for (const v of [start, end, steps]) if (typeof v !== "number" || !Number.isFinite(v)) return { ok: false, error: `${name}: start, end and steps must be numbers (got ${describeValue(v)})` };
+    return { ok: true, value: { field, start: start as number, end: end as number, steps: steps as number } };
+  };
+  const x = axis(0, "x axis");
+  if (!x.ok) return x;
+  const y = axis(4, "y axis");
+  if (!y.ok) return y;
+  const [strategyIndex, targetPct] = raw.slice(8) as unknown[];
+  if (typeof strategyIndex !== "number" || !Number.isInteger(strategyIndex) || strategyIndex < 0) return { ok: false, error: `the swept strategy must be a position in the link's list (got ${describeValue(strategyIndex)})` };
+  if (typeof targetPct !== "number" || !Number.isFinite(targetPct)) return { ok: false, error: `the target must be a number (got ${describeValue(targetPct)})` };
+  return { ok: true, value: { x: x.value, y: y.value, strategyIndex, targetPct } };
+}
 
 type Expanded<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -251,6 +294,8 @@ export type ExpandedStrategy = { kind: "builtin"; strategyId: string; config: St
 export interface ExpandedPayload {
   top: Partial<TopValues>;
   strategies: ExpandedStrategy[];
+  /** The link's sweep, if it has one that expands (its strategy index refers to `strategies`). */
+  sweep?: ExpandedSweep;
   dropped: Dropped[];
 }
 
@@ -335,11 +380,11 @@ function expandSports(g: unknown[]): Expanded<SportsInput> {
   return { ok: true, value: { mode: mode === "m" ? "market" : "estimate", format: format === "a" ? "american" : "decimal", sideA: sideA as number, sideB: sideB as number, side, estimate: estimate as number } };
 }
 
-export function expandPayload(obj: Obj, options: { rules: boolean; sports: boolean; outcomes: boolean } = { rules: true, sports: true, outcomes: true }): ExpandedPayload {
+export function expandPayload(obj: Obj, options: { rules: boolean; sports: boolean; outcomes: boolean; sweep?: boolean } = { rules: true, sports: true, outcomes: true, sweep: true }): ExpandedPayload {
   const dropped: Dropped[] = [];
   const top: Partial<TopValues> = {};
 
-  const unknown = Object.keys(obj).filter((k) => !has(KEY_MAP, k));
+  const unknown = Object.keys(obj).filter((k) => !has(KEY_MAP, k) && !(k === SWEEP_KEY && options.sweep));
   unknown.slice(0, MAX_REPORTED_UNKNOWN_KEYS).forEach((k) => dropped.push({ field: "Link", message: `unknown setting ${describeValue(k)} ignored` }));
   if (unknown.length > MAX_REPORTED_UNKNOWN_KEYS) dropped.push({ field: "Link", message: `${unknown.length - MAX_REPORTED_UNKNOWN_KEYS} more unknown settings ignored` });
 
@@ -436,5 +481,12 @@ export function expandPayload(obj: Obj, options: { rules: boolean; sports: boole
       if (b) strategies.push(b);
     }
   }
-  return { top, strategies, dropped };
+  let sweep: ExpandedSweep | undefined;
+  if (options.sweep && has(obj, SWEEP_KEY)) {
+    const x = expandSweep(own(obj, SWEEP_KEY));
+    if (!x.ok) dropped.push({ field: "Sweep", message: `${x.error}; left out` });
+    else if (x.value.strategyIndex >= strategies.length) dropped.push({ field: "Sweep", message: `the swept strategy (number ${x.value.strategyIndex + 1}) is not among the strategies loaded from the link; left out` });
+    else sweep = x.value;
+  }
+  return sweep ? { top, strategies, sweep, dropped } : { top, strategies, dropped };
 }

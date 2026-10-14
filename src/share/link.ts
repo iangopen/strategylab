@@ -5,7 +5,8 @@ import { describeValue } from "../engine/rules/validate";
 import { getStrategy } from "../engine/strategies/registry";
 import { defaultScenario, migrateScenario, newCustomInstance, newUid, SCENARIO_VERSION, validateScenario, type BuiltinInstance, type ScenarioConfig, type ScenarioConfigV1, type ScenarioConfigV2, type StrategyInstance } from "../scenario";
 import { base64urlToBytes, bytesToBase64url } from "./base64url";
-import { compactScenario, expandPayload, FIELD_LABELS, type Dropped, type TopField, type TopValues } from "./compact";
+import { isSweepErrorKey } from "../sweep/validate";
+import { compactScenario, compactSweep, expandPayload, FIELD_LABELS, SWEEP_KEY, type Dropped, type TopField, type TopValues } from "./compact";
 import { FRAGMENT_PREFIX, MAX_FRAGMENT_CHARS, MAX_JSON_DEPTH, MAX_URL_CHARS } from "./limits";
 
 export type LoadResult =
@@ -14,10 +15,15 @@ export type LoadResult =
   | { kind: "loaded"; scenario: ScenarioConfig; dropped: Dropped[]; fromVersion: number };
 
 export type EncodeResult =
-  | { ok: true; fragment: string; urlLength: number; leftOut: number[] }
+  | { ok: true; fragment: string; urlLength: number; leftOut: number[]; sweepLeftOut: boolean }
   | { ok: false; reason: "blocked" | "tooLarge"; message: string };
 
 // ------------------------------------------------------------------------------------ save
+
+/** The scenario's sweep, when it has one with no errors (only then does it go into a link). */
+export function validSweep(s: ScenarioConfig): ScenarioConfig["sweep"] {
+  return s.sweep && !Object.keys(validateScenario(s)).some(isSweepErrorKey) ? s.sweep : undefined;
+}
 
 /** Indices of the strategy instances that validate right now (only these go into a link). */
 export function validStrategyIndices(s: ScenarioConfig): number[] {
@@ -28,7 +34,8 @@ export function validStrategyIndices(s: ScenarioConfig): number[] {
 /** Why "Copy link" is unavailable right now, or null when it can run. */
 export function copyBlocker(s: ScenarioConfig): string | null {
   const errors = validateScenario(s);
-  const topLevel = Object.keys(errors).filter((k) => !k.startsWith("strategy:") && k !== "strategies");
+  // An invalid sweep doesn't block the link: it is left out, and the copy message says so.
+  const topLevel = Object.keys(errors).filter((k) => !k.startsWith("strategy:") && k !== "strategies" && !isSweepErrorKey(k));
   if (topLevel.length > 0) return "Fix the highlighted settings before copying a link.";
   if (s.strategies.length === 0) return "Add at least one strategy before copying a link.";
   if (errors.strategies) return errors.strategies;
@@ -45,6 +52,9 @@ export function encodeScenarioLink(s: ScenarioConfig, baseUrl: string): EncodeRe
   if (blocker !== null) return { ok: false, reason: "blocked", message: blocker };
   const valid = new Set(validStrategyIndices(s));
   const payload = compactScenario(s, (inst) => valid.has(s.strategies.indexOf(inst)));
+  const sweep = validSweep(s);
+  // A valid sweep's strategy is valid, so it is in the link; its index counts the link's strategies.
+  if (sweep) payload[SWEEP_KEY] = compactSweep(sweep, [...valid].sort((a, b) => a - b).indexOf(s.strategies.findIndex((i) => i.uid === sweep.strategyUid)));
   const fragment = FRAGMENT_PREFIX + bytesToBase64url(new TextEncoder().encode(JSON.stringify(payload)));
   const urlLength = baseUrl.length + fragment.length;
   if (urlLength > MAX_URL_CHARS) {
@@ -55,7 +65,7 @@ export function encodeScenarioLink(s: ScenarioConfig, baseUrl: string): EncodeRe
     };
   }
   const leftOut = s.strategies.map((_, i) => i).filter((i) => !valid.has(i));
-  return { ok: true, fragment, urlLength, leftOut };
+  return { ok: true, fragment, urlLength, leftOut, sweepLeftOut: s.sweep !== undefined && sweep === undefined };
 }
 
 // ------------------------------------------------------------------------------------ load
@@ -161,8 +171,12 @@ export function decodeScenarioLink(hash: string): LoadResult {
     } as unknown as ScenarioConfigV1;
     scenario = migrateScenario(v1);
   } else {
-    x = expandPayload(payload, { rules: true, sports: v >= 3, outcomes: v >= 4 });
+    x = expandPayload(payload, { rules: true, sports: v >= 3, outcomes: v >= 4, sweep: v >= 4 });
     const assembled = assemble(x.top, x.strategies.map((s) => (s.kind === "custom" ? newCustomInstance(s.rule) : builtin(s.strategyId, s.config))));
+    if (x.sweep) {
+      const { strategyIndex, ...rest } = x.sweep;
+      assembled.sweep = { ...rest, strategyUid: assembled.strategies[strategyIndex]!.uid };
+    }
     // A version-2 link is a v2 scenario: it goes through the EXISTING migration like any older one.
     scenario = v === 2 ? migrateScenario({ ...assembled, version: 2 } as unknown as ScenarioConfigV2) : assembled;
   }
@@ -194,7 +208,13 @@ function settle(s: ScenarioConfig, supplied: Set<TopField>): Dropped[] {
     const errors = validateScenario(s);
     let changed = false;
     for (const [key, message] of Object.entries(errors)) {
-      if (key in FIELD_LABELS) {
+      if (isSweepErrorKey(key)) {
+        // The sweep is all or nothing: one error (an oversize grid, a cell that can't run) leaves it out.
+        if (!s.sweep) continue;
+        dropped.push({ field: "Sweep", message: `${message} Left out.` });
+        delete s.sweep;
+        changed = true;
+      } else if (key in FIELD_LABELS) {
         const field = key as TopField;
         const target = NULLABLE.includes(field) ? null : fb[field];
         if (JSON.stringify(s[field]) === JSON.stringify(target)) continue;

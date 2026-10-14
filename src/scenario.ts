@@ -9,6 +9,8 @@ import { getStrategy } from "./engine/strategies/registry";
 import type { StrategyConfig } from "./engine/strategies/types";
 import { validateStrategyConfig } from "./engine/strategies/validate";
 import { DEFAULT_MAX_ROUNDS, MAX_ROUNDS_CAP } from "./engine/types";
+import type { SweepConfig } from "./sweep/sweep";
+import { validateSweep } from "./sweep/validate";
 import type { StrategyRef } from "./worker/resolve";
 import type { SimRequest } from "./worker/sim.worker";
 
@@ -123,6 +125,8 @@ export interface ScenarioConfig {
   sessions: number;
   seed: number;
   strategies: StrategyInstance[];
+  /** A parameter sweep (session 20), absent when none is set up. Its link key is optional, so the version stays 4. */
+  sweep?: SweepConfig;
 }
 
 export const MAX_SEED = 0xffffffff;
@@ -189,9 +193,16 @@ const sameOutcomes = (a: readonly Outcome[], b: readonly Outcome[]) => JSON.stri
 
 /**
  * Errors keyed by field: top-level keys ("startBankroll", "game"), or
- * "strategy:<uid>:<fieldKey>" for strategy config fields. Empty object = valid.
+ * "strategy:<uid>:<fieldKey>" for strategy config fields, or "sweep..." for the sweep (isSweepErrorKey;
+ * the plain Run ignores those). Empty object = valid.
  */
 export function validateScenario(s: ScenarioConfig): Record<string, string> {
+  const e = validateBaseScenario(s);
+  return s.sweep ? { ...e, ...validateSweep(s, s.sweep, validateBaseScenario) } : e;
+}
+
+/** validateScenario without the sweep (also what every sweep cell must pass). */
+function validateBaseScenario(s: ScenarioConfig): Record<string, string> {
   const e: Record<string, string> = {};
   const money = (v: number) => Number.isFinite(v) && toCents(v) >= 1;
 

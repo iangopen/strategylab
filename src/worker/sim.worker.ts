@@ -3,6 +3,7 @@ import type { AnyGame } from "../engine/games";
 import { resultTransferables, runMonteCarlo, type MonteCarloResult } from "../engine/montecarlo";
 import { replaySession, replayTransferables, type Replay } from "../engine/replay";
 import type { SessionConfig } from "../engine/types";
+import { runSweep, type SweepCellResult, type SweepRequest } from "../sweep/run";
 import { resolveStrategies, type StrategyRef } from "./resolve";
 
 /**
@@ -35,6 +36,11 @@ const api = {
     if (session >= req.nSessions) throw new Error(`Session ${session} is outside this run (0..${req.nSessions - 1})`);
     const r = replaySession(req.game, specsOf(req), req.session, req.masterSeed, session);
     return Comlink.transfer(r, replayTransferables(r));
+  },
+
+  /** Runs a sweep cell by cell (runSweep re-checks the caps); each finished cell is sent to onCell at once. */
+  sweep(req: SweepRequest, onCell: (cell: SweepCellResult) => void, onProgress: (fraction: number) => void): SweepCellResult[] {
+    return runSweep(req, (c) => void onCell(c), (f) => void onProgress(f));
   },
 };
 
