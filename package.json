@@ -16,7 +16,7 @@
     "build:pages": "cross-env VITE_BASE=/strategylab/ npm run build",
     "preview:pages": "cross-env VITE_BASE=/strategylab/ vite preview --port 4180 --strictPort",
     "e2e": "playwright test",
-    "bench": "cross-env BENCH=1 vitest run src/engine/bench.stats.test.ts --reporter=verbose",
+    "bench": "cross-env BENCH=1 vitest run src/engine/bench.stats.test.ts src/sweep/sweep.bench.stats.test.ts --reporter=verbose --no-file-parallelism",
     "screenshots": "playwright test -c playwright.screenshots.config.ts"
   },
   "dependencies": {

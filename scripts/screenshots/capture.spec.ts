@@ -11,6 +11,9 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import optimise, { init } from "@jsquash/oxipng/optimise.js";
 import { replaySession } from "../../src/engine/replay";
 import { defaultScenario, toSimRequest } from "../../src/scenario";
+import { toSweepRequest } from "../../src/sweep/request";
+import { runSweep } from "../../src/sweep/run";
+import { defaultSweep } from "../../src/sweep/sweep";
 import { resolveStrategies } from "../../src/worker/resolve";
 import { expectTableMatchesEngine } from "../../e2e/helpers";
 
@@ -97,4 +100,20 @@ test("Sample report: the default run's one-page report as Chromium prints it (do
   expect(pages, "the sample report must be one page").toBe(1);
   writeFileSync(new URL("docs/report-sample.pdf", ROOT), pdf);
   console.log(`[screenshots] docs/report-sample.pdf: ${pages} page, ${pdf.length.toLocaleString("en-US")} bytes, link ${await page.getByTestId("report-link").textContent()}`);
+});
+
+test("README image: the default sweep (Flat, bankroll by base bet) with its heatmap and readout (docs/sweep.png)", async ({ page }) => {
+  await page.goto("./");
+  await page.getByRole("combobox", { name: "Theme" }).selectOption("light");
+  await page.getByRole("button", { name: "Set up a sweep" }).click();
+  await page.getByRole("button", { name: "Run sweep" }).click();
+  await expect(page.getByTestId("sweep-status")).toContainText(/^Done: /, { timeout: 300_000 });
+  // The image may only show the engine's numbers: every cell equals the same sweep run in Node.
+  const s = defaultScenario();
+  const sweep = defaultSweep(s.strategies[0]!.uid);
+  const expected = runSweep(toSweepRequest({ ...s, sweep }, sweep)).map((c) => [c.stats.pBust, c.stats.pBustLow, c.stats.pBustHigh].map(String).join("|"));
+  const shown = await page.getByTestId("sweep-table").locator("td[data-cell]").evaluateAll((tds) => tds.map((td) => td.getAttribute("data-raw")));
+  expect(shown).toEqual(expected);
+  await page.mouse.move(0, 0);
+  await save(await page.getByTestId("sweep-result").screenshot(), "docs/sweep.png");
 });
