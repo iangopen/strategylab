@@ -56,7 +56,7 @@ npm run build         # strict type check (app, config, E2E specs) + production 
 npm run lint          # oxlint
 npm run e2e           # Playwright: builds with VITE_BASE=/strategylab/, serves on :4180, runs e2e/*.spec.ts
 npm run build:pages   # the GitHub Pages build (VITE_BASE=/strategylab/)
-npm run bench         # one fixed, seeded 100k-session run, timed; prints sessions/s (one machine's numbers, never a claim)
+npm run bench         # one fixed, seeded 100k-session run and one max-size sweep, timed (one machine's numbers, never a claim)
 npm run screenshots   # regenerate docs/*.png + public/og-image.png from the LIVE site (SCREENSHOT_URL overrides); NOT a test
 npx playwright install chromium   # once per machine, before the first e2e run
 ```
@@ -112,7 +112,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 ## Where things are
 
-`src/engine/` pure engine (rules 1-11 above): `rng`, `games` (outcome model), `runner` (session loop, table rules, sub-cent carry), `montecarlo` + `checkpoints`, `replay`, `odds` (sports), `strategies/` (8 built-ins + `registry.ts`), `rules/` (JSON rule language: validate + compile), `stats/` (accumulator, quantile, registry). `src/worker/` Comlink worker + client. `src/share/` scenario links (untrusted input). `src/ui/` React UI and `charts/` (canvas; all scales in `adapters.ts`). `src/scenario.ts` is the one serializable `ScenarioConfig` (version 4). `e2e/` Playwright specs, `scripts/screenshots/` README images. Full annotated file map: `docs/spec.md` ("Folder map").
+`src/engine/` pure engine (rules 1-11 above): `rng`, `games` (outcome model), `runner` (session loop, table rules, sub-cent carry), `montecarlo` + `checkpoints`, `replay`, `odds` (sports), `strategies/` (8 built-ins + `registry.ts`), `rules/` (JSON rule language: validate + compile), `stats/` (accumulator, quantile, registry). `src/worker/` Comlink worker + client. `src/share/` scenario links (untrusted input). `src/sweep/` parameter sweeps (pure: grid, caps, cell seeds, `runSweep`). `src/report/` the one-page report and the takeaway / sweep-readout sentences. `src/ui/` React UI and `charts/` (canvas; all scales in `adapters.ts`). `src/scenario.ts` is the one serializable `ScenarioConfig` (version 4). `e2e/` Playwright specs, `scripts/screenshots/` README images. Full annotated file map: `docs/spec.md` ("Folder map").
 
 ## Chart rules
 
@@ -131,26 +131,28 @@ These are the owner's session 4 directives, verbatim. They bind every chart, pre
 Read the relevant section BEFORE changing that area. These files are plain paths, deliberately not @imports.
 
 - `docs/spec.md`: full folder map; chart rule implementation notes (fan zoom, label knockouts, colors); how to add a strategy (with the Strategy specs and test kit) and how to add a stat; the **rule language** (grammar, evaluation order, limits, worked examples); the **URL scenario format** (key map, limits, loading, history); **sports odds** (conversions, de-vig, format toggle, cents rounding / carry, link representation); **multi-outcome games** (model, one draw per round, payouts, Kelly generalized, editor, replay strip, scenario v4); the roadmap.
-- `docs/history.md`: the STATUS log (sessions 1-19, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
-- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were re-checked in session 19; refresh any you move.
+- `docs/history.md`: the STATUS log (sessions 1-20, verification items referenced as "STATUS n"), the old owner browser checklists, the full "Still open" list including closed items, and every "Decisions made outside the spec" entry with its reasoning. Check it before undoing any earlier decision.
+- `docs/guide.md`: a plain-language author's guide (architecture diagram, the path of one run, each core idea with file:line pointers, extension how-tos, what each test suite protects). Its line numbers were re-checked in session 20; refresh any you move.
 - Outside the repo (local only, never committed here): `C:\devwork\portfolio-audit\strategylab\INTERVIEW-PREP.md` and `NEXT-STEPS.md` (scored candidates, recommended order, the stage 1 prompt).
 
-## Current state (session 19, 2026-10-13)
+## Current state (session 20, 2026-10-13)
 
 All roadmap sessions are done and verified (test counts: see "Docs and disclosures"), CI green with Pages deploy, live at https://iangopen.github.io/strategylab/. The September 2026 hardening audit's findings for this repo are fixed (docs/history.md STATUS 127-133):
 - **Screen-reader announcements:** run and replay statuses are `role="status"` regions mounted before any text; a finished run adds a hidden summary (`runAnnouncement` in `ui/format.ts`). Keep them always mounted. Select status regions by role AND name in specs (the link banner is "Opened link").
 - **Licence notices:** `scripts/licenseNotices.ts` writes `third-party-licenses.txt` into every build (footer link). A bundled package without a licence file FAILS the build; fix the dependency, never the check.
 - `.claude/settings.local.json` is git-ignored here.
-- **Session 19 (STATUS 155-162): one-page report** (`src/report/`, guide 3.10): built from the run's snapshot, printed with `window.print()`; takeaways are pure and hedge when intervals include zero or overlap; ONE interval display (`formatInterval`), also in the results table (`TABLE_ROWS`; cells carry `data-raw`); build commit via Vite `define`. `docs/report-sample.pdf` comes from `npm run screenshots`.
+- **Session 20 (STATUS 163-175): sweeps** (guide 3.11): each cell is a plain `runMonteCarlo` run seeded `cellSeed(base, k)` (independent cells, no CRN); caps in `share/limits.ts` enforced by `validateSweep` (inside `validateScenario`, so links drop an oversize sweep) AND `runSweep`; link key `sp`, version stays 4; the readout uses the Wilson UPPER bound. Cancel bumps a per-sweep token: a terminated worker's posted cell messages still arrive. Table: 1 decimal in intervals, 2 for EV per $.
+- **Report fonts (STATUS 173):** Arial / Liberation Sans (metric twins) so the page lays out the same on every OS. Print tests lay out at 720 px and assert width <= 720, height <= 960 BEFORE `page.pdf()`: Chromium silently shrinks a too-wide page (that hid a Linux overflow).
+- **Session 19 (STATUS 155-162): report** (guide 3.10): `window.print()` of the run's snapshot; pure hedged takeaways; ONE interval display (`formatInterval`); table cells carry `data-raw`; `docs/report-sample.pdf` comes from `npm run screenshots`.
 - **Session 18 (STATUS 145-154):** risk rows; a new stat id goes in `STATS_ADDED_AFTER_CAPTURE` (never regenerate the Monte Carlo golden); RNG chi-square test; `npm run bench`.
-- **Local gotcha:** if Playwright lists far fewer than 47 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
+- **Local gotcha:** if Playwright lists far fewer than 50 tests, check for OneDrive cloud-file reparse points in the working tree (Node skips them as symlinks); see STATUS 133.
 
 Only record in STATUS what was actually verified.
 
 ## Docs and disclosures (session 16, 2026-09-29)
 
 Verified (docs/history.md STATUS 134-140):
-- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (770 Vitest with 6 opt-in skipped, 47 Playwright in 11 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
+- **README:** every number maps to a file or a session 16 run (STATUS 136); it states scale, never speed. **Update its two test counts (805 Vitest with 7 opt-in skipped, 50 Playwright in 12 spec files) from `npm run test` and `npx playwright test --list` when tests are added.**
 - **Privacy:** no PRIVACY.md, because nothing leaves the browser (same-origin GETs only, no cookies, one localStorage key `betting-lab.theme`, kept under its old name). Adding any network call, storage or analytics means writing a PRIVACY.md first.
 - **Disclaimer:** the footer line stays; a line under the tagline says adults (18+), no real money, not betting advice, and the US National Problem Gambling Helpline **1-800-MY-RESET** (https://www.ncpgambling.org/help-treatment/, checked in a browser 2026-09-29). The README carries it; `e2e/app.spec.ts` checks it.
 - **Credits** in the README and `third-party-licenses.txt`; original favicon; MIT LICENSE matching `package.json`; GitHub About set (description, URL, 8 topics).
@@ -165,6 +167,7 @@ Only Ian can supply: real usage numbers, a personal pitch, a non-US helpline, an
 - Sports mode stores decimal prices at full precision after a format switch; the field shows 2 decimals, the readout shows the real payout (by design).
 - The address bar is not kept in sync while editing: after opening a link and editing, a reload restores the LINK until Copy link is clicked again.
 - Rule language gaps by design: one action per entry, no step-back, no payout-capped bet, no bankroll-proportional stake (those stay built-ins). Only Martingale x2 is proven bit-identical to its rule form.
-- Next directions (`NEXT-STEPS.md` in the audit folder): stages 1 (risk metrics, session 18) and 2 (report, session 19) are DONE; next parameter sweeps.
+- Planned feature work is DONE: stages 1 (risk metrics, session 18), 2 (report, session 19) and 3 (sweeps, session 20) in the audit folder's `NEXT-STEPS.md`. Further work needs a new decision.
+- Sweep limits: no sweep section in the report (931 of 960 px used). Independent cells add noise between neighbours (CRN across cells not built). Axes: bankroll, base bet, max rounds only; the readout needs bankroll as an axis.
 - Report limits: one page is tested for the default run and 8 built-ins, not for long links (big custom rules). "Not clear" uses interval overlap, which is conservative (a paired CRN test could separate some pairs).
 - Replay zoom is x-only; hover values go to a text readout, not an on-canvas tooltip.

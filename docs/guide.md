@@ -1,6 +1,6 @@
 # StrategyLab: an author's guide to the codebase
 
-This guide is for reading the code, not for changing the rules. The rules live in `CLAUDE.md`, the detailed specs in `docs/spec.md`, and the record of what was verified and when in `docs/history.md`. Where this guide and those files disagree, they win. Line numbers were checked on 2026-10-13 (commit `b14f63d`, and again after the session 18 changes); they drift as code changes, so search for the named function if a number is off.
+This guide is for reading the code, not for changing the rules. The rules live in `CLAUDE.md`, the detailed specs in `docs/spec.md`, and the record of what was verified and when in `docs/history.md`. Where this guide and those files disagree, they win. Line numbers were checked on 2026-10-13 (commit `b14f63d`, and again after the session 18, 19 and 20 changes); they drift as code changes, so search for the named function if a number is off.
 
 Suggested reading plan: evening 1, sections 1 and 2. Evening 2, section 3 (the core ideas), with the files open beside it. Evening 3, sections 4 and 5, then run the tests once and read their output.
 
@@ -23,7 +23,7 @@ Suggested reading plan: evening 1, sections 1 and 2. Evening 2, section 3 (the c
 
 `src/scenario.ts` sits in the middle: it defines `ScenarioConfig`, the one plain-JSON object that holds everything the user has set. Because it is plain data, a link can carry it and a worker message can carry it.
 
-**Numbers worth knowing.** Up to 1,000,000 sessions per run (`MAX_SESSIONS`, `src/engine/montecarlo.ts:15`), up to 8 strategies (`MAX_STRATEGIES`, `src/scenario.ts:130`), 8 built-in strategies (`src/engine/strategies/registry.ts:12-21`), 719 Vitest tests plus 44 Playwright tests (README, verified 2026-09-29).
+**Numbers worth knowing.** Up to 1,000,000 sessions per run (`MAX_SESSIONS`, `src/engine/montecarlo.ts:15`), up to 8 strategies (`MAX_STRATEGIES`, `src/scenario.ts:134`), 8 built-in strategies (`src/engine/strategies/registry.ts:12-21`), 805 Vitest tests plus 50 Playwright tests (README, verified 2026-10-13).
 
 ---
 
@@ -70,22 +70,22 @@ flowchart LR
 
 Follow this with the files open. It is the single most useful thing to understand.
 
-1. **The user edits the form.** Every edit replaces the `ScenarioConfig` held in React state in `App` (`src/App.tsx:40`). Nothing about the scenario is hidden in a component's own state, which is why a link can capture all of it.
-2. **Validation runs on every change.** `validateScenario` (`src/scenario.ts:194`) returns field errors; `canRun` is true only when there are none (`src/App.tsx:109-110`). The Run button is disabled otherwise.
-3. **Run is clicked.** `handleRun` (`src/App.tsx:140`) snapshots the scenario and calls `toSimRequest` (`src/scenario.ts:291`), which converts dollars to integer cents with `toCents` (`src/scenario.ts:172`) and turns each strategy into plain data: a built-in is `{ strategyId, config }`, a custom rule is the rule's JSON. Functions cannot be sent to a worker, so nothing in the request is code.
-4. **The client sends it to the worker.** `SimClient.run` (`src/worker/client.ts:35`) calls the worker through Comlink and wraps the progress callback in `Comlink.proxy` (`src/worker/client.ts:39`), so the worker can call it back across threads.
-5. **The worker turns data back into strategies.** `api.run` (`src/worker/sim.worker.ts:25`) calls `resolveStrategies` (`src/worker/resolve.ts:13`): built-ins are looked up in the registry, and custom rules are validated and compiled right here (`src/worker/resolve.ts:17`). A bad rule fails the run with a readable message.
+1. **The user edits the form.** Every edit replaces the `ScenarioConfig` held in React state in `App` (`src/App.tsx:47`). Nothing about the scenario is hidden in a component's own state, which is why a link can capture all of it.
+2. **Validation runs on every change.** `validateScenario` (`src/scenario.ts:199`) returns field errors; `canRun` is true only when there are none (`src/App.tsx:125-127`). The Run button is disabled otherwise.
+3. **Run is clicked.** `handleRun` (`src/App.tsx:158`) snapshots the scenario and calls `toSimRequest` (`src/scenario.ts:302`), which converts dollars to integer cents with `toCents` (`src/scenario.ts:176`) and turns each strategy into plain data: a built-in is `{ strategyId, config }`, a custom rule is the rule's JSON. Functions cannot be sent to a worker, so nothing in the request is code.
+4. **The client sends it to the worker.** `SimClient.run` (`src/worker/client.ts:36`) calls the worker through Comlink and wraps the progress callback in `Comlink.proxy` (`src/worker/client.ts:37`), so the worker can call it back across threads.
+5. **The worker turns data back into strategies.** `api.run` (`src/worker/sim.worker.ts:26`) calls `resolveStrategies` (`src/worker/resolve.ts:13`): built-ins are looked up in the registry, and custom rules are validated and compiled right here (`src/worker/resolve.ts:17`). A bad rule fails the run with a readable message.
 6. **Monte Carlo loops over sessions.** `runMonteCarlo` (`src/engine/montecarlo.ts:59`) validates its inputs, then for each session `i` computes one seed (`src/engine/montecarlo.ts:94`) and runs EVERY strategy on that same seed (`src/engine/montecarlo.ts:95-119`). The first 2,000 sessions get an observer that records percentile bands; the first 50 also record a downsampled path for the spaghetti lines (`src/engine/montecarlo.ts:101-114`). Every other session pays only an `if` check.
 7. **One session is played.** `runSession` (`src/engine/runner.ts:60`) creates the random generator and hands off to `runSessionWithRng` (`src/engine/runner.ts:92`). Each round: check the stop conditions, ask the strategy for a bet, apply table rules, draw ONE random number, pay out, and tell the strategy what happened (`src/engine/runner.ts:121-169`).
 8. **Each session's result is folded into an accumulator.** `addSession` (`src/engine/stats/accumulator.ts:72`) adds running sums and writes one number per session into four typed-array columns (final bankroll, max drawdown, longest losing streak, and rounds played if the session busted). Paths are never kept.
 9. **Progress is reported about every 2%.** `src/engine/montecarlo.ts:120-126`. The callback is the proxied function from step 4, so each call is a message back to the page, which updates the progress bar.
 10. **Statistics are computed once at the end.** Every registered stat runs on each strategy's accumulator (`src/engine/montecarlo.ts:141`). The histogram uses one set of bins for all strategies (`src/engine/montecarlo.ts:131`).
-11. **The result goes back without copying.** `Comlink.transfer(result, resultTransferables(result))` (`src/worker/sim.worker.ts:30`) hands the typed arrays' memory to the page instead of copying it. The per-session columns are not in the result at all; they never leave the worker.
-12. **The page draws.** `handleRun` stores the result (`src/App.tsx:156`). `ResultsTable` renders one row per registered stat, with each 95% interval shown in its stat's row. `FanChart` computes ONE set of axes for all panels with `fanScales` (`src/ui/charts/FanChart.tsx:28`, defined at `src/ui/charts/adapters.ts:89`), so Martingale's panel and Flat's panel are drawn on the same scale.
+11. **The result goes back without copying.** `Comlink.transfer(result, resultTransferables(result))` (`src/worker/sim.worker.ts:31`) hands the typed arrays' memory to the page instead of copying it. The per-session columns are not in the result at all; they never leave the worker.
+12. **The page draws.** `handleRun` stores the result (`src/App.tsx:174`). `ResultsTable` renders one row per registered stat, with each 95% interval shown in its stat's row. `FanChart` computes ONE set of axes for all panels with `fanScales` (`src/ui/charts/FanChart.tsx:28`, defined at `src/ui/charts/adapters.ts:89`), so Martingale's panel and Flat's panel are drawn on the same scale.
 
-**Cancel** works differently from a normal "stop" button. The worker is running one long synchronous loop and cannot receive a message mid-loop, so `cancel` simply kills the worker and starts a fresh one (`src/worker/client.ts:58-64`).
+**Cancel** works differently from a normal "stop" button. The worker is running one long synchronous loop and cannot receive a message mid-loop, so `cancel` simply kills the worker and starts a fresh one (`src/worker/client.ts:69-75`).
 
-**Replay** (clicking a line in the fan chart) does not look anything up. It re-plays session `i` for every strategy from its seed in the worker (`src/worker/sim.worker.ts:34`, `src/engine/replay.ts:69`). Because the seed fully determines the session, the replay is exactly the session that was summarized.
+**Replay** (clicking a line in the fan chart) does not look anything up. It re-plays session `i` for every strategy from its seed in the worker (`src/worker/sim.worker.ts:35`, `src/engine/replay.ts:69`). Because the seed fully determines the session, the replay is exactly the session that was summarized.
 
 ---
 
@@ -121,7 +121,7 @@ Follow this with the files open. It is the single most useful thing to understan
 
 ### 3.4 The Web Worker
 
-**Where.** `src/worker/sim.worker.ts` (the worker side, exposed with `Comlink.expose` at line 43), `src/worker/client.ts` (the page side, `SimClient` at line 17), `src/worker/resolve.ts` (turning plain data into strategies).
+**Where.** `src/worker/sim.worker.ts` (the worker side, exposed with `Comlink.expose` at line 49), `src/worker/client.ts` (the page side, `SimClient` at line 18), `src/worker/resolve.ts` (turning plain data into strategies).
 
 **Why.** A big run is seconds of pure computation. On the page's main thread that would freeze typing, scrolling and the Cancel button. In a worker, the page stays responsive; the session 1 check recorded zero main-thread tasks over 50 ms during a 100,000-session run (`docs/history.md` STATUS 9), and `e2e/responsiveness.spec.ts` keeps checking it.
 
@@ -129,7 +129,7 @@ Follow this with the files open. It is the single most useful thing to understan
 - **Comlink** hides `postMessage` behind ordinary async function calls, so `client.run(req, onProgress)` reads like a local call.
 - **Only data crosses the boundary.** Strategies are objects with functions, which cannot be posted to a worker. So the request carries a registry id or rule JSON, and the worker rebuilds the strategy (`src/worker/resolve.ts:10-26`). A side effect is security: the worker validates every rule itself instead of trusting the page.
 - **Transfer, not copy.** The result's typed arrays are transferred (`src/engine/montecarlo.ts:158-165`), which moves their memory instead of copying it.
-- **Cancel = terminate and respawn** (`src/worker/client.ts:58`), because a synchronous loop cannot be interrupted by a message.
+- **Cancel = terminate and respawn** (`src/worker/client.ts:69`), because a synchronous loop cannot be interrupted by a message.
 - **Memory does not grow with run length.** Per session the engine keeps four numbers per strategy. Bands keep only checkpoint values for 2,000 sessions, and sample paths are downsampled to at most 1,000 points (`MAX_PATH_POINTS`, `src/engine/montecarlo.ts:18`). The owner rejected storing full paths in session 3: 2,000 full paths at 1,000,000 rounds would be about 16 GB (`docs/history.md`, Decisions).
 
 ### 3.5 The rule compiler and its safety limits
@@ -162,15 +162,15 @@ Users can write their own progression ("double after a loss, but go back to 1 un
 
 **The format.** `#s=` followed by base64url of a compact JSON scenario. It lives in the fragment (after `#`), which browsers never send to a server, so no scenario data ever appears in a server log.
 
-**The decoder's pipeline** (`parseFragment`, `link.ts:102`, then `decodeScenarioLink`, `link.ts:135`), each stage cheap and bounded:
-1. Reject anything longer than 8,000 characters before decoding (`link.ts:104`; the cap is `MAX_URL_CHARS` at `limits.ts:12`).
+**The decoder's pipeline** (`parseFragment`, `link.ts:112`, then `decodeScenarioLink`, `link.ts:145`), each stage cheap and bounded:
+1. Reject anything longer than 8,000 characters before decoding (`link.ts:114`; the cap is `MAX_URL_CHARS` at `limits.ts:12`).
 2. Strict base64url decode that reports a position instead of throwing (`base64url.ts:29`).
-3. Strict UTF-8 decode (`fatal: true`, `link.ts:111`).
-4. A linear scan rejects nesting deeper than 16 levels BEFORE `JSON.parse` sees the text (`jsonDepthExceeds`, `link.ts:81`; used at `link.ts:115`), so a "bracket bomb" never reaches the parser.
-5. `JSON.parse`, then require a plain object (`link.ts:124`).
-6. Check the version. A link from a newer app asks the user to reload (`link.ts:145`); older versions are migrated with the same `migrateScenario` the app uses.
-7. Expand short keys with type checks (`expandPayload`, `compact.ts:338`), run custom rules through `validateRule`, and run the whole scenario through `validateScenario`.
-8. **Partial load** (`settle`, `link.ts:189`): a bad field falls back to its default, a bad strategy is left out, and the user is told exactly what was dropped. The loop is capped at 64 passes (`link.ts:193`).
+3. Strict UTF-8 decode (`fatal: true`, `link.ts:121`).
+4. A linear scan rejects nesting deeper than 16 levels BEFORE `JSON.parse` sees the text (`jsonDepthExceeds`, `link.ts:91`; used at `link.ts:125`), so a "bracket bomb" never reaches the parser.
+5. `JSON.parse`, then require a plain object (`link.ts:134`).
+6. Check the version. A link from a newer app asks the user to reload (`link.ts:155`); older versions are migrated with the same `migrateScenario` the app uses.
+7. Expand short keys with type checks (`expandPayload`, `compact.ts:383`), run custom rules through `validateRule`, and run the whole scenario through `validateScenario`.
+8. **Partial load** (`settle`, `link.ts:203`): a bad field falls back to its default, a bad strategy is left out, and the user is told exactly what was dropped. The loop is capped at 64 passes (`link.ts:207`).
 
 Opening a link never starts a simulation. **Tests:** `src/share/malicious.test.ts:111` onwards covers prototype-pollution keys, deep nesting, huge strings, bad base64, every truncation of a real link, invalid UTF-8, hostile versions and wrong types. Round trip, size budget, migration and old-version goldens are in the other `src/share/*.test.ts` files and `src/v3links.golden.test.ts`.
 
@@ -215,16 +215,43 @@ A Monte Carlo result is never exactly the theoretical value; it wobbles. The que
 **What it is.** After a run, the Report button opens a print-laid-out page for that run: takeaway sentences, key statistics with 95% intervals, the bankroll chart, every setting in words, and how to reproduce it (seed, build commit, share link). "Print / save as PDF" just calls `window.print()` (`src/report/ReportView.tsx:61`); there is no PDF library. `docs/report-sample.pdf` is the default run, printed from the live site by `npm run screenshots`.
 
 **Where.**
-- `src/report/ReportView.tsx:45` lays the page out. It uses the run's own snapshot of the scenario (stored when Run was clicked, `src/App.tsx:156`), never the live form, so the link it prints (`encodeScenarioLink`, `ReportView.tsx:50`) reruns exactly these numbers. While open it draws in the light theme (`useLightTheme`, line 33), so the screen matches the paper.
+- `src/report/ReportView.tsx:45` lays the page out. It uses the run's own snapshot of the scenario (stored when Run was clicked, `src/App.tsx:174`), never the live form, so the link it prints (`encodeScenarioLink`, `ReportView.tsx:50`) reruns exactly these numbers. While open it draws in the light theme (`useLightTheme`, line 33), so the screen matches the paper.
 - `src/report/takeaways.ts:178` turns the numbers into 3 to 5 sentences. It is pure TypeScript with no React, so every sentence is unit-tested (`takeaways.test.ts`).
 - `src/report/summary.ts:58` writes the configuration in words, and `REPORT_ROWS` (line 77) picks the key statistics.
 - `src/ui/format.ts:42` is `formatInterval`, the ONE interval display ("17.1% (16.4–17.8%)"), shared by the report and the results table.
 - The build commit comes from `vite.config.ts:19` (`commitHash`, injected with `define` at line 35). A build from a working tree with uncommitted changes is labelled "+local changes".
-- The print rules are `@page { size: letter; margin: 0.5in }` and `@media print` (`src/index.css:284-285`). Above four strategies the page switches to denser type (`DENSE_ABOVE`, `ReportView.tsx:21`; CSS from `index.css:269`), and the chart panels are sized by `reportChartLayout` (`src/report/layout.ts:4`) so that eight strategies still fit two rows.
+- The print rules are `@page { size: letter; margin: 0.5in }` and `@media print` (`src/index.css:319-320`). Above four strategies the page switches to denser type (`DENSE_ABOVE`, `ReportView.tsx:21`; CSS from `index.css:272`), and the chart panels are sized by `reportChartLayout` (`src/report/layout.ts:4`) so that eight strategies still fit two rows.
 
 **Why the sentences are careful.** A reviewer will read the sentences, not the intervals. So the generator never names a winner unless the numbers support one. If an EV interval includes zero, the sentence says the result "is not clearly different from zero at this sample size". If two strategies' intervals overlap, it says the difference "isn't clear at this sample size" (`overlaps`, `takeaways.ts:38`). Overlap is a conservative test: two intervals can overlap even when a careful paired test would find a difference. A difference is named only when the intervals are fully separated. Rounds-to-bust sentences always begin "Counting busted sessions only". The EV interval is the estimate ± 1.96 standard errors (`evInterval`, line 43). Above three strategies (`LIST_LIMIT`, line 53) each sentence gives the lowest and highest rather than every strategy, so the page still fits.
 
-**Tests.** `e2e/report.spec.ts:38` prints the default report to a Letter PDF and requires exactly one page. Line 77 does the same with all eight strategies. Line 89 opens the report's link in a new page, reruns it and compares every results-table cell's `data-raw` (the exact `String(double)` of each number) with the original run: bit for bit. The unit tests were each shown failing when the hedging logic was broken on purpose (`docs/history.md`, session 19).
+**Fonts and fit.** The report prints in Arial / Liberation Sans (metric twins), not the system UI font, so it lays out the same on Windows, macOS and Linux: session 20 found it overflowed on Linux, hidden by Chromium shrinking a too-wide page to fit. The print tests therefore lay the page out at the 720 px printable width and assert it is no wider than 720 px and no taller than 960 px before printing (`printToPdf`, `e2e/report.spec.ts:35`).
+
+**Tests.** `e2e/report.spec.ts:56` prints the default report to a Letter PDF and requires exactly one page. Line 95 does the same with all eight strategies. Line 107 opens the report's link in a new page, reruns it and compares every results-table cell's `data-raw` (the exact `String(double)` of each number) with the original run: bit for bit. The unit tests were each shown failing when the hedging logic was broken on purpose (`docs/history.md`, session 19).
+
+### 3.11 Parameter sweeps (session 20)
+
+**What it is.** The "Parameter sweep" panel varies two settings across a grid for ONE strategy and shows P(bust) in every cell as a heatmap, then answers "what is the smallest bankroll on this grid that keeps P(bust) under X%?" (default 5%). The axes can be starting bankroll, base bet or max rounds (`SWEEP_FIELDS`, `src/sweep/sweep.ts:9`): plain numbers in `ScenarioConfig` with no derived inputs, so a cell is just the scenario with two numbers changed. Everything else (game, limits, stops) comes from the scenario above.
+
+**Each cell is an ordinary run.** `cellScenario` (`src/sweep/sweep.ts:107`) builds cell `k` as a standalone scenario: the two swept values, the cell's sessions, the swept strategy only, and the seed `cellSeed(baseSeed, k) = splitmix32(baseSeed XOR splitmix32(k XOR 0x53574550))` (`src/sweep/sweep.ts:79`). It is the same construction as session seeds (section 3.1), never `baseSeed + k`, and the salt keeps a cell seed from equalling the session seed of the same index. `runSweep` (`src/sweep/run.ts:38`) runs the cells in order through the unchanged `runMonteCarlo` (line 52). So any cell can be rerun alone and gives the same numbers bit for bit: `src/sweep/sweep.stats.test.ts:27` rebuilds three cells by hand from the documented formula and compares every statistic. The test failed when the derivation was changed to `baseSeed + k` (`docs/history.md`, session 20). Cells are numbered row by row (`cellIndex`, line 66).
+
+**Cells are independent, not common random numbers.** Each cell has its own seed, so neighbouring cells differ by sampling noise as well as by their settings. That is why the readout reports a larger bankroll that misses the target after a smaller one met it, instead of hiding it.
+
+**The size cap, enforced three times.** At most 20 steps per axis (`MAX_SWEEP_STEPS`, `src/share/limits.ts:31`) and 1,000,000 sessions per sweep (line 34). Sessions per cell are `min(Sessions, floor(1,000,000 / cells))` (`sweepSessionsPerCell`, `src/sweep/sweep.ts:84`), and a sweep whose cells would get fewer than 500 (line 37) is rejected, never run thinner. With the 20 × 20 cap the grid alone can't push a cell below 500 (400 cells still get 2,500 each), so in practice the floor rejects a Sessions setting below 500.
+1. `validateSweep` (`src/sweep/validate.ts:34`) runs inside `validateScenario` (`src/scenario.ts:201`). It also validates every cell's scenario (line 57), so a cell the app would refuse, such as a bankroll at or above the win target, is reported by name.
+2. The link loader's partial load drops a sweep with any error and says why (`settle`, `src/share/link.ts:211`). A crafted link can't smuggle in a 21 × 20 grid.
+3. The worker re-checks the request itself (`assertSweepWithinCaps`, `src/sweep/run.ts:22`).
+
+**In the link.** An optional `sp` key (`SWEEP_KEY`, `src/share/compact.ts:47`; expanded by `expandSweep`, line 205) holds both axes, the swept strategy's position among the link's strategies and the target, so the scenario version stays 4 and every older link is unchanged. Copy link leaves an invalid sweep out and says so, rather than blocking the whole link (`src/share/link.ts:57`).
+
+**In the worker.** `api.sweep` (`src/worker/sim.worker.ts:42`) runs the cells and sends each one to the page as soon as it finishes, through a `Comlink.proxy` callback (`src/worker/client.ts:41`), so the heatmap fills in progressively. Cancel is the usual terminate-and-respawn. One subtlety, found by the E2E test: cell messages the terminated worker had already posted still arrive after Cancel. So each sweep carries a token that Cancel invalidates, and late cells are ignored (`src/App.tsx:71`, checked at line 213). Editing the sweep does not mark the plain run's results as stale (`runKey`, `src/App.tsx:30`).
+
+**The heatmap.** `SweepHeatmap` (`src/ui/sweep/SweepHeatmap.tsx:23`) draws on a canvas. The colour scale is viridis (colourblind-safe and sequential) on a FIXED 0–100% range that is never rescaled to the data: darker always means more busts, also in greyscale (`bustColor`, `src/ui/sweep/heatmap.ts:33`; a test checks that luminance falls steadily). Axis labels are in the settings' units. Hovering or tapping a cell prints its P(bust) and Wilson interval below the chart. A dot marks each line's readout answer (`markedCells`, line 92). The same numbers are in a plain table for keyboard and screen-reader users (line 168 of the component).
+
+**The readout sentences.** `sweepReadout` (`src/report/sweepReadout.ts:73`) sits next to `takeaways.ts` and follows its hedging style. A bankroll counts only when the UPPER end of its 95% Wilson interval for P(bust) is below the target (`meetsTarget`, line 35), and the first sentence says so. That way a cell whose estimate is 4.0% but whose interval reaches 5.0% is not called safe enough; the sentence names it and says why it doesn't count. When nothing qualifies it says "no bankroll on this grid". The printed digits never contradict the claim: an upper bound of 4.96% is printed as 4.96%, not 5.0% (`digitsFor`, line 51). The readout runs along the bankroll axis, one line per value of the other axis (`bankrollLines`, line 107), and needs the bankroll as one of the axes.
+
+**The report.** The one-page report does not include the sweep. The default report measures 932 px of the 960 px a Letter page holds, and the smallest useful sweep section (a heading and the readout lines) needs well over 100 px. This is listed as open.
+
+**Tests.** `src/sweep/sweep.test.ts` covers the caps (20 × 20 accepted, 21 × 20 rejected, the 500 floor, crafted links), the seed formula, the grid and the link round trip. `src/report/sweepReadout.test.ts` checks a qualifying bankroll, none qualifying, and an estimate under the target whose upper bound is not. Its upper-bound tests failed when the rule was switched to the point estimate. `e2e/sweep.spec.ts:24` runs a small sweep and compares the table with `runSweep` in Node. Line 68 cancels a max-size sweep and measures the page's longest gap between animation frames while it runs. Line 113 reruns the app's own Copy link and compares every cell's exact numbers.
 
 ## 4. How to extend it
 
@@ -267,10 +294,10 @@ All commands work in PowerShell.
 | `npm run build` | Strict type check of app, config and E2E specs, then the production build. The gate before any push. |
 | `npm run lint` | oxlint. |
 | `npm run e2e` | Playwright: builds under `/strategylab/`, serves on port 4180, runs `e2e/*.spec.ts`. Run `npx playwright install chromium` once per machine. |
-| `npm run bench` | One fixed, seeded run, timed (`src/engine/bench.stats.test.ts`; skipped by `npm run test`). |
+| `npm run bench` | One fixed, seeded run and one max-size sweep, timed (`src/engine/bench.stats.test.ts`, `src/sweep/sweep.bench.stats.test.ts`; skipped by `npm run test`). |
 | `npx vitest run src/engine/runner.test.ts` | One test file. Add `-t "draws"` to filter by test name. |
 
-**Benchmark: one machine's result, not a guarantee.** `npm run bench` runs the app's default scenario (European roulette, $1,000 bankroll, $10 base bet, stop at $1,100, 1,000 max rounds, Flat and Martingale ×2) at 100,000 sessions with seed 12345: a warm-up, then three timed runs. It checks that the three runs give identical results. On 2026-10-13 on an Intel Core i7-12700KF (20 logical cores, 16 GB, Windows, Node 24.14.1), in Node on a single thread, with other work possibly running on the machine, it printed: runs of 2.45 s, 2.82 s and 2.70 s, a median of **2.70 s**, so **37,063 sessions per second** (each played by both strategies), or about 21.9 million rounds per second. The browser runs the same code in a worker; in a focused tab it measured within about 10% of Node (`docs/history.md` STATUS 77). Expect different numbers on another machine, and use the command rather than these figures when comparing changes.
+**Benchmark: one machine's result, not a guarantee.** `npm run bench` runs the app's default scenario (European roulette, $1,000 bankroll, $10 base bet, stop at $1,100, 1,000 max rounds, Flat and Martingale ×2) at 100,000 sessions with seed 12345: a warm-up, then three timed runs. It checks that the three runs give identical results. On 2026-10-13 on an Intel Core i7-12700KF (20 logical cores, 16 GB, Windows, Node 24.14.1), in Node on a single thread, with other work possibly running on the machine, it printed: runs of 2.45 s, 2.82 s and 2.70 s, a median of **2.70 s**, so **37,063 sessions per second** (each played by both strategies), or about 21.9 million rounds per second. The browser runs the same code in a worker; in a focused tab it measured within about 10% of Node (`docs/history.md` STATUS 77). The same command then runs a max-size sweep: 20 × 20 cells of Martingale ×2 (bankroll $100–$1,000 by base bet $1–$20) at 2,500 sessions per cell, 1,000,000 sessions in all. On the same machine on 2026-10-13 it took **17.12 s**, about 58,400 sessions per second. In the same command the plain run's median was 3.87 s, slower than the 2.70 s above, which shows how much load on the machine moves these numbers. Expect different numbers on another machine, and use the command rather than these figures when comparing changes.
 
 ### What each suite protects
 
@@ -286,6 +313,7 @@ All commands work in PowerShell.
 | Report | `src/report/*.test.ts`, `src/ui/format.test.ts`, `e2e/report.spec.ts` | a takeaway claiming more than its intervals support, the interval display, the page no longer fitting one Letter page, or a link that no longer reruns the same numbers |
 | Generator quality | `src/engine/rng.test.ts`, `src/engine/rng.stats.test.ts` | the seed formula, or a generator whose outputs are not uniform (chi-square) |
 | Links | `src/share/*.test.ts` | encoding, size budget, migration, hostile input handling |
+| Sweeps | `src/sweep/*.test.ts`, `src/report/sweepReadout.test.ts`, `src/ui/sweep/heatmap.test.ts`, `e2e/sweep.spec.ts` | the size caps (in the form, the link loader and the worker), a cell that no longer equals its standalone run, a readout that counts an estimate instead of the upper bound, Cancel, the link rerun |
 | Chart maths | `src/ui/charts/adapters.stats.test.ts` | shared scales, zoom, label placement |
 | Tone | `src/ui/sportsReadout.test.ts:45-64` | banned words (picks, sharp, value bet, guarantee, winning system, sportsbook and lottery names, URLs) in the sports and outcome-editor sources |
 | End to end | `e2e/*.spec.ts` | the real page: numbers equal the engine's (`e2e/helpers.ts:43`), shared axes, links survive reload, keyboard and screen-reader paths, responsiveness during a run |
