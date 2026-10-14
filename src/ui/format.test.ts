@@ -87,6 +87,32 @@ describe("results table rows", () => {
     expect(ev.raw({ evPerWagered: 0.1 + 0.2 })).toBe("0.30000000000000004");
   });
 
+  it("every percent row's decimals: one for every share of sessions, two for EV per $ and theory, three for its SE", () => {
+    const v = 0.123456;
+    const digits = (id: string) => {
+      const row = TABLE_ROWS.find((r) => r.id === id)!;
+      const parts = INTERVAL_ROWS[id];
+      const text = row.cell(parts ? { [id]: v, [parts[0]]: v, [parts[1]]: v } : { [id]: v });
+      return /^\d+\.(\d+)%/.exec(text)![1]!.length;
+    };
+    const pctRows = TABLE_ROWS.filter((r) => STATS.find((s) => s.id === r.id)!.format === "pct").map((r) => [r.id, digits(r.id)]);
+    expect(Object.fromEntries(pctRows)).toEqual({
+      evPerWagered: 2,
+      evSE: 3,
+      evTheory: 2,
+      pProfit: 1,
+      pBust: 1,
+      pHitWin: 1,
+      pDrawdownHalf: 1,
+      end_ruin: 1,
+      end_insufficientFunds: 1,
+      end_stopWin: 1,
+      end_stopLoss: 1,
+      end_maxRounds: 1,
+      end_strategyStop: 1,
+    });
+  });
+
   it("the rounds-to-bust rows say they count busted sessions only", () => {
     for (const id of ["bustRoundsMedian", "bustRoundsP10"]) expect(TABLE_ROWS.find((r) => r.id === id)!.label).toMatch(/\(busted sessions only\)$/);
   });

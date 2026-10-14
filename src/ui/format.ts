@@ -58,13 +58,14 @@ export const INTERVAL_ROWS: Readonly<Record<string, readonly [string, string]>> 
 const INTERVAL_PARTS = new Set(Object.values(INTERVAL_ROWS).flat());
 
 /**
- * Percent digits in the results table, matching the report: one inside intervals (a 95% interval from
- * 10,000 sessions is about ±0.7 points wide, so a third decimal claims precision the run doesn't have),
- * two for EV per $ wagered and its theoretical value. Other percent rows keep formatStat's three (the SE
- * row needs them to be readable).
+ * Percent digits in the results table, matching the report. Every share of sessions (the P(...) rows,
+ * with or without an interval, and the end-reason rows) gets one: a 95% interval from 10,000 sessions
+ * is about ±0.7 points wide, so a third decimal claims precision the run doesn't have. EV per $ wagered
+ * and its theoretical value get two; the SE of EV per $ gets three, one finer than the EV it measures
+ * (a typical 0.042% would read as 0.04%). A new percent stat gets one unless it is listed here.
  */
 export const TABLE_INTERVAL_DIGITS = 1;
-export const TABLE_PCT_DIGITS: Readonly<Record<string, number>> = { evPerWagered: 2, evTheory: 2 };
+export const TABLE_PCT_DIGITS: Readonly<Record<string, number>> = { evPerWagered: 2, evTheory: 2, evSE: 3 };
 
 /** One row of the results table: a registered stat, with its interval folded in where it has one. */
 export interface TableRow {
@@ -81,7 +82,7 @@ export interface TableRow {
 /** The results table's rows: registry order, each interval's low/high rows folded into its point row. */
 export const TABLE_ROWS: readonly TableRow[] = STATS.filter((s) => !INTERVAL_PARTS.has(s.id)).map((s): TableRow => {
   const parts = INTERVAL_ROWS[s.id];
-  const digits = TABLE_PCT_DIGITS[s.id];
+  const digits = TABLE_PCT_DIGITS[s.id] ?? (s.format === "pct" ? TABLE_INTERVAL_DIGITS : undefined);
   if (!parts) {
     const cell = digits === undefined ? (v: Readonly<Record<string, number>>) => formatStat(s.format, v[s.id]) : (v: Readonly<Record<string, number>>) => formatInterval(v[s.id], undefined, undefined, digits);
     return { id: s.id, label: s.label, emphasis: s.emphasis === true, cell, raw: (v) => String(v[s.id]) };
