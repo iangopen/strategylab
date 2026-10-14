@@ -10,9 +10,9 @@ A browser app that runs betting strategies side by side on the same simulated ou
 
 *A parameter sweep: P(bust) for Flat across 50 combinations of starting bankroll and base bet, 10,000 sessions each. A dot marks, per base bet, the smallest bankroll from which every larger one keeps P(bust) below 5% at the upper end of its 95% interval.*
 
-![Results table for the default run: Flat and Martingale](docs/results.png)
+![Results table for the default run, key rows: Flat and Martingale](docs/results.png)
 
-*The results table for the default run: EV per $ wagered is −2.76% for Flat and −2.91% for Martingale, 1.33 and 0.48 standard errors from the −2.70% the house edge predicts; Martingale ends ahead more often and busts about ten times as often.*
+*Key rows of the results table for the default run (the app shows every row): EV per $ wagered is −2.76% for Flat and −2.91% for Martingale, against the −2.70% the house edge predicts; Martingale ends ahead more often, busts about ten times as often, and its busts come after a median of 14 rounds.*
 
 **Engineering**
 

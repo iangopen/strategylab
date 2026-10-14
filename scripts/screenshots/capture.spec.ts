@@ -42,6 +42,10 @@ async function save(png: Buffer, relPath: string) {
   console.log(`[screenshots] ${relPath}: ${png.length.toLocaleString("en-US")} -> ${out.length.toLocaleString("en-US")} bytes`);
 }
 
+// The results-table rows the README image shows (stat ids from src/engine/stats/registry.ts): EV per $,
+// P(profit) and P(bust) with their intervals, and median rounds to bust.
+const README_TABLE_ROWS = ["evPerWagered", "pProfit", "pBust", "bustRoundsMedian"];
+
 const panel = (page: Page, heading: string): Locator => page.locator("section.panel", { has: page.locator(`h2:text-is("${heading}")`) });
 
 async function openAndRun(page: Page) {
@@ -59,8 +63,20 @@ test("README screenshots: results table, fan chart fit to Martingale, replay of 
   // Nothing hovered, so no crosshair or readout sits on a chart.
   await page.mouse.move(0, 0);
 
-  // (a) The results table: Flat vs Martingale.
+  // (a) The results table: Flat vs Martingale, only its key rows so the README image stays short. The other
+  // rows are hidden for this one capture and shown again straight after; the app always shows every row.
+  const table = page.getByTestId("results-table");
+  await expect(table.locator("tbody tr[data-stat]")).toHaveCount(await table.locator("tbody tr").count());
+  for (const id of README_TABLE_ROWS) await expect(table.locator(`tr[data-stat="${id}"]`)).toBeVisible();
+  const hidden = await table.evaluate((t, keep) => {
+    const rows = [...t.querySelectorAll<HTMLElement>("tbody tr[data-stat]")].filter((r) => !keep.includes(r.dataset.stat!));
+    for (const r of rows) r.style.display = "none";
+    return rows.length;
+  }, README_TABLE_ROWS);
+  await expect(table.locator("tbody tr:visible")).toHaveCount(README_TABLE_ROWS.length);
   await save(await panel(page, "Results").screenshot(), "docs/results.png");
+  await table.evaluate((t) => t.querySelectorAll<HTMLElement>("tbody tr[data-stat]").forEach((r) => r.style.removeProperty("display")));
+  await expect(table.locator("tbody tr:visible")).toHaveCount(README_TABLE_ROWS.length + hidden);
 
   // (b) The fan chart after "Fit to this strategy" on Martingale (the zoom is shared by every panel).
   const fan = panel(page, "Bankroll over time");
