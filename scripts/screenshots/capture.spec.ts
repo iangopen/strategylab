@@ -94,7 +94,15 @@ test("Sample report: the default run's one-page report as Chromium prints it (do
   await openAndRun(page);
   await page.getByRole("button", { name: "Report", exact: true }).click();
   await expect(page.getByTestId("report")).toBeVisible();
+  // Lay out at the printable width (7.5in × 10in) as a browser's print does, and check it fits at full
+  // size: Chromium would otherwise shrink a too-wide page to fit (see e2e/report.spec.ts).
+  await page.setViewportSize({ width: 720, height: 960 });
   await page.emulateMedia({ media: "print" });
+  const canvases = page.getByTestId("report-canvas");
+  for (let i = 0; i < (await canvases.count()); i++) await expect(canvases.nth(i)).toHaveAttribute("data-draws", /^[1-9]/);
+  const fit = await page.getByTestId("report").evaluate((el) => ({ height: el.getBoundingClientRect().height, scrollWidth: el.scrollWidth }));
+  expect(fit.scrollWidth).toBeLessThanOrEqual(720);
+  expect(fit.height).toBeLessThanOrEqual(960);
   const pdf = await page.pdf({ format: "Letter", preferCSSPageSize: true, printBackground: true });
   const pages = (pdf.toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
   expect(pages, "the sample report must be one page").toBe(1);

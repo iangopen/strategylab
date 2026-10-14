@@ -238,6 +238,9 @@ table.results .interval { white-space: nowrap; }
   max-width: 7.5in; margin: 0 auto; background: var(--panel); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 0.4in 0.45in;
   font-size: 9pt; line-height: 1.35;
+  /* Metric-compatible fonts (Liberation Sans has Arial's widths), so the page lays out the same on
+     Windows, macOS and Linux and the one-page fit doesn't depend on the system UI font. */
+  font-family: Arial, "Liberation Sans", Helvetica, sans-serif;
 }
 .report h1 { font-size: 15pt; margin: 0 0 2px; }
 .report h1:focus { outline: none; }
@@ -261,10 +264,10 @@ table.results .interval { white-space: nowrap; }
 .report-config dt { color: var(--muted); flex: none; }
 .report-config dt::after { content: ":"; }
 .report-config dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.report-link { margin: 2px 0 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 6.5pt; line-height: 1.25; overflow-wrap: anywhere; word-break: break-all; }
+.report-link { margin: 2px 0 0; font-family: "Courier New", "Liberation Mono", monospace; font-size: 6pt; line-height: 1.25; overflow-wrap: anywhere; word-break: break-all; }
 .report-chart { display: grid; gap: 4px 10px; margin-top: 2px; }
 .report-chart .chart-panel figcaption { font-size: 8pt; margin-bottom: 0; }
-.report-chart .canvas-box canvas { cursor: default; }
+.report-chart .canvas-box canvas { cursor: default; max-width: 100%; } /* never wider than its column, so print never shrinks the page to fit */
 /* More than four strategies: smaller type in the table and the takeaways, so eight columns fit one page. */
 .report.dense .report-takeaways { font-size: 8pt; }
 .report.dense .report-table { font-size: 6.8pt; line-height: 1.15; }

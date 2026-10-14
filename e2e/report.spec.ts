@@ -23,9 +23,27 @@ async function openReport(page: Page) {
   await expect(page.getByRole("heading", { name: "StrategyLab report", level: 1 })).toBeFocused();
 }
 
-/** Chromium's PDF of the report, as printed: print media, US Letter, the page's own @page margins. */
+/** Printable area of US Letter with 0.5in margins, in CSS px: 7.5in × 10in. */
+const PRINT_WIDTH = 720;
+const PRINT_HEIGHT = 960;
+
+/**
+ * Chromium's PDF of the report, as printed: print media, US Letter, the page's own @page margins.
+ * First it checks the page fits at FULL size. Chromium silently shrinks a page whose content is wider
+ * than the paper, which once made an overflowing report pass on one machine and fail on another.
+ */
 async function printToPdf(page: Page): Promise<Buffer> {
+  // Lay the page out at the paper's printable width, as a browser's print does.
+  await page.setViewportSize({ width: PRINT_WIDTH, height: PRINT_HEIGHT });
   await page.emulateMedia({ media: "print" });
+  // Every chart panel has been sized and drawn (an unsized canvas is 300 × 150 by default).
+  const canvases = page.getByTestId("report-canvas");
+  for (let i = 0; i < (await canvases.count()); i++) await expect(canvases.nth(i)).toHaveAttribute("data-draws", /^[1-9]/);
+  const fit = await page.getByTestId("report").evaluate((el) => ({ height: el.getBoundingClientRect().height, width: el.getBoundingClientRect().width, scrollWidth: el.scrollWidth }));
+  console.log(`[report] printed size ${fit.width.toFixed(0)} × ${fit.height.toFixed(0)} px (page ${PRINT_WIDTH} × ${PRINT_HEIGHT}); content width ${fit.scrollWidth} px`);
+  expect(fit.width, "the report is laid out at the printable width").toBeLessThanOrEqual(PRINT_WIDTH);
+  expect(fit.scrollWidth, "nothing is wider than the page (Chromium would shrink everything to fit)").toBeLessThanOrEqual(Math.ceil(fit.width));
+  expect(fit.height, "the report fits one page at full size").toBeLessThanOrEqual(PRINT_HEIGHT);
   return page.pdf({ format: "Letter", preferCSSPageSize: true, printBackground: true });
 }
 
