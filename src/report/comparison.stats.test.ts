@@ -3,12 +3,14 @@
 // seeded (mulberry32), so each rate printed here is the same on every run. Rates are checked against
 // the nominal 5% with a tolerance of 4 binomial standard errors, computed here and printed.
 import { describe, expect, it } from "vitest";
-import { evDifference, bustDifference, evInterval, overlaps, pairCount, takeaways, type TakeawayInput } from "./takeaways";
+import { evClaim, evDifference, bustDifference, evInterval, overlaps, pairCount, takeaways, type TakeawayInput } from "./takeaways";
 import { GAME_PRESETS } from "../engine/games";
 import { runMonteCarlo } from "../engine/montecarlo";
 import { mulberry32, type Rng } from "../engine/rng";
+import { fibonacci } from "../engine/strategies/fibonacci";
 import { flat } from "../engine/strategies/flat";
 import { martingale } from "../engine/strategies/martingale";
+import { paroli } from "../engine/strategies/paroli";
 import { sessionConfig, testCtx } from "../engine/testUtils";
 import type { SessionResult } from "../engine/types";
 import { addSession, bustCount, createAccumulator, type Accumulator } from "../engine/stats/accumulator";
@@ -335,11 +337,19 @@ describe("small session counts, rare busts (session 23)", () => {
     }
   });
 
-  // The real engine, Flat against Martingale on European roulette: the true EV-per-$ difference is zero.
-  // Each regime sets how rare Martingale's bust is. "t-interval" is the paired t-interval alone;
-  // "reported" adds the worst-case-session check, and is what the report says.
+  // The real engine on European roulette: every strategy's true EV per $ is −1/37, so every true
+  // difference is zero. Each regime sets how rare a bust is. Four strategies with different bust
+  // behaviour run on the same sessions (Flat rarely busts, Martingale busts suddenly, Fibonacci climbs
+  // more slowly, Paroli raises its bet only after wins). Two things are measured per session count:
+  //  - pairs: how often a difference is called clear. "t alone" is the paired t-interval; "reported"
+  //    adds the worst-case-session check and is what the report says.
+  //  - single strategies: how often the sentences claim something false. "Above theory": the interval
+  //    lies wholly above the true value. "Gain": it lies wholly above zero. "Plain" is the interval
+  //    alone (the report before session 24); "reported" is what evClaim lets the sentence say unhedged.
   const european = GAME_PRESETS.find((g) => g.id === "european")!;
-  const specs = [{ strategy: flat, config: flat.defaultConfig }, { strategy: martingale, config: martingale.defaultConfig }];
+  const STRATEGIES = [flat, martingale, paroli, fibonacci];
+  const specs = STRATEGIES.map((strategy) => ({ strategy, config: strategy.defaultConfig }));
+  const PAIRS: readonly (readonly [number, number])[] = [[0, 1], [2, 0], [1, 3], [1, 2]];
   const REGIMES = [
     { name: "busts very rare ($1,000 bankroll, $1 base, 10 rounds)", cfg: sessionConfig({ startBankroll: 100_000, baseBet: 100, maxRounds: 10 }), reps: 2000, ns: [...SMALL_N, 1000] },
     { name: "busts rare ($1,000 bankroll, $1 base, 30 rounds)", cfg: sessionConfig({ startBankroll: 100_000, baseBet: 100, maxRounds: 30 }), reps: 2000, ns: [...SMALL_N, 1000] },
@@ -347,30 +357,56 @@ describe("small session counts, rare busts (session 23)", () => {
     { name: "busts common ($200 bankroll, $1 base, 100 rounds)", cfg: sessionConfig({ startBankroll: 20_000, baseBet: 100, maxRounds: 100 }), reps: 1000, ns: [...SMALL_N] },
   ];
   for (const [k, g] of REGIMES.entries()) {
-    it(`paired EV, ${g.name}: the reported false-'clear' rate is at or below 5% at every session count`, () => {
+    it(`real engine, ${g.name}: reported false claims stay at or below 5% at every session count, for pairs and for single strategies`, () => {
       const se = rateSE(g.reps);
-      const tRates: number[] = [];
+      const theory = -1 / 37;
+      const firstPairT: number[] = [];
       for (const n of g.ns) {
-        let excludes = 0;
-        let clear = 0;
-        let bustRate = 0;
+        const pairT = PAIRS.map(() => 0);
+        const pairReported = PAIRS.map(() => 0);
+        const single = STRATEGIES.map(() => ({ abovePlain: 0, aboveReported: 0, belowPlain: 0, gainPlain: 0, gainReported: 0, bust: 0 }));
         for (let rep = 0; rep < g.reps; rep++) {
           const r = runMonteCarlo(european, specs, g.cfg, n, 23_000_000 + 1_000_000 * k + 10_000 * rep + n);
-          const input: TakeawayInput = { edge: 1 / 37, nSessions: n, strategies: r.perStrategy.map((o) => ({ label: o.strategyId, stats: o.stats })), comparisons: r.comparisons };
-          const v = evDifference(input, 0, 1)!;
-          if (v.excludesZero) excludes++;
-          if (v.clear) clear++;
-          bustRate += r.perStrategy[1]!.stats.pBust! / g.reps;
+          const input: TakeawayInput = { edge: -theory, nSessions: n, strategies: r.perStrategy.map((o) => ({ label: o.strategyId, stats: o.stats })), comparisons: r.comparisons, startBankroll: g.cfg.startBankroll };
+          PAIRS.forEach(([i, j], q) => {
+            const v = evDifference(input, i, j)!;
+            if (v.excludesZero) pairT[q]!++;
+            if (v.clear) pairReported[q]!++;
+          });
+          STRATEGIES.forEach((_, s) => {
+            const c = evClaim(input, s)!;
+            const t = single[s]!;
+            if (c.iv.low > theory) t.abovePlain++;
+            if (c.iv.low > theory && c.missesTheory) t.aboveReported++; // stated as a chance miss, with no hedge
+            if (c.iv.high < theory) t.belowPlain++;
+            if (c.looksLikeGain) t.gainPlain++;
+            if (c.looksLikeGain && !c.fragile && !c.nearZero) t.gainReported++; // left to read as a gain
+            t.bust += r.perStrategy[s]!.stats.pBust! / g.reps;
+          });
         }
-        tRates.push(excludes / g.reps);
-        console.log(
-          `[small n, paired EV] ${g.name}; Martingale busts in ${pct(bustRate)} of sessions; n ${n}, ${g.reps} repetitions: ` +
-            `t-interval alone ${pct(excludes / g.reps)}, reported ${pct(clear / g.reps)} (nominal ${pct(NOMINAL)}, SE ${pct(se)})`,
-        );
-        expect(clear / g.reps, `n ${n}`).toBeLessThan(NOMINAL + 4 * se);
+        firstPairT.push(pairT[0]! / g.reps);
+        PAIRS.forEach(([i, j], q) => {
+          console.log(
+            `[small n, pair] ${g.name}; ${STRATEGIES[i]!.id} vs ${STRATEGIES[j]!.id}; n ${n}, ${g.reps} repetitions: ` +
+              `t alone ${pct(pairT[q]! / g.reps)}, reported ${pct(pairReported[q]! / g.reps)} (nominal ${pct(NOMINAL)}, SE ${pct(se)})`,
+          );
+          expect(pairReported[q]! / g.reps, `${STRATEGIES[i]!.id} vs ${STRATEGIES[j]!.id}, n ${n}`).toBeLessThan(NOMINAL + 4 * se);
+        });
+        STRATEGIES.forEach((strategy, s) => {
+          const t = single[s]!;
+          console.log(
+            `[small n, single] ${g.name}; ${strategy.id} (busts in ${pct(t.bust)}); n ${n}, ${g.reps} repetitions: ` +
+              `above theory plain ${pct(t.abovePlain / g.reps)}, reported ${pct(t.aboveReported / g.reps)}; ` +
+              `gain plain ${pct(t.gainPlain / g.reps)}, reported ${pct(t.gainReported / g.reps)}; below theory ${pct(t.belowPlain / g.reps)} (SE ${pct(se)})`,
+          );
+          // The sentence calls a miss a 1-in-20 event: unhedged misses on both sides together must not exceed 5%.
+          expect((t.aboveReported + t.belowPlain) / g.reps, `${strategy.id} misses, n ${n}`).toBeLessThan(NOMINAL + 4 * se);
+          // One-sided: an unhedged "gain" on a losing game should be rarer than 2.5%.
+          expect(t.gainReported / g.reps, `${strategy.id} gain, n ${n}`).toBeLessThan(NOMINAL / 2 + 4 * se);
+        });
       }
       // Why the check exists: with rare busts the t-interval alone is far above its nominal level at 30 sessions.
-      if (k <= 1) expect(tRates[0]!).toBeGreaterThan(0.07 + 4 * se);
+      if (k <= 1) expect(firstPairT[0]!).toBeGreaterThan(0.07 + 4 * se);
     });
   }
 });

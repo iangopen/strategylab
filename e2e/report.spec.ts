@@ -121,6 +121,23 @@ test("the report with three and with four strategies prints on one page (dense t
     expect(pdfPageCount(pdf), `a ${ids.length}-strategy report must print on one page`).toBe(1);
   }
 });
+
+test("the report with five and with six strategies prints on one page", async ({ page }) => {
+  const all = ["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere"];
+  for (const k of [5, 6]) {
+    const e = encodeScenarioLink({ ...defaultScenario(), strategies: all.slice(0, k).map((id) => newStrategyInstance(id)) }, "");
+    if (!e.ok) throw new Error(e.message);
+    await page.emulateMedia({ media: "screen" });
+    await page.goto("about:blank"); // a hash-only change would not reload the app
+    await openApp(page, e.fragment);
+    await runAndWait(page);
+    await openReport(page);
+    await expect(page.getByTestId("report-canvas")).toHaveCount(k);
+    const pdf = await printToPdf(page);
+    expect(pdfPageCount(pdf), `a ${k}-strategy report must print on one page`).toBe(1);
+  }
+});
+
 test("the report with seven strategies prints on one page", async ({ page }) => {
   const ids = ["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere", "oscars"];
   const e = encodeScenarioLink({ ...defaultScenario(), strategies: ids.map((id) => newStrategyInstance(id)) }, "");
@@ -146,6 +163,9 @@ test("rare busts, few sessions: an EV gap that one whole-bankroll loss would und
   const ev = page.getByTestId("report-takeaways").locator("li").nth(1);
   await expect(ev).toContainText("over the same 250 sessions (paired t-interval), Flat's EV per $ minus Martingale's is -7.92 percentage points (95% interval -12.16 to -3.67), which excludes zero, but one more whole-bankroll loss would undo that: the difference isn't clear at this sample size.");
   await expect(ev).not.toContainText("measured a lower EV");
+  // Martingale's interval lies above zero here; the sentence must not leave that reading as a gain.
+  await expect(ev).toContainText("Flat -1.68% (-5.53% to 2.17%) and Martingale 6.24% (1.56–10.91%); for Martingale the interval is above the theoretical -2.70%, but one more whole-bankroll loss would undo that: this is not evidence of a gain; for Flat the result is not clearly different from zero at this sample size");
+  await expect(ev).not.toContainText("by chance about one time in twenty");
   const pdf = await printToPdf(page);
   expect(pdfPageCount(pdf), "the report must print on one page").toBe(1);
 });

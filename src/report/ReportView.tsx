@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { edge } from "../engine/games";
 import type { MonteCarloResult } from "../engine/montecarlo";
-import type { ScenarioConfig } from "../scenario";
+import { toCents, type ScenarioConfig } from "../scenario";
 import { encodeScenarioLink } from "../share/link";
 import type { ChartRefs } from "../ui/charts/adapters";
 import { seriesColorVar } from "../ui/charts/adapters";
@@ -55,7 +55,7 @@ export function ReportView({ result, labels, scenario, refs, onClose }: Props) {
   const url = link.ok ? baseUrl() + link.fragment : null;
   const summary = useMemo(() => scenarioSummary(scenario, labels), [scenario, labels]);
   const sentences = useMemo(
-    () => takeaways({ edge: edge({ outcomes: scenario.game.outcomes }), nSessions: result.nSessions, strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })), comparisons: result.comparisons }),
+    () => takeaways({ edge: edge({ outcomes: scenario.game.outcomes }), nSessions: result.nSessions, strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })), comparisons: result.comparisons, startBankroll: toCents(scenario.startBankroll) }),
     [result, labels, scenario],
   );
 

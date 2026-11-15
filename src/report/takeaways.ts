@@ -51,6 +51,12 @@ export interface TakeawayInput {
    * pair being compared is not here, the two strategies are treated as independent samples.
    */
   comparisons?: readonly PairedComparison[];
+  /**
+   * The run's starting bankroll in cents (the most one session can lose). With it, a claim about ONE
+   * strategy's EV per $ must survive one more whole-bankroll loss (evClaim). Without it the plain
+   * interval is used.
+   */
+  startBankroll?: number;
 }
 
 export interface Interval {
@@ -202,6 +208,55 @@ export function evInterval(stats: Readonly<Record<string, number>>): Interval | 
   return { low: ev - Z_95 * se, high: ev + Z_95 * se };
 }
 
+/** What the run supports saying about ONE strategy's EV per $ wagered. */
+export interface EvClaim {
+  /** The plain 95% interval (what the sentence and the table print). */
+  iv: Interval;
+  /** The interval lies wholly above the theoretical value, but would not after one more whole-bankroll loss. */
+  fragile: boolean;
+  /** The interval misses the theoretical value and the miss is not fragile. */
+  missesTheory: boolean;
+  /** Zero is inside the interval, or would be after one more whole-bankroll loss. */
+  nearZero: boolean;
+  /** The interval lies wholly above zero (it reads as a gain). */
+  looksLikeGain: boolean;
+}
+
+/**
+ * Claims about one strategy's EV per $ wagered, with the same worst-case-session check as evDifference
+ * (session 24). The plain interval has the same weakness as the paired one: a strategy that wins a
+ * little in most sessions and rarely loses its whole bankroll shows, in a sample with few or no busts,
+ * a too-good mean and a too-small spread. Measured on the real engine with rare busts and 30 sessions,
+ * the plain interval sat wholly ABOVE the true value in 44% of Martingale runs and 47% of Fibonacci
+ * runs, and wholly above zero (reading as a profitable strategy) in 34% and 26%, on a game where
+ * every strategy loses 2.70% of what it wagers. The loss a sample can hide
+ * is bounded by the starting bankroll, so "above the theoretical value" and "above zero" are claimed
+ * only if they survive one more session that lost the whole bankroll. Only the upper side is checked:
+ * a hidden loss can only make a strategy look better than it is, and misses below the theoretical
+ * value were measured at or under 5%. Rates: src/report/comparison.stats.test.ts.
+ */
+export function evClaim(input: TakeawayInput, index: number): EvClaim | null {
+  const stats = input.strategies[index]?.stats;
+  const iv = stats && evInterval(stats);
+  if (!stats || !iv) return null;
+  const theory = -input.edge;
+  // The lowest the interval's lower end goes once one more whole-bankroll loss is added.
+  let low = iv.low;
+  const worst = input.startBankroll !== undefined && stats.meanWagered! > 0 ? input.startBankroll / stats.meanWagered! : NaN;
+  if (Number.isFinite(worst)) {
+    const stressed = tIntervalWithOneMore(stats.evPerWagered!, stats.evSE!, input.nSessions, stats.evPerWagered! - worst);
+    if (Number.isFinite(stressed.low)) low = Math.min(low, stressed.low);
+  }
+  const fragile = iv.low > theory && low <= theory;
+  return {
+    iv,
+    fragile,
+    missesTheory: iv.high < theory || (iv.low > theory && !fragile),
+    nearZero: contains(iv, 0) || (iv.low > 0 && low <= 0),
+    looksLikeGain: iv.low > 0,
+  };
+}
+
 const pct2 = (v: number) => formatInterval(v, undefined, undefined, 2);
 
 /** Up to this many strategies, sentences list each one; above it they give the range (lowest and highest). */
@@ -229,8 +284,8 @@ function edgeSentence(edge: number): string {
 function evSentence(input: TakeawayInput): string {
   const theory = -input.edge;
   const measured = input.strategies.flatMap((s, index) => {
-    const iv = evInterval(s.stats);
-    return iv ? [{ index, label: s.label, ev: s.stats.evPerWagered!, iv }] : [];
+    const claim = evClaim(input, index);
+    return claim ? [{ index, label: s.label, ev: s.stats.evPerWagered!, iv: claim.iv, claim }] : [];
   });
   const noBets = input.strategies.filter((s) => !evInterval(s.stats)).map((s) => `${s.label} placed no bets`);
   const one = (m: (typeof measured)[number]) => `${m.label} ${formatInterval(m.ev, m.iv.low, m.iv.high, 2)}`;
@@ -245,11 +300,18 @@ function evSentence(input: TakeawayInput): string {
   if (measured.length === 0) return `${sentence}, so there is no EV per $ to compare.`;
 
   const clauses: string[] = [];
-  const misses = measured.filter((m) => !contains(m.iv, theory)).map((m) => m.label);
-  if (misses.length === 0) clauses.push(`${measured.length === 1 ? "the interval includes" : "every interval includes"} the theoretical ${pct2(theory)}`);
-  else clauses.push(`for ${names(misses)} the interval misses the theoretical ${pct2(theory)}, which a 95% interval does by chance about one time in twenty`);
+  const misses = measured.filter((m) => m.claim.missesTheory).map((m) => m.label);
+  // Above the theoretical value only until one more whole-bankroll loss: said so, and never left to read as a gain.
+  const fragile = measured.filter((m) => m.claim.fragile);
+  if (misses.length === 0 && fragile.length === 0) clauses.push(`${measured.length === 1 ? "the interval includes" : "every interval includes"} the theoretical ${pct2(theory)}`);
+  if (misses.length > 0) clauses.push(`for ${names(misses)} the interval misses the theoretical ${pct2(theory)}, which a 95% interval does by chance about one time in twenty`);
+  if (fragile.length > 0) {
+    const gain = fragile.some((m) => m.claim.looksLikeGain);
+    clauses.push(`for ${names(fragile.map((m) => m.label))} the interval is above the theoretical ${pct2(theory)}, but one more whole-bankroll loss would undo that: this is not evidence of ${gain ? "a gain" : "doing better than theory"}`);
+  }
   if (Math.abs(input.edge) >= 1e-12) {
-    const nearZero = measured.filter((m) => contains(m.iv, 0)).map((m) => m.label);
+    // A fragile interval above zero is already covered by the clause above.
+    const nearZero = measured.filter((m) => m.claim.nearZero && !(m.claim.fragile && m.claim.looksLikeGain)).map((m) => m.label);
     if (nearZero.length > 0) clauses.push(`for ${names(nearZero)} the result is not clearly different from zero at this sample size`);
   }
   if (measured.length >= 2) {

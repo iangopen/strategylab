@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contains, evDifference, evInterval, overlaps, takeaways, type TakeawayStrategy } from "./takeaways";
+import { contains, evClaim, evDifference, evInterval, overlaps, takeaways, type TakeawayStrategy } from "./takeaways";
 
 // Hand-built stats objects (no simulation): each case pins what the sentences may and may not claim.
 const EDGE = 1 / 37; // European roulette, theoretical EV per $ = -2.70%
@@ -169,6 +169,52 @@ describe("takeaways", () => {
     // The fragile sentence is no longer than the "includes zero" one plus a few words, so the page fit holds.
     const plain = takeaways({ ...input, comparisons: [{ ...cmp, evDiffSE: 0.002 }] })[1]!;
     expect(t[1]!.length - plain.length).toBeLessThan(30);
+  });
+
+  describe("one strategy's EV per $, with the starting bankroll known (session 24)", () => {
+    const BANKROLL = 100_000; // cents
+    /** A strategy with the mean wagered per session (cents) the worst-case check needs. */
+    const withWagered = (label: string, ev: number, se: number, meanWagered: number): TakeawayStrategy => {
+      const s = strat(label, { ev, se, bust: [0, 0, 0.015] });
+      return { label, stats: { ...s.stats, meanWagered } };
+    };
+    const run = (s: TakeawayStrategy, n: number, edge = EDGE) => ({ edge, nSessions: n, strategies: [s], startBankroll: BANKROLL });
+
+    it("an interval above zero that one whole-bankroll loss would undo is never left to read as a gain", () => {
+      // 250 sessions, $10 wagered per session: one $1,000 loss weighs 100, or about 40 points of EV per $ here.
+      const input = run(withWagered("Martingale", 0.0624, 0.0238, 1000), 250);
+      const c = evClaim(input, 0)!;
+      expect([c.looksLikeGain, c.fragile, c.missesTheory]).toEqual([true, true, false]);
+      const ev = takeaways(input)[1]!;
+      expect(ev).toBe("Measured EV per $ wagered, with 95% intervals: Martingale 6.24% (1.58–10.90%); for Martingale the interval is above the theoretical -2.70%, but one more whole-bankroll loss would undo that: this is not evidence of a gain.");
+      expect(ev).not.toMatch(/one time in twenty|includes the theoretical/);
+      // Without the bankroll (older callers) the plain interval speaks, as before.
+      expect(takeaways({ ...input, startBankroll: undefined })[1]).toContain("for Martingale the interval misses the theoretical -2.70%, which a 95% interval does by chance about one time in twenty");
+    });
+
+    it("above the theoretical value but below zero, and fragile: 'not evidence of doing better than theory'", () => {
+      const input = run(withWagered("Fibonacci", -0.01, 0.005, 10_000), 250);
+      const c = evClaim(input, 0)!;
+      expect([c.looksLikeGain, c.fragile, c.missesTheory, c.nearZero]).toEqual([false, true, false, false]);
+      expect(takeaways(input)[1]).toBe("Measured EV per $ wagered, with 95% intervals: Fibonacci -1.00% (-1.98% to -0.02%); for Fibonacci the interval is above the theoretical -2.70%, but one more whole-bankroll loss would undo that: this is not evidence of doing better than theory.");
+    });
+
+    it("a miss that survives the extra loss, and any miss BELOW the theoretical value, is still reported as a chance miss", () => {
+      // 10,000 sessions, $5,000 wagered per session: one bankroll loss moves EV per $ by 0.002 points.
+      const above = run(withWagered("A", -0.02, 0.002, 500_000), 10_000);
+      expect(evClaim(above, 0)).toMatchObject({ fragile: false, missesTheory: true });
+      expect(takeaways(above)[1]).toContain("for A the interval misses the theoretical -2.70%, which a 95% interval does by chance about one time in twenty");
+      const below = run(withWagered("B", -0.05, 0.005, 1000), 250);
+      expect(evClaim(below, 0)).toMatchObject({ fragile: false, missesTheory: true });
+    });
+
+    it("a player-edge game: an interval above zero that includes the theoretical value is 'not clearly different from zero' when one bankroll loss would reach zero", () => {
+      const input = run(withWagered("Flat", 0.09, 0.02, 1000), 250, -0.1);
+      expect(evClaim(input, 0)).toMatchObject({ fragile: false, missesTheory: false, nearZero: true, looksLikeGain: true });
+      const ev = takeaways(input)[1]!;
+      expect(ev).toContain("the interval includes the theoretical 10.00%");
+      expect(ev).toContain("for Flat the result is not clearly different from zero at this sample size");
+    });
   });
 
   it("tone: no advice, tipster or 'winning' language in any generated sentence", () => {
