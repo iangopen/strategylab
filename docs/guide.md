@@ -23,7 +23,7 @@ Suggested reading plan: evening 1, sections 1 and 2. Evening 2, section 3 (the c
 
 `src/scenario.ts` sits in the middle: it defines `ScenarioConfig`, the one plain-JSON object that holds everything the user has set. Because it is plain data, a link can carry it and a worker message can carry it.
 
-**Numbers worth knowing.** Up to 1,000,000 sessions per run (`MAX_SESSIONS`, `src/engine/montecarlo.ts:16`), up to 8 strategies (`MAX_STRATEGIES`, `src/scenario.ts:134`), 8 built-in strategies (`src/engine/strategies/registry.ts:12-21`), 836 Vitest tests plus 54 Playwright tests (README, verified 2026-11-14).
+**Numbers worth knowing.** Up to 1,000,000 sessions per run (`MAX_SESSIONS`, `src/engine/montecarlo.ts:16`), up to 8 strategies (`MAX_STRATEGIES`, `src/scenario.ts:134`), 8 built-in strategies (`src/engine/strategies/registry.ts:12-21`), 840 Vitest tests plus 55 Playwright tests (README, verified 2026-11-14).
 
 ---
 
@@ -227,17 +227,17 @@ A Monte Carlo result is never exactly the theoretical value; it wobbles. The que
 
 **Where.**
 - `src/report/ReportView.tsx:49` lays the page out. It uses the run's own snapshot of the scenario (stored when Run was clicked, `src/App.tsx:174`), never the live form, so the link it prints (`encodeScenarioLink`, `ReportView.tsx:54`) reruns exactly these numbers. While open it draws in the light theme (`useLightTheme`, line 37), so the screen matches the paper.
-- `src/report/takeaways.ts:344` turns the numbers into 3 to 5 sentences. It is pure TypeScript with no React, so every sentence is unit-tested (`takeaways.test.ts`).
+- `src/report/takeaways.ts:406` turns the numbers into 3 to 5 sentences. It is pure TypeScript with no React, so every sentence is unit-tested (`takeaways.test.ts`).
 - `src/report/summary.ts:58` writes the configuration in words, and `REPORT_ROWS` (line 77) picks the key statistics.
 - `src/ui/format.ts:42` is `formatInterval`, the ONE interval display ("17.1% (16.4–17.8%)"), shared by the report and the results table.
 - The build commit comes from `vite.config.ts:19` (`commitHash`, injected with `define` at line 35). A build from a working tree with uncommitted changes is labelled "+local changes".
 - The print rules are `@page { size: letter; margin: 0.5in }` and `@media print` (`src/index.css:319-320`). Above two strategies the page switches to denser type (`DENSE_ABOVE`, `ReportView.tsx:25`; it was four until session 22, when three and four strategies were found to run past the page; CSS from `index.css:272`), and the chart panels are sized by `reportChartLayout` (`src/report/layout.ts:7`) so that eight strategies still fit two rows.
 
-**Why the sentences are careful.** A reviewer will read the sentences, not the intervals. So the generator never names a winner unless the numbers support one. If an EV interval includes zero, the sentence says the result "is not clearly different from zero at this sample size". Rounds-to-bust sentences always begin "Counting busted sessions only". The EV interval is the estimate ± 1.96 standard errors (`evInterval`, `takeaways.ts:198`). Above three strategies (`LIST_LIMIT`, line 208) each sentence gives the lowest and highest rather than every strategy, so the page still fits.
+**Why the sentences are careful.** A reviewer will read the sentences, not the intervals. So the generator never names a winner unless the numbers support one. If an EV interval includes zero, the sentence says the result "is not clearly different from zero at this sample size". Rounds-to-bust sentences always begin "Counting busted sessions only". The EV interval is the estimate ± 1.96 standard errors (`evInterval`, `takeaways.ts:204`). Above three strategies (`LIST_LIMIT`, line 263) each sentence gives the lowest and highest rather than every strategy, so the page still fits.
 
 **How two strategies are compared (session 22).** Until session 22 the report asked whether the two strategies' separate 95% intervals overlapped. That is a weak test: overlapping intervals don't show that there is no difference, and it ignored that both strategies played the same sessions. Now the report builds ONE interval on the difference and names a difference only when that interval excludes zero.
 - **The data is paired.** `runMonteCarlo` gives session i the same seed for every strategy (`src/engine/montecarlo.ts:100`, used at line 121), so the two strategies faced the same outcomes. `pairedComparison` (`src/engine/stats/paired.ts:45`) runs inside the worker over the per-session columns and returns only a few numbers per pair (`MonteCarloResult.comparisons`); the columns still never leave the worker.
-- **EV per $ wagered: a paired t-interval.** EV per $ is a ratio of sums, so each session's contribution is the linearised term `(profit − R × wagered) / mean wagered` (the same delta method as the single-strategy SE). The per-session difference of those terms gives the standard error of the difference, and the interval is the difference ± t × SE with n − 1 degrees of freedom (`evDifference`, `takeaways.ts:137`). A t-interval was chosen over a bootstrap because n is in the thousands, it is one pass with no extra random numbers (so the verdict is a pure function of the run), and a bootstrap would cost resamples × n per pair for the same answer. Nothing is compared below 30 sessions (`MIN_COMPARE_SESSIONS`, `interval.ts:43`).
+- **EV per $ wagered: a paired t-interval.** EV per $ is a ratio of sums, so each session's contribution is the linearised term `(profit − R × wagered) / mean wagered` (the same delta method as the single-strategy SE). The per-session difference of those terms gives the standard error of the difference, and the interval is the difference ± t × SE with n − 1 degrees of freedom (`evDifference`, `takeaways.ts:143`). A t-interval was chosen over a bootstrap because n is in the thousands, it is one pass with no extra random numbers (so the verdict is a pure function of the run), and a bootstrap would cost resamples × n per pair for the same answer. Nothing is compared below 30 sessions (`MIN_COMPARE_SESSIONS`, `interval.ts:43`).
 - **Bust rate: a paired-proportion interval.** Only sessions where exactly one of the two strategies went bust carry information (the McNemar table). The interval is Bonett and Price's adjusted Wald (`pairedProportionInterval`, `interval.ts:94`), because the plain Wald interval calls 3 against 0 a difference; this one agrees with the exact sign test (5 against 0 is not clear, 6 against 0 is).
 - **Unpaired fallback.** When a caller has no paired comparison for the pair, the two samples are treated as independent: a Welch interval for EV per $ (`welchDf`, `interval.ts:80`) and Newcombe's interval for bust rates (`independentProportionInterval`, line 107). In the app every run is paired, so the fallback is reached only by code that passes no `comparisons`.
 - **More than two strategies.** The sentence compares the lowest with the highest, chosen after seeing the numbers. On a house-edge game every strategy has the same true EV per $, so that "largest gap" would be falsely clear about 27% of the time with five strategies. The interval is therefore widened (Bonferroni over all pairs, `familyQuantilePoint`, `interval.ts:50`) and the sentence says so.
@@ -265,9 +265,53 @@ A Monte Carlo result is never exactly the theoretical value; it wobbles. The que
   | 1.5% shared + 1.5% own | 0.02% | 0.01% | 0.18% | 1.68% |
 
   The bust interval never exceeds 5%; with rare busts and few sessions it is very cautious (it needs about six one-sided discordant sessions), so it was left unchanged.
+- **The same check for one strategy's own EV (session 24).** The sentences about a single strategy had the same weakness. With rare busts and 30 sessions, Martingale's plain interval sat wholly above the true −2.70% in 44% of runs and wholly above zero in 34%; the report then printed something like "Martingale 6.24% (1.56–10.91%)" and called the miss a one-in-twenty chance event. Now `evClaim` (`takeaways.ts:238`) applies the one-more-bankroll-loss stress to each strategy. If the interval is above the theoretical value only until that loss, the sentence says "the interval is above the theoretical -2.70%, but one more whole-bankroll loss would undo that: this is not evidence of a gain" (or "of doing better than theory" when the interval is below zero), and the "one time in twenty" wording is kept for misses that survive. An interval above zero that the loss would pull back to zero counts as "not clearly different from zero". The printed interval itself is unchanged. Only the upper side is checked: a hidden loss can only flatter a strategy, and misses below the theoretical value measured 0.25% to 4.75%. `ReportView` passes the starting bankroll; a caller that doesn't gets the plain interval.
+- **Measured, single-strategy sentences** (session 24; same four regimes, repetitions and session counts as the table above; "plain → reported"):
+
+  | Interval wholly above the true −2.70% | n 30 | n 50 | n 100 | n 250 | n 1,000 |
+  |---|---|---|---|---|---|
+  | Martingale, 10 rounds (busts 0.25%) | 43.80 → 0.00% | 38.85 → 0.00% | 31.10 → 0.00% | 20.60 → 0.00% | 7.85 → 0.00% |
+  | Martingale, 30 rounds (busts 2.7%) | 37.55 → 0.00% | 22.35 → 0.00% | 7.25 → 0.00% | 7.05 → 0.25% | 3.85 → 1.35% |
+  | Martingale, default run (busts 17%) | 7.75 → 0.50% | 6.50 → 0.50% | 2.25 → 0.50% | 3.75 → 2.25% | |
+  | Martingale, $200 bankroll (busts 36%) | 5.00 → 1.40% | 4.70 → 1.40% | 2.90 → 1.10% | 3.70 → 2.40% | |
+  | Fibonacci, 10 rounds (busts 0.00%) | 14.90 → 0.00% | 14.20 → 0.00% | 10.00 → 0.00% | 9.25 → 0.00% | 5.30 → 0.00% |
+  | Fibonacci, 30 rounds (busts 0.27%) | 46.80 → 0.00% | 43.30 → 0.00% | 38.45 → 0.00% | 27.30 → 0.00% | 8.45 → 1.45% |
+  | Fibonacci, default run (busts 14%) | 7.75 → 1.50% | 5.00 → 1.75% | 3.75 → 1.50% | 5.75 → 3.75% | |
+  | Fibonacci, $200 bankroll (busts 15%) | 5.00 → 0.40% | 5.50 → 1.20% | 4.70 → 1.50% | 4.10 → 2.50% | |
+
+  | Interval wholly above zero (reads as a gain) | n 30 | n 50 | n 100 | n 250 | n 1,000 |
+  |---|---|---|---|---|---|
+  | Martingale, 10 rounds | 34.05 → 0.00% | 31.05 → 0.00% | 22.75 → 0.00% | 12.60 → 0.00% | 1.35 → 0.00% |
+  | Martingale, 30 rounds | 33.40 → 0.00% | 21.20 → 0.00% | 5.60 → 0.00% | 2.40 → 0.05% | 0.20 → 0.00% |
+  | Martingale, default run | 2.50 → 0.00% | 2.75 → 0.25% | 0.50 → 0.25% | 0.75 → 0.50% | |
+  | Martingale, $200 bankroll | 1.50 → 0.10% | 0.90 → 0.30% | 0.20 → 0.10% | 0.00 → 0.00% | |
+  | Fibonacci, 10 rounds | 8.20 → 0.00% | 6.60 → 0.00% | 2.90 → 0.00% | 1.50 → 0.00% | 0.00 → 0.00% |
+  | Fibonacci, 30 rounds | 26.10 → 0.00% | 23.20 → 0.00% | 17.00 → 0.00% | 9.85 → 0.00% | 1.00 → 0.00% |
+  | Fibonacci, default run | 6.50 → 0.00% | 2.00 → 0.25% | 0.00 → 0.00% | 0.00 → 0.00% | |
+  | Fibonacci, $200 bankroll | 2.50 → 0.00% | 1.30 → 0.00% | 0.30 → 0.10% | 0.00 → 0.00% | |
+
+  Flat and Paroli were never the problem: above the true value in 1.70% to 4.00% of runs plain (0.00% to 1.50% reported), above zero in at most 1.20% (0.00% reported).
+- **Measured, more pairs** (session 24; "t alone → reported", true difference zero):
+
+  | Pair, regime | n 30 | n 50 | n 100 | n 250 | n 1,000 |
+  |---|---|---|---|---|---|
+  | Paroli vs Flat, 10 rounds | 4.95 → 0.00% | 4.20 → 0.00% | 5.20 → 0.00% | 4.70 → 0.00% | 5.95 → 0.00% |
+  | Paroli vs Flat, 30 rounds | 5.20 → 0.00% | 5.70 → 0.00% | 5.25 → 0.00% | 4.70 → 0.00% | 5.15 → 0.00% |
+  | Paroli vs Flat, default run | 5.25 → 0.25% | 3.50 → 0.75% | 4.50 → 0.75% | 4.00 → 2.25% | |
+  | Paroli vs Flat, $200 bankroll | 5.10 → 0.00% | 5.20 → 0.00% | 5.00 → 0.00% | 5.40 → 0.00% | |
+  | Martingale vs Fibonacci, 10 rounds | 44.65 → 0.00% | 43.40 → 0.00% | 34.40 → 0.00% | 22.50 → 0.00% | 8.95 → 0.00% |
+  | Martingale vs Fibonacci, 30 rounds | 36.70 → 0.00% | 25.10 → 0.00% | 10.00 → 0.00% | 6.35 → 0.05% | 5.60 → 1.05% |
+  | Martingale vs Fibonacci, default run | 6.75 → 0.25% | 5.25 → 1.00% | 4.75 → 1.50% | 5.50 → 4.75% | |
+  | Martingale vs Fibonacci, $200 bankroll | 4.40 → 0.60% | 4.80 → 0.80% | 4.50 → 2.20% | 5.20 → 3.00% | |
+  | Martingale vs Paroli, 10 rounds | 28.85 → 0.00% | 30.15 → 0.00% | 27.15 → 0.00% | 19.20 → 0.00% | 8.40 → 0.00% |
+  | Martingale vs Paroli, 30 rounds | 33.80 → 0.00% | 22.35 → 0.00% | 9.80 → 0.00% | 7.65 → 0.10% | 5.65 → 1.50% |
+  | Martingale vs Paroli, default run | 6.25 → 0.75% | 5.25 → 1.00% | 3.75 → 1.75% | 6.25 → 4.00% | |
+  | Martingale vs Paroli, $200 bankroll | 5.10 → 0.50% | 5.90 → 0.70% | 4.20 → 1.60% | 5.50 → 2.70% | |
+
+  Paroli against Flat shows the cost of the check: the t-interval alone was already at its nominal 5% there (neither strategy has a hidden bust), and the check withholds every verdict. That is the price of not being able to tell, from a sample, which strategies can go bust.
 - **Measured, larger samples** (session 22 tests, same file): with no true difference the paired t-interval excludes zero in 4.92% of 4,000 repetitions (nominal 5%; the old overlap rule: 0.00%), the paired bust test in 4.08%, the Welch fallback in 4.10%, and the widened five-strategy comparison in 4.20%. On real engine runs (Flat against Martingale, 400 master seeds × 1,000 sessions) the t-interval excludes zero in 3.25% and the report says "clear" in 1.50%. A known 0.10-point difference under shared noise (5,000 sessions) is found, 0.10 (0.08 to 0.12), where the two separate intervals overlap. On the default run no verdict changes: the paired standard error is only about 15% smaller than the unpaired one there, because Martingale's rare large losses dominate and are not shared with Flat. A pair that does change: Martingale against Paroli on the default settings, where the bust rates differ by 1.1 points (0.2 to 2.1), which the overlap rule called not clear.
 
-**Fonts and fit.** The report prints in Arial / Liberation Sans (metric twins), not the system UI font, so it lays out the same on Windows, macOS and Linux: session 20 found it overflowed on Linux, hidden by Chromium shrinking a too-wide page to fit. The print tests therefore lay the page out at the 720 px printable width and assert it is no wider than 720 px and no taller than 960 px before printing (`printToPdf`, `e2e/report.spec.ts:35`). Every strategy count from two to eight fits: 949, 854, 892, 892, 905, 937 and 947 px of 960 for 2 to 8 strategies (5 and 6 measured once in session 22; 2, 3, 4, 7 and 8 are printed by the E2E suite).
+**Fonts and fit.** The report prints in Arial / Liberation Sans (metric twins), not the system UI font, so it lays out the same on Windows, macOS and Linux: session 20 found it overflowed on Linux, hidden by Chromium shrinking a too-wide page to fit. The print tests therefore lay the page out at the 720 px printable width and assert it is no wider than 720 px and no taller than 960 px before printing (`printToPdf`, `e2e/report.spec.ts:35`). Every strategy count from two to eight fits and is printed by the E2E suite: 949, 854, 892, 892, 905, 937 and 947 px of 960 for 2 to 8 strategies.
 
 **Tests.** `e2e/report.spec.ts:56` prints the default report to a Letter PDF and requires exactly one page. Line 95 does the same with all eight strategies. Line 107 opens the report's link in a new page, reruns it and compares every results-table cell's `data-raw` (the exact `String(double)` of each number) with the original run: bit for bit. The unit tests were each shown failing when the hedging logic was broken on purpose (`docs/history.md`, session 19).
 
