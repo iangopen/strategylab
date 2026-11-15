@@ -39,6 +39,8 @@ export interface Accumulator {
    * Sorting puts the NaNs last, so the first bustCount(acc) sorted values are the busted sessions.
    */
   readonly bustRounds: Float64Array;
+  /** Total wagered per session. Not a percentile column: the paired comparison (paired.ts) reads it session by session. */
+  readonly wagered: Float64Array;
   /** Sorted copies, built at most once per column (see sortedColumn). */
   sortedCache: Partial<Record<ColumnKey, Float64Array>>;
 }
@@ -64,6 +66,7 @@ export function createAccumulator(capacity: number, startBankroll: number): Accu
     maxDrawdowns: new Float64Array(capacity),
     longestStreaks: new Float64Array(capacity),
     bustRounds: new Float64Array(capacity),
+    wagered: new Float64Array(capacity),
     sortedCache: {},
   };
 }
@@ -77,6 +80,7 @@ export function addSession(acc: Accumulator, r: SessionResult): void {
   acc.maxDrawdowns[i] = r.maxDrawdown;
   acc.longestStreaks[i] = r.longestLosingStreak;
   acc.bustRounds[i] = isBust(r.endReason) ? r.rounds : NaN;
+  acc.wagered[i] = r.totalWagered;
   acc.count++;
   acc.sumFinal += r.finalBankroll;
   acc.sumWagered += r.totalWagered;

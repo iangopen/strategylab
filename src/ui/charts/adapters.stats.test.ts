@@ -40,6 +40,7 @@ function fakeResult(parts: { p95: number[]; paths: number[][]; counts: number[] 
     masterSeed: 0,
     histogram: { edges: f(edges) },
     bands: { rounds: f(rounds), sessions: 0 },
+    comparisons: [],
     perStrategy: parts.map(
       (p): StrategyOutcome => ({
         strategyId: "x",

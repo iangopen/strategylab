@@ -54,7 +54,7 @@ describe("report chart layout", () => {
     const rows = (n: number) => Math.ceil(n / reportChartLayout(n).columns);
     for (let n = 1; n <= 8; n++) expect(rows(n), `n = ${n}`).toBeLessThanOrEqual(2);
     expect([1, 2, 3, 4, 5, 6, 7, 8].map((n) => reportChartLayout(n).columns)).toEqual([1, 2, 3, 2, 3, 3, 4, 4]);
-    expect(reportChartLayout(2).height).toBe(165);
-    expect(reportChartLayout(5).height).toBe(92);
+    expect(reportChartLayout(2).height).toBe(135);
+    expect(reportChartLayout(5).height).toBe(84);
   });
 });

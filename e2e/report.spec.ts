@@ -76,6 +76,9 @@ test("the report: default run, every part present, and the printed PDF is exactl
   expect(await items.count()).toBeGreaterThanOrEqual(3);
   expect(await items.count()).toBeLessThanOrEqual(5);
   await expect(items.filter({ hasText: /round \d/ })).toContainText([/^Counting busted sessions only, /]);
+  // Strategies are compared on their per-session differences (same sessions), with the method, size, interval and n.
+  await expect(items.nth(1)).toContainText("over the same 10,000 sessions (paired t-interval), Martingale's EV per $ minus Flat's is -0.15 percentage points (95% interval -0.99 to 0.69), which includes zero");
+  await expect(items.nth(2)).toContainText("over the same 10,000 sessions (paired-proportion interval), Martingale's bust rate minus Flat's is 15.5 percentage points (95% interval 14.7 to 16.2), which excludes zero");
   // The report is drawn light whatever the theme, so the screen matches the paper.
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
@@ -102,6 +105,21 @@ test("the report with all eight strategies still prints on one page", async ({ p
   const pdf = await printToPdf(page);
   await test.info().attach("report-8.pdf", { body: pdf, contentType: "application/pdf" });
   expect(pdfPageCount(pdf), "an 8-strategy report must print on one page").toBe(1);
+});
+test("the report with three and with four strategies prints on one page (dense type from three up)", async ({ page }) => {
+  for (const ids of [["flat", "martingale", "paroli"], ["flat", "martingale", "paroli", "dalembert"]]) {
+    const e = encodeScenarioLink({ ...defaultScenario(), strategies: ids.map((id) => newStrategyInstance(id)) }, "");
+    if (!e.ok) throw new Error(e.message);
+    await page.emulateMedia({ media: "screen" });
+    await page.goto("about:blank"); // a hash-only change would not reload the app
+    await openApp(page, e.fragment);
+    await runAndWait(page);
+    await openReport(page);
+    await expect(page.getByTestId("report-canvas")).toHaveCount(ids.length);
+    await expect(page.getByTestId("report-takeaways").locator("li").nth(1)).toContainText(`widened to keep 95% across all ${(ids.length * (ids.length - 1)) / 2} pairs`);
+    const pdf = await printToPdf(page);
+    expect(pdfPageCount(pdf), `a ${ids.length}-strategy report must print on one page`).toBe(1);
+  }
 });
 
 test("reproducible: the report's link, opened in a new page and run, gives bit-identical statistics", async ({ page, context }) => {

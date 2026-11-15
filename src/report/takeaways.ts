@@ -3,12 +3,33 @@
 // with its interval, P(bust) with its interval, and when busts happen.
 //
 // The sentences never claim more than the numbers support:
-// - an interval that includes the comparison value (zero EV, the other strategy) is reported as
+// - an interval that includes the comparison value (zero EV) is reported as
 //   "not clear at this sample size", never as a winner;
-// - a comparison is named only when the two 95% intervals do not overlap (a conservative test);
+// - two strategies are compared through ONE interval on their DIFFERENCE, and a difference is named
+//   only when that interval excludes zero. In a run every strategy plays the same sessions (common
+//   random numbers), so the difference is taken session by session (engine/stats/paired.ts): the luck
+//   the two strategies shared cancels. Without pairing data the fallback treats the two samples as
+//   independent (Welch for EV per $, Newcombe for bust rates). Neither path asks whether two separate
+//   intervals overlap: overlapping intervals do not show that a difference is absent;
+// - the pair compared is the lowest against the highest of k strategies, picked AFTER seeing the
+//   numbers, so with more than two strategies the interval is widened (Bonferroni over all k(k−1)/2
+//   pairs) to keep 95% for the whole family. On a house-edge game every strategy has the SAME true EV
+//   per $, so an unadjusted "largest gap" would name false differences far more than 5% of the time;
+// - each comparison says which interval was used, the difference with its interval, and the sessions;
 // - rounds-to-bust figures are said to describe busted sessions only.
 // Tone: educational, no advice, no "winning" language.
-import { Z_95 } from "../engine/stats/interval";
+import {
+  familyQuantilePoint,
+  independentProportionInterval,
+  MIN_COMPARE_SESSIONS,
+  normalQuantile,
+  pairedProportionInterval,
+  tInterval,
+  welchDf,
+  Z_95,
+  type Bounds,
+} from "../engine/stats/interval";
+import type { PairedComparison } from "../engine/stats/paired";
 import { formatInterval, formatStat } from "../ui/format";
 
 export interface TakeawayStrategy {
@@ -22,6 +43,11 @@ export interface TakeawayInput {
   edge: number;
   nSessions: number;
   strategies: readonly TakeawayStrategy[];
+  /**
+   * The run's paired comparisons (MonteCarloResult.comparisons), indexed like strategies. When the
+   * pair being compared is not here, the two strategies are treated as independent samples.
+   */
+  comparisons?: readonly PairedComparison[];
 }
 
 export interface Interval {
@@ -34,10 +60,110 @@ export function contains(iv: Interval, x: number): boolean {
   return iv.low <= x && x <= iv.high;
 }
 
-/** Two intervals share at least one point: the difference between them is not clear. */
+/**
+ * Two intervals share at least one point. This was the report's comparison rule until session 22; the
+ * sentences no longer use it. It stays only so tests can show what it missed (takeaways.test.ts).
+ */
 export function overlaps(a: Interval, b: Interval): boolean {
   return a.low <= b.high && b.low <= a.high;
 }
+
+/** The difference between two strategies (first minus second), with the interval that decides the verdict. */
+export interface DifferenceVerdict {
+  /** "paired": the same sessions, differenced session by session. "independent": two separate samples. */
+  method: "paired" | "independent";
+  diff: number;
+  low: number;
+  high: number;
+  /** Sessions per strategy. */
+  n: number;
+  /** Pairs the interval was widened for (Bonferroni); 1 means a plain 95% interval. */
+  family: number;
+  /** The interval excludes zero. */
+  clear: boolean;
+}
+
+/** Pairs among k strategies. */
+export function pairCount(k: number): number {
+  return (k * (k - 1)) / 2;
+}
+
+/** The run's paired comparison of strategies i and j, with the sign that turns "a minus b" into "i minus j". */
+function findPair(input: TakeawayInput, i: number, j: number): { cmp: PairedComparison; sign: 1 | -1 } | null {
+  for (const cmp of input.comparisons ?? []) {
+    if (cmp.a === i && cmp.b === j) return { cmp, sign: 1 };
+    if (cmp.a === j && cmp.b === i) return { cmp, sign: -1 };
+  }
+  return null;
+}
+
+function verdict(method: DifferenceVerdict["method"], diff: number, iv: Bounds, n: number, family: number): DifferenceVerdict | null {
+  if (![diff, iv.low, iv.high].every(Number.isFinite)) return null;
+  return { method, diff, low: iv.low, high: iv.high, n, family, clear: !contains(iv, 0) };
+}
+
+/**
+ * EV per $ wagered of strategy i minus strategy j. Paired t-interval on the per-session differences
+ * when the run supplied them; otherwise a Welch interval from the two standard errors. `family` is the
+ * number of pairs the caller chose this one from. Null when there is nothing sound to say (too few
+ * sessions, or a strategy that placed no bets).
+ */
+export function evDifference(input: TakeawayInput, i: number, j: number, family = 1): DifferenceVerdict | null {
+  const p = familyQuantilePoint(family);
+  const pair = findPair(input, i, j);
+  if (pair && Number.isFinite(pair.cmp.evDiffSE)) {
+    const { cmp, sign } = pair;
+    if (cmp.n < MIN_COMPARE_SESSIONS) return null;
+    return verdict("paired", sign * cmp.evDiff, tInterval(sign * cmp.evDiff, cmp.evDiffSE, cmp.n - 1, p), cmp.n, family);
+  }
+  const a = input.strategies[i]?.stats;
+  const b = input.strategies[j]?.stats;
+  const n = input.nSessions;
+  if (!a || !b || n < MIN_COMPARE_SESSIONS) return null;
+  const diff = a.evPerWagered! - b.evPerWagered!;
+  const se = Math.hypot(a.evSE!, b.evSE!);
+  return verdict("independent", diff, tInterval(diff, se, welchDf(a.evSE!, b.evSE!, n, n), p), n, family);
+}
+
+/**
+ * Bust rate of strategy i minus strategy j. Paired-proportion interval (Bonett-Price) on the sessions
+ * where exactly one of the two went bust when the run supplied them; otherwise Newcombe's interval
+ * for two independent proportions. `bustsI` / `bustsJ` are the bust counts.
+ */
+export function bustDifference(input: TakeawayInput, i: number, j: number, bustsI: number, bustsJ: number, family = 1): DifferenceVerdict | null {
+  const z = normalQuantile(familyQuantilePoint(family));
+  const pair = findPair(input, i, j);
+  if (pair) {
+    const { cmp, sign } = pair;
+    if (cmp.n < MIN_COMPARE_SESSIONS) return null;
+    const r = sign === 1 ? pairedProportionInterval(cmp.bustOnlyA, cmp.bustOnlyB, cmp.n, z) : pairedProportionInterval(cmp.bustOnlyB, cmp.bustOnlyA, cmp.n, z);
+    return verdict("paired", r.diff, r, cmp.n, family);
+  }
+  const n = input.nSessions;
+  if (n < MIN_COMPARE_SESSIONS) return null;
+  const r = independentProportionInterval(bustsI, n, bustsJ, n, z);
+  return verdict("independent", r.diff, r, n, family);
+}
+
+/** A difference of two percentages, in percentage points ("-0.15"); never "-0.00". */
+function points(v: number, digits: number): string {
+  const s = (v * 100).toFixed(digits);
+  return Number(s) === 0 ? (0).toFixed(digits) : s;
+}
+
+/**
+ * The comparison in words: which interval was used and on how many sessions, the difference with its
+ * interval, and whether that interval includes zero. `what` names the difference ("A's EV per $ minus B's").
+ */
+function differenceClause(v: DifferenceVerdict, what: string, digits: number, pairedName: string, independentName: string): string {
+  const sessions = v.n.toLocaleString("en-US");
+  const how = v.method === "paired" ? `over the same ${sessions} sessions (${pairedName})` : `as independent samples of ${sessions} sessions each (${independentName})`;
+  const range = `${points(v.low, digits)} to ${points(v.high, digits)}`;
+  const interval = v.family === 1 ? `95% interval ${range}` : `${range}, widened to keep 95% across all ${v.family} pairs`;
+  return `${how}, ${what} is ${points(v.diff, digits)} percentage points (${interval}), which ${v.clear ? "excludes" : "includes"} zero`;
+}
+
+const TOO_FEW = `with fewer than ${MIN_COMPARE_SESSIONS} sessions the strategies are not compared`;
 
 /** 95% interval for EV per $ wagered: the estimate ± 1.96 SE (normal approximation for the ratio). */
 export function evInterval(stats: Readonly<Record<string, number>>): Interval | null {
@@ -73,9 +199,9 @@ function edgeSentence(edge: number): string {
 
 function evSentence(input: TakeawayInput): string {
   const theory = -input.edge;
-  const measured = input.strategies.flatMap((s) => {
+  const measured = input.strategies.flatMap((s, index) => {
     const iv = evInterval(s.stats);
-    return iv ? [{ label: s.label, ev: s.stats.evPerWagered!, iv }] : [];
+    return iv ? [{ index, label: s.label, ev: s.stats.evPerWagered!, iv }] : [];
   });
   const noBets = input.strategies.filter((s) => !evInterval(s.stats)).map((s) => `${s.label} placed no bets`);
   const one = (m: (typeof measured)[number]) => `${m.label} ${formatInterval(m.ev, m.iv.low, m.iv.high, 2)}`;
@@ -100,14 +226,19 @@ function evSentence(input: TakeawayInput): string {
   if (measured.length >= 2) {
     const lo = byEv[0]!;
     const hi = byEv[byEv.length - 1]!;
-    if (overlaps(lo.iv, hi.iv)) clauses.push(`the difference between the strategies ${UNCLEAR}`);
-    else clauses.push(`${lo.label} measured a lower EV per $ than ${hi.label}, and their intervals do not overlap`);
+    const v = evDifference(input, lo.index, hi.index, pairCount(measured.length));
+    if (!v) clauses.push(TOO_FEW);
+    else {
+      const clause = differenceClause(v, `${lo.label}'s EV per $ minus ${hi.label}'s`, 2, "paired t-interval", "Welch interval");
+      clauses.push(`${clause}: ${v.clear ? `${lo.label} measured a lower EV per $ than ${hi.label}` : `the difference between the strategies ${UNCLEAR}`}`);
+    }
   }
   sentence += `; ${clauses.join("; ")}.`;
   return sentence;
 }
 
 interface Bust {
+  index: number;
   label: string;
   p: number;
   iv: Interval;
@@ -116,11 +247,11 @@ interface Bust {
 
 /** Bust rates of the strategies that placed bets (one that never bet cannot go bust, so it is not compared). */
 function busts(input: TakeawayInput): Bust[] {
-  return input.strategies.flatMap((s) => {
+  return input.strategies.flatMap((s, index) => {
     if (!evInterval(s.stats)) return [];
     const { pBust: p, pBustLow: low, pBustHigh: high } = s.stats;
     if (p === undefined || low === undefined || high === undefined || ![p, low, high].every(Number.isFinite)) return [];
-    return [{ label: s.label, p, iv: { low, high }, busts: Math.round(p * input.nSessions) }];
+    return [{ index, label: s.label, p, iv: { low, high }, busts: Math.round(p * input.nSessions) }];
   });
 }
 
@@ -138,7 +269,12 @@ function bustSentence(input: TakeawayInput): string {
   if (b.length >= 2) {
     const lo = sorted[0]!;
     const hi = sorted[sorted.length - 1]!;
-    sentence += overlaps(lo.iv, hi.iv) ? `; the difference in bust rates ${UNCLEAR}` : `; ${hi.label} went bust more often than ${lo.label}, and their intervals do not overlap`;
+    const v = bustDifference(input, hi.index, lo.index, hi.busts, lo.busts, pairCount(b.length));
+    if (!v) sentence += `; ${TOO_FEW}`;
+    else {
+      const clause = differenceClause(v, `${hi.label}'s bust rate minus ${lo.label}'s`, 1, "paired-proportion interval", "Newcombe interval");
+      sentence += `; ${clause}: ${v.clear ? `${hi.label} went bust more often than ${lo.label}` : `the difference in bust rates ${UNCLEAR}`}`;
+    }
   }
   return `${sentence}.`;
 }

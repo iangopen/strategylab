@@ -6,6 +6,7 @@ import { addSession, createAccumulator, type Accumulator } from "./stats/accumul
 import { checkpointRounds } from "./checkpoints";
 import { BAND_SESSIONS, BandRecorder, type Bands } from "./stats/bands";
 import { sharedHistogram } from "./stats/histogram";
+import { pairedComparisons, type PairedComparison } from "./stats/paired";
 import { STATS } from "./stats/registry";
 import type { RunContext, StatDef } from "./stats/types";
 import type { AnyStrategy, StrategyConfig } from "./strategies/types";
@@ -43,6 +44,11 @@ export interface MonteCarloResult {
   histogram: { edges: Float64Array };
   /** Checkpoint rounds (0 first) and the size of the band subset (first min(2000, n) sessions). */
   bands: { rounds: Float64Array; sessions: number };
+  /**
+   * One entry per pair of strategies (a < b): the paired difference in EV per $ and in bust rate over
+   * the SAME sessions (CRN). Derived numbers only; the per-session columns stay in the worker.
+   */
+  comparisons: PairedComparison[];
 }
 
 export interface MonteCarloOptions {
@@ -135,6 +141,7 @@ export function runMonteCarlo(
     masterSeed,
     histogram: { edges: histogram.edges },
     bands: { rounds: bandRounds, sessions: bandSessions },
+    comparisons: pairedComparisons(accs),
     perStrategy: strategies.map((s, k) => {
       const acc = accs[k]!;
       const values: Record<string, number> = {};

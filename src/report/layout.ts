@@ -1,8 +1,11 @@
 // Report chart layout (pure): how the fan panels share one printed page.
 
-/** Columns and panel height so that up to 8 panels take at most two rows of a printed page. */
+/**
+ * Columns and panel height so that up to 8 panels take at most two rows of a printed page. Heights were
+ * trimmed in session 22 (165 -> 135, 92 -> 84) to make room for the longer comparison sentences.
+ */
 export function reportChartLayout(panels: number): { columns: number; height: number } {
   const columns = panels <= 3 ? Math.max(1, panels) : panels === 4 ? 2 : panels <= 6 ? 3 : 4;
   const rows = Math.ceil(panels / columns);
-  return { columns, height: rows <= 1 ? 165 : 92 };
+  return { columns, height: rows <= 1 ? 135 : 84 };
 }

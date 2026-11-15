@@ -17,8 +17,12 @@ import { takeaways } from "./takeaways";
 /** The build this page was made from (vite.config.ts injects it). */
 const COMMIT_HASH: string = __COMMIT_HASH__;
 
-/** Above this many strategies the report uses a denser type size, so eight columns still fit one page. */
-const DENSE_ABOVE = 4;
+/**
+ * Above this many strategies the report uses a denser type size, so every count up to eight fits one
+ * page. It was 4 until session 22: three and four strategies already ran past the page then (979 and
+ * 995 px of 960, untested), and the longer comparison sentences made it worse.
+ */
+const DENSE_ABOVE = 2;
 
 interface Props {
   result: MonteCarloResult;
@@ -51,7 +55,7 @@ export function ReportView({ result, labels, scenario, refs, onClose }: Props) {
   const url = link.ok ? baseUrl() + link.fragment : null;
   const summary = useMemo(() => scenarioSummary(scenario, labels), [scenario, labels]);
   const sentences = useMemo(
-    () => takeaways({ edge: edge({ outcomes: scenario.game.outcomes }), nSessions: result.nSessions, strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })) }),
+    () => takeaways({ edge: edge({ outcomes: scenario.game.outcomes }), nSessions: result.nSessions, strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })), comparisons: result.comparisons }),
     [result, labels, scenario],
   );
 

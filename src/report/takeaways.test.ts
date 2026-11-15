@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contains, evInterval, overlaps, takeaways, type TakeawayStrategy } from "./takeaways";
+import { contains, evDifference, evInterval, overlaps, takeaways, type TakeawayStrategy } from "./takeaways";
 
 // Hand-built stats objects (no simulation): each case pins what the sentences may and may not claim.
 const EDGE = 1 / 37; // European roulette, theoretical EV per $ = -2.70%
@@ -46,7 +46,8 @@ describe("takeaways", () => {
     expect(t[1]).toContain("Flat -2.76% (-2.84% to -2.68%) and Martingale -2.91% (-3.76% to -2.06%)");
     expect(t[1]).toContain("every interval includes the theoretical -2.70%");
     expect(t[2]).toContain("Flat 1.6% (1.4–1.9%) and Martingale 17.1% (16.3–17.8%)");
-    expect(t[2]).toContain("Martingale went bust more often than Flat, and their intervals do not overlap");
+    expect(t[1]).toContain("as independent samples of 10,000 sessions each (Welch interval), Martingale's EV per $ minus Flat's is -0.15 percentage points (95% interval -1.00 to 0.70), which includes zero: the difference between the strategies isn't clear at this sample size.");
+    expect(t[2]).toContain("as independent samples of 10,000 sessions each (Newcombe interval), Martingale's bust rate minus Flat's is 15.5 percentage points (95% interval 14.7 to 16.3), which excludes zero: Martingale went bust more often than Flat.");
     expect(t[3]).toBe("Counting busted sessions only, half of Flat's busts came by round 874 and the earliest tenth by round 647.4; half of Martingale's busts came by round 14 and the earliest tenth by round 6.");
     expect(t[4]).toContain("Martingale ended ahead in 82.9% (82.2–83.7%) of sessions yet lost money per dollar wagered on average");
   });
@@ -64,7 +65,7 @@ describe("takeaways", () => {
     expect(t.join(" ")).not.toContain("lost money per dollar");
   });
 
-  it("a tie between strategies: overlapping intervals say the difference isn't clear, and name no winner", () => {
+  it("a tie between strategies: a difference interval that includes zero says the difference isn't clear, and names no winner", () => {
     const a = strat("Flat", { ev: -0.027, se: 0.002, bust: [0.05, 0.045, 0.055] });
     const b = strat("D'Alembert", { ev: -0.029, se: 0.002, bust: [0.054, 0.049, 0.059] });
     const t = takeaways({ edge: EDGE, nSessions: N, strategies: [a, b] });
@@ -73,13 +74,14 @@ describe("takeaways", () => {
     expect(t.join(" ")).not.toMatch(/more often|measured a lower EV/);
   });
 
-  it("separated intervals name the difference, and say the intervals do not overlap", () => {
+  it("a difference interval that excludes zero names the difference, with its size and interval", () => {
     const a = strat("A", { ev: -0.01, se: 0.001, bust: [0.01, 0.008, 0.012] });
     const b = strat("B", { ev: -0.05, se: 0.001, bust: [0.3, 0.29, 0.31] });
     const t = takeaways({ edge: EDGE, nSessions: N, strategies: [a, b] });
-    expect(t[1]).toContain("B measured a lower EV per $ than A, and their intervals do not overlap");
+    expect(t[1]).toContain("B's EV per $ minus A's is -4.00 percentage points (95% interval -4.28 to -3.72), which excludes zero: B measured a lower EV per $ than A");
     expect(t[1]).toContain("for A and B the interval misses the theoretical -2.70%, which a 95% interval does by chance about one time in twenty");
-    expect(t[2]).toContain("B went bust more often than A, and their intervals do not overlap");
+    expect(t[2]).toContain("B's bust rate minus A's is 29.0 percentage points (95% interval 28.1 to 29.9), which excludes zero: B went bust more often than A");
+    expect(t.join(" ")).not.toMatch(/overlap/);
   });
 
   it("zero busts: 'never went bust' with the interval's upper bound, and no timing sentence for that strategy", () => {
@@ -123,11 +125,29 @@ describe("takeaways", () => {
     for (const s of t) console.log(`[takeaway, 5 strategies] ${s}`);
     expect(t[1]).toContain("ranged from S4 -3.10% (-4.08% to -2.12%) to S2 -1.60% (-3.36% to 0.16%)");
     expect(t[1]).toContain("for S2 the result is not clearly different from zero at this sample size");
-    expect(t[1]).toContain("the difference between the strategies isn't clear at this sample size");
+    expect(t[1]).toContain("S4's EV per $ minus S2's is -1.50 percentage points (-4.39 to 1.39, widened to keep 95% across all 10 pairs), which includes zero: the difference between the strategies isn't clear at this sample size");
     expect(t[2]).toContain("ranged from S1 1.4% (0.9–2.0%) to S3 16.5% (14.9–18.2%)");
-    expect(t[2]).toContain("S3 went bust more often than S1, and their intervals do not overlap");
+    expect(t[2]).toContain("S3's bust rate minus S1's is 15.1 percentage points (12.7 to 17.6, widened to keep 95% across all 10 pairs), which excludes zero: S3 went bust more often than S1");
     expect(t[3]).toBe("Counting busted sessions only, the median bust came as early as round 13 (S5) and as late as round 938 (S1).");
-    for (const s of t) expect(s.length, s).toBeLessThan(330);
+    for (const s of t) expect(s.length, s).toBeLessThan(560);
+  });
+  it("a run's paired comparison is used when present, whichever way round the pair is stored, and too few sessions compare nothing", () => {
+    const a = strat("A", { ev: -0.027, se: 0.002, bust: [0.05, 0.045, 0.055] });
+    const b = strat("B", { ev: -0.029, se: 0.002, bust: [0.054, 0.049, 0.059] });
+    // Stored as "a minus b" for indices (0, 1): A − B = +0.2 points, tight because the luck was shared.
+    const cmp = { a: 0, b: 1, n: N, evDiff: 0.002, evDiffSE: 0.0004, bustOnlyA: 10, bustOnlyB: 50 };
+    const t = takeaways({ edge: EDGE, nSessions: N, strategies: [a, b], comparisons: [cmp] });
+    expect(t[1]).toContain("over the same 10,000 sessions (paired t-interval), B's EV per $ minus A's is -0.20 percentage points (95% interval -0.28 to -0.12), which excludes zero: B measured a lower EV per $ than A.");
+    expect(t[2]).toContain("over the same 10,000 sessions (paired-proportion interval), B's bust rate minus A's is 0.4 percentage points (95% interval 0.2 to 0.6), which excludes zero: B went bust more often than A.");
+    // The same pair listed the other way round gives the same sentences.
+    const flipped = takeaways({ edge: EDGE, nSessions: N, strategies: [b, a], comparisons: [{ ...cmp, evDiff: -0.002, bustOnlyA: 50, bustOnlyB: 10 }] });
+    expect(flipped[1]!.split("; ").at(-1)).toBe(t[1]!.split("; ").at(-1));
+    expect(evDifference({ edge: EDGE, nSessions: N, strategies: [a, b], comparisons: [cmp] }, 1, 0)!.diff).toBeCloseTo(-0.002, 12);
+
+    const few = takeaways({ edge: EDGE, nSessions: 20, strategies: [a, b], comparisons: [{ ...cmp, n: 20 }] });
+    expect(few[1]).toContain("with fewer than 30 sessions the strategies are not compared");
+    expect(few[2]).toContain("with fewer than 30 sessions the strategies are not compared");
+    expect(few.join(" ")).not.toMatch(/more often|measured a lower EV/);
   });
 
   it("tone: no advice, tipster or 'winning' language in any generated sentence", () => {
