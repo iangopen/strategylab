@@ -135,7 +135,8 @@ describe("takeaways", () => {
     const a = strat("A", { ev: -0.027, se: 0.002, bust: [0.05, 0.045, 0.055] });
     const b = strat("B", { ev: -0.029, se: 0.002, bust: [0.054, 0.049, 0.059] });
     // Stored as "a minus b" for indices (0, 1): A − B = +0.2 points, tight because the luck was shared.
-    const cmp = { a: 0, b: 1, n: N, evDiff: 0.002, evDiffSE: 0.0004, bustOnlyA: 10, bustOnlyB: 50 };
+    // worstA / worstB: a whole-bankroll loss weighs 0.2 (a $1,000 bankroll against $5,000 wagered per session).
+    const cmp = { a: 0, b: 1, n: N, evDiff: 0.002, evDiffSE: 0.0004, bustOnlyA: 10, bustOnlyB: 50, worstA: 0.2, worstB: 0.2 };
     const t = takeaways({ edge: EDGE, nSessions: N, strategies: [a, b], comparisons: [cmp] });
     expect(t[1]).toContain("over the same 10,000 sessions (paired t-interval), B's EV per $ minus A's is -0.20 percentage points (95% interval -0.28 to -0.12), which excludes zero: B measured a lower EV per $ than A.");
     expect(t[2]).toContain("over the same 10,000 sessions (paired-proportion interval), B's bust rate minus A's is 0.4 percentage points (95% interval 0.2 to 0.6), which excludes zero: B went bust more often than A.");
@@ -148,6 +149,26 @@ describe("takeaways", () => {
     expect(few[1]).toContain("with fewer than 30 sessions the strategies are not compared");
     expect(few[2]).toContain("with fewer than 30 sessions the strategies are not compared");
     expect(few.join(" ")).not.toMatch(/more often|measured a lower EV/);
+  });
+
+  it("a fragile EV difference: the interval excludes zero, but one more whole-bankroll loss would undo it, so no difference is named", () => {
+    const a = strat("A", { ev: -0.027, se: 0.002, bust: [0.05, 0.045, 0.055] });
+    const b = strat("B", { ev: -0.029, se: 0.002, bust: [0.054, 0.049, 0.059] });
+    // A looks better by 0.2 points (interval 0.12 to 0.28). One bankroll loss for A weighs 30 here: spread
+    // over 10,001 sessions it moves A's EV per $ by 0.3 points, more than the whole difference.
+    const cmp = { a: 0, b: 1, n: N, evDiff: 0.002, evDiffSE: 0.0004, bustOnlyA: 10, bustOnlyB: 50, worstA: 30, worstB: 0.2 };
+    const input = { edge: EDGE, nSessions: N, strategies: [a, b], comparisons: [cmp] };
+    const v = evDifference(input, 0, 1)!;
+    expect([v.excludesZero, v.fragile, v.clear]).toEqual([true, true, false]);
+    const t = takeaways(input);
+    expect(t[1]).toContain("B's EV per $ minus A's is -0.20 percentage points (95% interval -0.28 to -0.12), which excludes zero, but one more whole-bankroll loss would undo that: the difference isn't clear at this sample size.");
+    expect(t[1]).not.toMatch(/measured a lower EV/);
+    // Only the better-looking strategy is stressed: a large worst case on the WORSE side changes nothing.
+    const other = evDifference({ ...input, comparisons: [{ ...cmp, worstA: 0.2, worstB: 30 }] }, 0, 1)!;
+    expect([other.fragile, other.clear]).toEqual([false, true]);
+    // The fragile sentence is no longer than the "includes zero" one plus a few words, so the page fit holds.
+    const plain = takeaways({ ...input, comparisons: [{ ...cmp, evDiffSE: 0.002 }] })[1]!;
+    expect(t[1]!.length - plain.length).toBeLessThan(30);
   });
 
   it("tone: no advice, tipster or 'winning' language in any generated sentence", () => {

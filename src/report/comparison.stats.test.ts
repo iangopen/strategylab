@@ -15,7 +15,10 @@ import { addSession, bustCount, createAccumulator, type Accumulator } from "../e
 import { pairedComparison, pairedComparisons } from "../engine/stats/paired";
 import { STATS } from "../engine/stats/registry";
 
-const START = 100_000; // cents
+// Cents. Five times the per-session luck (sd 1,000 below): the worst-case-session check weighs a
+// whole-bankroll loss against the sample, so a bankroll far larger than anything a session does would
+// make every synthetic difference "fragile" (that case is tested on purpose below).
+const START = 5_000;
 const WAGERED = 10_000; // cents wagered per synthetic session (constant, so EV per $ = mean profit / WAGERED)
 const NOMINAL = 0.05;
 
@@ -26,7 +29,7 @@ function normal(rng: Rng): number {
 }
 
 function session(profit: number, bust = false): SessionResult {
-  return { finalBankroll: START + profit, rounds: 10, totalWagered: WAGERED, peak: START, maxDrawdown: 0, longestLosingStreak: 0, endReason: bust ? "ruin" : "maxRounds" };
+  return { finalBankroll: START + Math.max(profit, -START), rounds: 10, totalWagered: WAGERED, peak: START, maxDrawdown: 0, longestLosingStreak: 0, endReason: bust ? "ruin" : "maxRounds" };
 }
 
 function accumulate(results: readonly SessionResult[]): Accumulator {
@@ -66,7 +69,7 @@ describe("paired comparison: a small known difference under shared noise", () =>
   // session, i.e. 0.10 percentage points of EV per $ on $100 wagered. Own noise is sd $0.50.
   const DELTA = 10;
   const TRUE_DIFF = DELTA / WAGERED;
-  const accs = sharedNoise(mulberry32(20261114), 2000, [0, -DELTA], 1000, 50);
+  const accs = sharedNoise(mulberry32(20261114), 5000, [0, -DELTA], 1000, 50);
   const paired = inputOf(accs, true);
   const unpaired = inputOf(accs, false);
 
@@ -82,8 +85,8 @@ describe("paired comparison: a small known difference under shared noise", () =>
         `paired difference ${pct(v.diff)} (${pct(v.low)} to ${pct(v.high)}), paired SE ${pct(paired.comparisons![0]!.evDiffSE)}, n ${v.n}`,
     );
     expect(v.method).toBe("paired");
-    expect(v.n).toBe(2000);
-    expect(v.clear).toBe(true);
+    expect(v.n).toBe(5000);
+    expect([v.excludesZero, v.fragile, v.clear]).toEqual([true, false, true]);
     expect(v.low).toBeGreaterThan(0);
     expect(v.low).toBeLessThanOrEqual(TRUE_DIFF);
     expect(v.high).toBeGreaterThanOrEqual(TRUE_DIFF);
@@ -91,6 +94,12 @@ describe("paired comparison: a small known difference under shared noise", () =>
     const w = evDifference(unpaired, 0, 1)!;
     expect(w.method).toBe("independent");
     expect(w.clear).toBe(false);
+  });
+
+  it("the same data with a bankroll 100 times larger is 'fragile': one unseen bankroll loss would outweigh the whole difference", () => {
+    const cmp = paired.comparisons![0]!;
+    const v = evDifference({ ...paired, comparisons: [{ ...cmp, worstA: cmp.worstA * 100, worstB: cmp.worstB * 100 }] }, 0, 1)!;
+    expect([v.excludesZero, v.fragile, v.clear]).toEqual([true, true, false]);
   });
 
   it("the paired SE is the plain standard error of the per-session differences (checked independently)", () => {
@@ -107,9 +116,9 @@ describe("paired comparison: a small known difference under shared noise", () =>
   it("the sentences say which interval ran, the difference with its interval, and the sessions", () => {
     const ev = takeaways(paired)[1]!;
     console.log(`[paired] ${ev}`);
-    expect(ev).toMatch(/over the same 2,000 sessions \(paired t-interval\), S2's EV per \$ minus S1's is -0\.\d\d percentage points \(95% interval -0\.\d\d to -0\.\d\d\), which excludes zero: S2 measured a lower EV per \$ than S1\.$/);
+    expect(ev).toMatch(/over the same 5,000 sessions \(paired t-interval\), S2's EV per \$ minus S1's is -0\.\d\d percentage points \(95% interval -0\.\d\d to -0\.\d\d\), which excludes zero: S2 measured a lower EV per \$ than S1\.$/);
     const fallback = takeaways(unpaired)[1]!;
-    expect(fallback).toMatch(/as independent samples of 2,000 sessions each \(Welch interval\), .* which includes zero: the difference between the strategies isn't clear at this sample size\.$/);
+    expect(fallback).toMatch(/as independent samples of 5,000 sessions each \(Welch interval\), .* which includes zero: the difference between the strategies isn't clear at this sample size\.$/);
   });
 
   it("a strategy compared with an identical copy: difference exactly 0, never 'clear'", () => {
@@ -125,17 +134,21 @@ describe("no true difference: how often each rule says 'clear' (nominal 5%)", ()
   it("paired EV difference: the false-'clear' rate is within 4 SE of 5%; the overlap rule almost never fires", () => {
     const REPS = 4000;
     const rng = mulberry32(1);
-    let pairedClear = 0;
+    let pairedClear = 0; // the t-interval alone
+    let guardedClear = 0; // with the worst-case-session check: what the report says
     let overlapClear = 0;
     for (let r = 0; r < REPS; r++) {
       const input = inputOf(sharedNoise(rng, 200, [0, 0], 1000, 300), true);
-      if (evDifference(input, 0, 1)!.clear) pairedClear++;
+      const v = evDifference(input, 0, 1)!;
+      if (v.excludesZero) pairedClear++;
+      if (v.clear) guardedClear++;
       if (!overlaps(evInterval(input.strategies[0]!.stats)!, evInterval(input.strategies[1]!.stats)!)) overlapClear++;
     }
     const rate = pairedClear / REPS;
     const se = rateSE(REPS);
-    console.log(`[null, paired EV] ${REPS} repetitions × 200 sessions: paired false-clear ${pct(rate)} (nominal ${pct(NOMINAL)}, SE ${pct(se)}); old overlap rule ${pct(overlapClear / REPS)}`);
+    console.log(`[null, paired EV] ${REPS} repetitions × 200 sessions: paired t-interval excludes zero ${pct(rate)} (nominal ${pct(NOMINAL)}, SE ${pct(se)}); reported clear after the worst-case check ${pct(guardedClear / REPS)}; old overlap rule ${pct(overlapClear / REPS)}`);
     expect(Math.abs(rate - NOMINAL)).toBeLessThan(4 * se);
+    expect(guardedClear).toBeLessThanOrEqual(pairedClear); // the check can only withhold a verdict
     expect(overlapClear / REPS).toBeLessThan(NOMINAL - 4 * se); // the old rule was far below its stated level
   });
 
@@ -188,8 +201,8 @@ describe("no true difference: how often each rule says 'clear' (nominal 5%)", ()
       const evs = input.strategies.map((s) => s.stats.evPerWagered!);
       const lo = evs.indexOf(Math.min(...evs));
       const hi = evs.indexOf(Math.max(...evs));
-      if (evDifference(input, lo, hi, 1)!.clear) plain++;
-      if (evDifference(input, lo, hi, pairCount(5))!.clear) widened++;
+      if (evDifference(input, lo, hi, 1)!.excludesZero) plain++;
+      if (evDifference(input, lo, hi, pairCount(5))!.excludesZero) widened++;
     }
     const se = rateSE(REPS);
     console.log(`[null, 5 strategies] ${REPS} repetitions: lowest-vs-highest false-clear ${pct(plain / REPS)} unadjusted, ${pct(widened / REPS)} widened for 10 pairs (nominal ${pct(NOMINAL)}, SE ${pct(se)})`);
@@ -247,21 +260,25 @@ describe("the real engine: Flat against Martingale on European roulette", () => 
     const european = GAME_PRESETS.find((g) => g.id === "european")!;
     const cfg = sessionConfig({ startBankroll: 20_000, baseBet: 100, maxRounds: 100 });
     const specs = [{ strategy: flat, config: flat.defaultConfig }, { strategy: martingale, config: martingale.defaultConfig }];
+    let excludes = 0;
     let clear = 0;
     let overlapClear = 0;
     let seRatio = 0;
     for (let seed = 1; seed <= REPS; seed++) {
       const r = runMonteCarlo(european, specs, cfg, SESSIONS, seed);
       const input: TakeawayInput = { edge: 1 / 37, nSessions: SESSIONS, strategies: r.perStrategy.map((o) => ({ label: o.strategyId, stats: o.stats })), comparisons: r.comparisons };
-      if (evDifference(input, 0, 1)!.clear) clear++;
+      const v = evDifference(input, 0, 1)!;
+      if (v.excludesZero) excludes++;
+      if (v.clear) clear++;
       if (!overlaps(evInterval(r.perStrategy[0]!.stats)!, evInterval(r.perStrategy[1]!.stats)!)) overlapClear++;
       seRatio += r.comparisons[0]!.evDiffSE / Math.hypot(r.perStrategy[0]!.stats.evSE!, r.perStrategy[1]!.stats.evSE!);
     }
     const se = rateSE(REPS);
     console.log(
-      `[engine, Flat vs Martingale] ${REPS} master seeds × ${SESSIONS} sessions: paired false-clear ${pct(clear / REPS)} (nominal ${pct(NOMINAL)}, SE ${pct(se)}); ` +
+      `[engine, Flat vs Martingale] ${REPS} master seeds × ${SESSIONS} sessions: paired t-interval excludes zero ${pct(excludes / REPS)}, reported clear ${pct(clear / REPS)} (nominal ${pct(NOMINAL)}, SE ${pct(se)}); ` +
         `old overlap rule ${pct(overlapClear / REPS)}; paired SE / independent SE averaged ${(seRatio / REPS).toFixed(3)}`,
     );
+    expect(excludes / REPS).toBeLessThan(NOMINAL + 4 * se);
     expect(clear / REPS).toBeLessThan(NOMINAL + 4 * se);
   });
 
@@ -276,4 +293,84 @@ describe("the real engine: Flat against Martingale on European roulette", () => 
     expect(JSON.stringify(runMonteCarlo(european, specs, cfg, 500, 100).comparisons)).not.toBe(JSON.stringify(a.comparisons));
     for (const c of a.comparisons) expect(c.n).toBe(500);
   });
+});
+
+describe("small session counts, rare busts (session 23)", () => {
+  const SMALL_N = [30, 50, 100, 250] as const;
+
+  // Bonett-Price on rare busts with NO true difference. "independent": each strategy busts on its own
+  // with probability `own` (every bust is a discordant session). "shared": both bust together on a
+  // shared bad session (probability `shared`) and each also busts alone with probability `own`.
+  // The interval depends only on the discordant counts and n, so the comparison record is built directly.
+  it("paired bust interval: false-'clear' stays at or below 5% for true rates of 1% to 3% at 30 to 250 sessions", () => {
+    const REPS = 20_000;
+    const se = rateSE(REPS);
+    const regimes = [
+      { name: "independent, 1% each", shared: 0, own: 0.01 },
+      { name: "independent, 2% each", shared: 0, own: 0.02 },
+      { name: "independent, 3% each", shared: 0, own: 0.03 },
+      { name: "1% shared + 0.5% own (1.5% each)", shared: 0.01, own: 0.005 },
+      { name: "1.5% shared + 1.5% own (3% each)", shared: 0.015, own: 0.015 },
+    ];
+    for (const [k, g] of regimes.entries()) {
+      for (const n of SMALL_N) {
+        const rng = mulberry32(230_000 + 1000 * k + n);
+        let clear = 0;
+        for (let r = 0; r < REPS; r++) {
+          let onlyA = 0;
+          let onlyB = 0;
+          for (let i = 0; i < n; i++) {
+            const bad = rng() < g.shared;
+            const bustA = bad || rng() < g.own;
+            const bustB = bad || rng() < g.own;
+            if (bustA && !bustB) onlyA++;
+            else if (bustB && !bustA) onlyB++;
+          }
+          const input: TakeawayInput = { edge: 0, nSessions: n, strategies: [], comparisons: [{ a: 0, b: 1, n, evDiff: NaN, evDiffSE: NaN, bustOnlyA: onlyA, bustOnlyB: onlyB, worstA: NaN, worstB: NaN }] };
+          if (bustDifference(input, 0, 1, 0, 0)!.clear) clear++;
+        }
+        console.log(`[small n, paired bust] ${g.name}, n ${n}, ${REPS} repetitions: false-clear ${pct(clear / REPS)} (nominal ${pct(NOMINAL)}, SE ${pct(se)})`);
+        expect(clear / REPS, `${g.name}, n ${n}`).toBeLessThan(NOMINAL + 4 * se);
+      }
+    }
+  });
+
+  // The real engine, Flat against Martingale on European roulette: the true EV-per-$ difference is zero.
+  // Each regime sets how rare Martingale's bust is. "t-interval" is the paired t-interval alone;
+  // "reported" adds the worst-case-session check, and is what the report says.
+  const european = GAME_PRESETS.find((g) => g.id === "european")!;
+  const specs = [{ strategy: flat, config: flat.defaultConfig }, { strategy: martingale, config: martingale.defaultConfig }];
+  const REGIMES = [
+    { name: "busts very rare ($1,000 bankroll, $1 base, 10 rounds)", cfg: sessionConfig({ startBankroll: 100_000, baseBet: 100, maxRounds: 10 }), reps: 2000, ns: [...SMALL_N, 1000] },
+    { name: "busts rare ($1,000 bankroll, $1 base, 30 rounds)", cfg: sessionConfig({ startBankroll: 100_000, baseBet: 100, maxRounds: 30 }), reps: 2000, ns: [...SMALL_N, 1000] },
+    { name: "the app's default run ($1,000 bankroll, $10 base, win target $1,100, 1,000 rounds)", cfg: sessionConfig({ startBankroll: 100_000, baseBet: 1000, stopWin: 110_000, maxRounds: 1000 }), reps: 400, ns: [...SMALL_N] },
+    { name: "busts common ($200 bankroll, $1 base, 100 rounds)", cfg: sessionConfig({ startBankroll: 20_000, baseBet: 100, maxRounds: 100 }), reps: 1000, ns: [...SMALL_N] },
+  ];
+  for (const [k, g] of REGIMES.entries()) {
+    it(`paired EV, ${g.name}: the reported false-'clear' rate is at or below 5% at every session count`, () => {
+      const se = rateSE(g.reps);
+      const tRates: number[] = [];
+      for (const n of g.ns) {
+        let excludes = 0;
+        let clear = 0;
+        let bustRate = 0;
+        for (let rep = 0; rep < g.reps; rep++) {
+          const r = runMonteCarlo(european, specs, g.cfg, n, 23_000_000 + 1_000_000 * k + 10_000 * rep + n);
+          const input: TakeawayInput = { edge: 1 / 37, nSessions: n, strategies: r.perStrategy.map((o) => ({ label: o.strategyId, stats: o.stats })), comparisons: r.comparisons };
+          const v = evDifference(input, 0, 1)!;
+          if (v.excludesZero) excludes++;
+          if (v.clear) clear++;
+          bustRate += r.perStrategy[1]!.stats.pBust! / g.reps;
+        }
+        tRates.push(excludes / g.reps);
+        console.log(
+          `[small n, paired EV] ${g.name}; Martingale busts in ${pct(bustRate)} of sessions; n ${n}, ${g.reps} repetitions: ` +
+            `t-interval alone ${pct(excludes / g.reps)}, reported ${pct(clear / g.reps)} (nominal ${pct(NOMINAL)}, SE ${pct(se)})`,
+        );
+        expect(clear / g.reps, `n ${n}`).toBeLessThan(NOMINAL + 4 * se);
+      }
+      // Why the check exists: with rare busts the t-interval alone is far above its nominal level at 30 sessions.
+      if (k <= 1) expect(tRates[0]!).toBeGreaterThan(0.07 + 4 * se);
+    });
+  }
 });

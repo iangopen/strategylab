@@ -15,6 +15,8 @@
 //   numbers, so with more than two strategies the interval is widened (Bonferroni over all k(k−1)/2
 //   pairs) to keep 95% for the whole family. On a house-edge game every strategy has the SAME true EV
 //   per $, so an unadjusted "largest gap" would name false differences far more than 5% of the time;
+// - an EV difference is also not named when one more worst-case session (a whole-bankroll loss)
+//   would bring zero back inside the interval: see evDifference;
 // - each comparison says which interval was used, the difference with its interval, and the sessions;
 // - rounds-to-bust figures are said to describe busted sessions only.
 // Tone: educational, no advice, no "winning" language.
@@ -25,6 +27,7 @@ import {
   normalQuantile,
   pairedProportionInterval,
   tInterval,
+  tIntervalWithOneMore,
   welchDf,
   Z_95,
   type Bounds,
@@ -79,7 +82,14 @@ export interface DifferenceVerdict {
   n: number;
   /** Pairs the interval was widened for (Bonferroni); 1 means a plain 95% interval. */
   family: number;
-  /** The interval excludes zero. */
+  /** The interval (low to high) excludes zero. */
+  excludesZero: boolean;
+  /**
+   * The interval excludes zero, but would not after one more session in which the better-looking
+   * strategy lost its whole bankroll (EV per $, paired runs only; see evDifference).
+   */
+  fragile: boolean;
+  /** A difference may be named: the interval excludes zero and the verdict is not fragile. */
   clear: boolean;
 }
 
@@ -97,9 +107,12 @@ function findPair(input: TakeawayInput, i: number, j: number): { cmp: PairedComp
   return null;
 }
 
-function verdict(method: DifferenceVerdict["method"], diff: number, iv: Bounds, n: number, family: number): DifferenceVerdict | null {
+function verdict(method: DifferenceVerdict["method"], diff: number, iv: Bounds, n: number, family: number, stress?: Bounds): DifferenceVerdict | null {
   if (![diff, iv.low, iv.high].every(Number.isFinite)) return null;
-  return { method, diff, low: iv.low, high: iv.high, n, family, clear: !contains(iv, 0) };
+  const excludesZero = !contains(iv, 0);
+  // Fragile: zero lies inside the span of the interval and its stressed version.
+  const fragile = excludesZero && stress !== undefined && !(Math.min(iv.low, stress.low) > 0 || Math.max(iv.high, stress.high) < 0);
+  return { method, diff, low: iv.low, high: iv.high, n, family, excludesZero, fragile, clear: excludesZero && !fragile };
 }
 
 /**
@@ -107,6 +120,19 @@ function verdict(method: DifferenceVerdict["method"], diff: number, iv: Bounds, 
  * when the run supplied them; otherwise a Welch interval from the two standard errors. `family` is the
  * number of pairs the caller chose this one from. Null when there is nothing sound to say (too few
  * sessions, or a strategy that placed no bets).
+ *
+ * The worst-case-session check (session 23). A t-interval trusts the sample's own spread. A strategy
+ * like Martingale wins a little in most sessions and rarely loses its whole bankroll; a sample with
+ * few or no busts shows a small spread and a too-good mean, and cannot tell "cannot go bust" from "has
+ * not gone bust yet". Measured on the real engine (Flat against Martingale, true difference zero), the
+ * plain interval excluded zero in about 40% of 30-session runs when busts were rare, and still in 8%
+ * of 1,000-session runs at a 0.25% bust rate, so no minimum session count fixes it. The one thing
+ * known without sampling is the bound: a session cannot lose more than the starting bankroll. So a
+ * difference is named only if the interval STILL excludes zero after one more session in which the
+ * better-looking strategy lost its whole bankroll (and the other did nothing unusual). One such
+ * session is the smallest stress that brought every measured case to 3% or less; where a bankroll
+ * loss is small next to the sample (many sessions, or busts already common) it changes nothing.
+ * The measurements are in src/report/comparison.stats.test.ts.
  */
 export function evDifference(input: TakeawayInput, i: number, j: number, family = 1): DifferenceVerdict | null {
   const p = familyQuantilePoint(family);
@@ -114,7 +140,10 @@ export function evDifference(input: TakeawayInput, i: number, j: number, family 
   if (pair && Number.isFinite(pair.cmp.evDiffSE)) {
     const { cmp, sign } = pair;
     if (cmp.n < MIN_COMPARE_SESSIONS) return null;
-    return verdict("paired", sign * cmp.evDiff, tInterval(sign * cmp.evDiff, cmp.evDiffSE, cmp.n - 1, p), cmp.n, family);
+    const diff = sign * cmp.evDiff;
+    // i looks better when diff > 0: its bankroll loss is one more difference of −(its worst-case term).
+    const extra = diff > 0 ? -(sign === 1 ? cmp.worstA : cmp.worstB) : sign === 1 ? cmp.worstB : cmp.worstA;
+    return verdict("paired", diff, tInterval(diff, cmp.evDiffSE, cmp.n - 1, p), cmp.n, family, tIntervalWithOneMore(diff, cmp.evDiffSE, cmp.n, extra, p));
   }
   const a = input.strategies[i]?.stats;
   const b = input.strategies[j]?.stats;
@@ -160,7 +189,7 @@ function differenceClause(v: DifferenceVerdict, what: string, digits: number, pa
   const how = v.method === "paired" ? `over the same ${sessions} sessions (${pairedName})` : `as independent samples of ${sessions} sessions each (${independentName})`;
   const range = `${points(v.low, digits)} to ${points(v.high, digits)}`;
   const interval = v.family === 1 ? `95% interval ${range}` : `${range}, widened to keep 95% across all ${v.family} pairs`;
-  return `${how}, ${what} is ${points(v.diff, digits)} percentage points (${interval}), which ${v.clear ? "excludes" : "includes"} zero`;
+  return `${how}, ${what} is ${points(v.diff, digits)} percentage points (${interval}), which ${v.excludesZero ? "excludes" : "includes"} zero`;
 }
 
 const TOO_FEW = `with fewer than ${MIN_COMPARE_SESSIONS} sessions the strategies are not compared`;
@@ -230,7 +259,8 @@ function evSentence(input: TakeawayInput): string {
     if (!v) clauses.push(TOO_FEW);
     else {
       const clause = differenceClause(v, `${lo.label}'s EV per $ minus ${hi.label}'s`, 2, "paired t-interval", "Welch interval");
-      clauses.push(`${clause}: ${v.clear ? `${lo.label} measured a lower EV per $ than ${hi.label}` : `the difference between the strategies ${UNCLEAR}`}`);
+      if (v.fragile) clauses.push(`${clause}, but one more whole-bankroll loss would undo that: the difference ${UNCLEAR}`);
+      else clauses.push(`${clause}: ${v.clear ? `${lo.label} measured a lower EV per $ than ${hi.label}` : `the difference between the strategies ${UNCLEAR}`}`);
     }
   }
   sentence += `; ${clauses.join("; ")}.`;

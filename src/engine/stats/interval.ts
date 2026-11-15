@@ -59,6 +59,21 @@ export function tInterval(estimate: number, se: number, df: number, p = 0.975): 
 }
 
 /**
+ * The t-interval a sample would give after ONE more observation `extra`: the sample has `n` values with
+ * this mean and standard error (se = sd / sqrt(n)). Used as a stress test: "would the conclusion survive
+ * one more session like this?" (see evDifference in report/takeaways.ts).
+ */
+export function tIntervalWithOneMore(mean: number, se: number, n: number, extra: number, p = 0.975): Bounds {
+  if (!Number.isFinite(mean) || !(se >= 0) || !(n >= 2) || !Number.isFinite(extra)) return { low: NaN, high: NaN };
+  const ss = se * se * n * (n - 1); // sum of squared deviations from the mean
+  const N = n + 1;
+  const d = extra - mean;
+  const newMean = mean + d / N;
+  const newSE = Math.sqrt((ss + (d * d * n) / N) / (N * (N - 1)));
+  return tInterval(newMean, newSE, N - 1, p);
+}
+
+/**
  * Welch-Satterthwaite degrees of freedom for the difference of two INDEPENDENT means, from each
  * mean's standard error and sample size. No equal-variance assumption.
  */

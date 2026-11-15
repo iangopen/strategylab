@@ -121,6 +121,34 @@ test("the report with three and with four strategies prints on one page (dense t
     expect(pdfPageCount(pdf), `a ${ids.length}-strategy report must print on one page`).toBe(1);
   }
 });
+test("the report with seven strategies prints on one page", async ({ page }) => {
+  const ids = ["flat", "martingale", "paroli", "dalembert", "fibonacci", "labouchere", "oscars"];
+  const e = encodeScenarioLink({ ...defaultScenario(), strategies: ids.map((id) => newStrategyInstance(id)) }, "");
+  if (!e.ok) throw new Error(e.message);
+  await openApp(page, e.fragment);
+  await runAndWait(page);
+  await openReport(page);
+  await expect(page.getByTestId("report-canvas")).toHaveCount(7);
+  await expect(page.getByTestId("report-takeaways").locator("li").nth(1)).toContainText("widened to keep 95% across all 21 pairs");
+  const pdf = await printToPdf(page);
+  expect(pdfPageCount(pdf), "a 7-strategy report must print on one page").toBe(1);
+});
+
+test("rare busts, few sessions: an EV gap that one whole-bankroll loss would undo is not named, and the page still fits", async ({ page }) => {
+  // $1 bets for 10 rounds on a $1,000 bankroll: Martingale almost never busts in 250 sessions, so it
+  // looks better than Flat with a tight interval. The true EV per $ is the same for both.
+  const scenario: ScenarioConfig = { ...defaultScenario(), baseBet: 1, stopWin: null, maxRounds: 10, sessions: 250, seed: 16 };
+  const e = encodeScenarioLink(scenario, "");
+  if (!e.ok) throw new Error(e.message);
+  await openApp(page, e.fragment);
+  await runAndWait(page);
+  await openReport(page);
+  const ev = page.getByTestId("report-takeaways").locator("li").nth(1);
+  await expect(ev).toContainText("over the same 250 sessions (paired t-interval), Flat's EV per $ minus Martingale's is -7.92 percentage points (95% interval -12.16 to -3.67), which excludes zero, but one more whole-bankroll loss would undo that: the difference isn't clear at this sample size.");
+  await expect(ev).not.toContainText("measured a lower EV");
+  const pdf = await printToPdf(page);
+  expect(pdfPageCount(pdf), "the report must print on one page").toBe(1);
+});
 
 test("reproducible: the report's link, opened in a new page and run, gives bit-identical statistics", async ({ page, context }) => {
   await openApp(page);

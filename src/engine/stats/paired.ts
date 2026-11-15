@@ -32,6 +32,14 @@ export interface PairedComparison {
   /** Sessions that went bust under a but not b, and under b but not a (the discordant pairs). */
   bustOnlyA: number;
   bustOnlyB: number;
+  /**
+   * What ONE session that lost the whole starting bankroll weighs in a's (and b's) EV per $, as a
+   * per-session term: startBankroll / mean wagered. The bankroll is the most a session can lose, so
+   * this is the largest term any session can contribute against a strategy. The report uses it to ask
+   * whether one unseen worst-case session would overturn a verdict. NaN when the strategy placed no bets.
+   */
+  worstA: number;
+  worstB: number;
 }
 
 export function pairedComparison(accA: Accumulator, accB: Accumulator, a: number, b: number): PairedComparison {
@@ -49,6 +57,8 @@ export function pairedComparison(accA: Accumulator, accB: Accumulator, a: number
   const rA = evPerWagered(accA);
   const rB = evPerWagered(accB);
   let evDiffSE = NaN;
+  let worstA = NaN;
+  let worstB = NaN;
   if (n >= 2 && Number.isFinite(rA) && Number.isFinite(rB)) {
     const meanWA = accA.sumWagered / n;
     const meanWB = accB.sumWagered / n;
@@ -60,8 +70,10 @@ export function pairedComparison(accA: Accumulator, accB: Accumulator, a: number
       ss += d * d;
     }
     evDiffSE = Math.sqrt(ss / (n - 1) / n);
+    worstA = accA.startBankroll / meanWA;
+    worstB = accB.startBankroll / meanWB;
   }
-  return { a, b, n, evDiff: rA - rB, evDiffSE, bustOnlyA, bustOnlyB };
+  return { a, b, n, evDiff: rA - rB, evDiffSE, bustOnlyA, bustOnlyB, worstA, worstB };
 }
 
 /** Every pair (a < b) of the run's strategies, in order. Empty for a single strategy. */
