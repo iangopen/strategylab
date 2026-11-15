@@ -128,7 +128,7 @@ Read the relevant section BEFORE changing that area. These files are plain paths
 ## Current state (session 24, 2026-11-14): v1.0.0 plus paired comparisons
 
 All roadmap sessions are done and verified, CI green with Pages deploy; **v1.0.0** is tagged on the commit that carries these docs, after its CI passed, with a GitHub release (session 21). The September 2026 audit's findings are fixed (STATUS 127-133):
-- **Session 24 (STATUS 196-200): the single-strategy EV sentences use the same worst-case-session check** (`evClaim`; tables in guide 3.10).
+- **Session 24 (STATUS 196-201): the single-strategy EV sentences use the same worst-case-session check** (`evClaim`; tables in guide 3.10).
   - **Before:** with rare busts the plain interval sat wholly above the true EV per $ in up to 47% of runs and wholly above zero (reading as a gain) in up to 34% (Martingale, Fibonacci; 30 sessions).
   - **Now:** "above the theoretical value" and "above zero" are claimed only if they survive one more whole-bankroll loss; otherwise the sentence says "...but one more whole-bankroll loss would undo that: this is not evidence of a gain". Reported: above theory at most 3.75%, reads as a gain at most 0.50%. The printed interval itself is unchanged. A reader must never be left thinking a negative-EV strategy gains: keep the hedge.
   - `TakeawayInput.startBankroll` (cents) switches the check on; `ReportView` passes it. Only the upper side is checked (misses below theory measured 0.25-4.75%).
