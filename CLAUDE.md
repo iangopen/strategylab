@@ -28,10 +28,7 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 
 ## Stack and environment
 
-- Vite + React + TypeScript (`strict: true`, `noUncheckedIndexedAccess: true`)
-- Vitest for tests, colocated as `*.test.ts`
 - Playwright (Chromium only) for E2E, in `e2e/*.spec.ts`, against the PRODUCTION build served under `/strategylab/` (session 9)
-- Web Worker via Comlink for all simulation
 - Charts: raw Canvas 2D, no chart library (session 4 spike decision, see Decisions)
 - No Supabase, no backend, no CSS framework
 - OS: Windows / PowerShell. Every command run or documented here must work in PowerShell (use `;` not `&&` on Windows PowerShell 5, no `rm -rf`, no bash-only syntax).
@@ -46,12 +43,9 @@ Tone is educational and honest: no casino links, no affiliate content, no "winni
 ### Commands
 
 ```powershell
-npm run dev           # local dev server (base "/")
 npm run test          # Vitest: "unit" project, then "stats" (*.stats.test.ts); must be clean before any commit (chain commits after it: npm run test && git commit ...)
 npm run build         # strict type check (app, config, E2E specs) + production build, must be clean before any push
-npm run lint          # oxlint
 npm run e2e           # Playwright: builds with VITE_BASE=/strategylab/, serves on :4180, runs e2e/*.spec.ts
-npm run build:pages   # the GitHub Pages build (VITE_BASE=/strategylab/)
 npm run bench         # one fixed, seeded 100k-session run and one max-size sweep, timed (one machine's numbers, never a claim)
 npm run screenshots   # regenerate docs/*.png + public/og-image.png from the LIVE site (SCREENSHOT_URL overrides); NOT a test
 npx playwright install chromium   # once per machine, before the first e2e run
@@ -108,7 +102,7 @@ These are not negotiable. A change that breaks one of them is wrong even if ever
 
 ## Where things are
 
-`src/engine/` pure engine (rules 1-11 above): `rng`, `games` (outcome model), `runner` (session loop, table rules, sub-cent carry), `montecarlo` + `checkpoints`, `replay`, `odds` (sports), `strategies/` (8 built-ins + `registry.ts`), `rules/` (JSON rule language: validate + compile), `stats/` (accumulator, quantile, registry). `src/worker/` Comlink worker + client. `src/share/` scenario links (untrusted input). `src/sweep/` parameter sweeps (pure: grid, caps, cell seeds, `runSweep`). `src/report/` the one-page report and the takeaway / sweep-readout sentences. `src/ui/` React UI and `charts/` (canvas; all scales in `adapters.ts`). `src/scenario.ts` is the one serializable `ScenarioConfig` (version 4). `e2e/` Playwright specs, `scripts/screenshots/` README images. Full annotated file map: `docs/spec.md` ("Folder map").
+`src/share/` parses untrusted input; every chart scale lives in `src/ui/charts/adapters.ts`; `src/scenario.ts` is the one `ScenarioConfig`. Annotated file map: `docs/spec.md` ("Folder map").
 
 ## Chart rules
 
