@@ -128,7 +128,7 @@ Read the relevant section BEFORE changing that area. These files are plain paths
 ## Current state (session 23, 2026-11-14): v1.0.0 plus paired comparisons
 
 All roadmap sessions are done and verified, CI green with Pages deploy; **v1.0.0** is tagged on the commit that carries these docs, after its CI passed, with a GitHub release (session 21). The September 2026 audit's findings are fixed (STATUS 127-133):
-- **Session 23 (STATUS 190-194): small-sample coverage of the comparison, and page fit at seven.** Tables in guide 3.10.
+- **Session 23 (STATUS 190-195): small-sample coverage of the comparison, and page fit at seven.** Tables in guide 3.10.
   - **The paired t-interval alone is NOT safe when busts are rare:** Flat against Martingale (true difference zero) gave about 40% false "clear" at 30 sessions and 8.6% at 1,000 sessions with a 0.25% bust rate. A minimum session count cannot fix it.
   - **The fix (`evDifference`): an EV difference is named only if the interval still excludes zero after ONE more session in which the better-looking strategy lost its whole bankroll.** Reported false "clear" is then 0.00-4.25% in every measured case (n 30 to 1,000, bust rates 0.25% to 36%). Never remove this check to gain power: on every game here the true EV-per-$ difference is zero. The sentence reads "excludes zero, but one more whole-bankroll loss would undo that".
   - **Bonett-Price (bust) is unchanged:** 0.00-3.46% false "clear" for 1-3% bust rates at 30-250 sessions.
