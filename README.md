@@ -19,7 +19,7 @@ A browser app that runs betting strategies side by side on the same simulated ou
 - **Deterministic, seeded engine in a Web Worker.** The engine in [`src/engine/`](src/engine/) is plain TypeScript with integer-cent money; every random number comes from one seeded generator, and [a test](src/engine/isolation.test.ts) fails if an engine file uses `Math.random` or imports React or the DOM. Runs execute in a Web Worker, with progress and Cancel.
 - **Statistical tests that were shown to fail when broken.** Tolerances are 4 standard errors computed from the simulated sessions, never hand-picked. Key tests were run against deliberately broken code and seen to fail before the code was restored, and the failures are logged in [`docs/history.md`](docs/history.md) (for example STATUS 148, 165, 166 and 176). One caught a real bias: a $5 bettor at −110 odds measured 5.29 standard errors from theory until payouts carried their sub-cent remainders.
 - **Reproducible share links and reports.** Copy link puts the whole scenario, including custom rules and sweeps, in the URL. End-to-end tests open a copied link in a new page and check that the rerun gives the same numbers bit for bit; the report prints the seed, the build's commit and that link.
-- **CI with Playwright.** Every push runs lint, 840 Vitest tests, a strict type check and build, and 55 Playwright tests against the production build. Only a `main` commit that passes all of them deploys to GitHub Pages.
+- **CI with Playwright.** Every push runs lint, 843 Vitest tests, a strict type check and build, and 55 Playwright tests against the production build. Only a `main` commit that passes all of them deploys to GitHub Pages.
 
 StrategyLab is an educational simulation for adults (18+). No real money is involved, and nothing here is betting advice. If gambling is causing problems for you or someone you know, call or text 1-800-MY-RESET, the US National Problem Gambling Helpline ([ncpgambling.org](https://www.ncpgambling.org/help-treatment/)).
 
@@ -64,7 +64,7 @@ The rule and link code contain no `eval`, `new Function` or dynamic `import`, an
 
 ## Testing
 
-- **Unit and statistical tests:** `npm run test` runs 840 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Seven more (benchmarks and fixture writers) are opt-in.
+- **Unit and statistical tests:** `npm run test` runs 843 Vitest tests, fast unit tests first, then the Monte Carlo tests (`*.stats.test.ts`). Seven more (benchmarks and fixture writers) are opt-in.
 - **Tolerances come from the data.** A statistical test passes when the measured value is within 4 standard errors of the expected one, with the standard error computed from the simulated sessions. Seeds are fixed, so each run gives the same numbers.
 - **The EV invariant:** for every strategy, EV per $ wagered must equal −edge. [`invariant.stats.test.ts`](src/engine/invariant.stats.test.ts) checks 9 strategies (the 8 built-ins and a custom rule) on 8 games with 20,000 sessions each: house-edge, fair and player-edge games, sports odds and multi-outcome games. The largest deviation is 2.78 standard errors. Kelly refuses to bet on the two house-edge multi-outcome games, and the test asserts that instead.
 - **A bug the tolerance caught:** before the sub-cent carry, a flat $5 bettor at −110 odds measured 5.29 standard errors from theory over 100,000 sessions. With the carry it measures 0.55 ([`runner.regression.stats.test.ts`](src/engine/runner.regression.stats.test.ts)).
