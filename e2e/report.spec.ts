@@ -59,8 +59,14 @@ test("the report: default run, every part present, and the printed PDF is exactl
   await expect(page.getByRole("button", { name: "Report", exact: true })).toBeDisabled();
   await runAndWait(page);
   await expectTableMatchesEngine(page, defaultScenario());
+  // Nothing is fragile on the default run: no marker, no note, no qualifier in the announcement.
+  await expect(page.locator("[data-fragile]")).toHaveCount(0);
+  await expect(page.getByTestId("fragile-note")).toHaveCount(0);
+  await expect(page.getByTestId("run-announcer")).not.toContainText("whole-bankroll loss");
   await openReport(page);
   const report = page.getByTestId("report");
+  await expect(report.locator("[data-fragile]")).toHaveCount(0);
+  await expect(page.getByTestId("report-fragile-note")).toHaveCount(0);
 
   // Configuration, seed, build, link, key statistics, chart, takeaways.
   await expect(page.getByTestId("report-config")).toContainText("European roulette (even-money); house edge 2.703%");
@@ -76,6 +82,8 @@ test("the report: default run, every part present, and the printed PDF is exactl
   expect(await items.count()).toBeGreaterThanOrEqual(3);
   expect(await items.count()).toBeLessThanOrEqual(5);
   await expect(items.filter({ hasText: /round \d/ })).toContainText([/^Counting busted sessions only, /]);
+  // The contrast survives the worst-case-session check on 10,000 sessions (one bankroll loss is small there).
+  await expect(items.last()).toContainText(/^Martingale ended ahead in .* of sessions yet lost money per dollar wagered on average/);
   // Strategies are compared on their per-session differences (same sessions), with the method, size, interval and n.
   await expect(items.nth(1)).toContainText("over the same 10,000 sessions (paired t-interval), Martingale's EV per $ minus Flat's is -0.15 percentage points (95% interval -0.99 to 0.69), which includes zero");
   await expect(items.nth(2)).toContainText("over the same 10,000 sessions (paired-proportion interval), Martingale's bust rate minus Flat's is 15.5 percentage points (95% interval 14.7 to 16.2), which excludes zero");
@@ -159,7 +167,33 @@ test("rare busts, few sessions: an EV gap that one whole-bankroll loss would und
   if (!e.ok) throw new Error(e.message);
   await openApp(page, e.fragment);
   await runAndWait(page);
+
+  // The results table, the announcement and the report all mark Martingale (column 1), and only it.
+  const table = page.getByTestId("results-table");
+  const evRow = table.locator('tr[data-stat="evPerWagered"]');
+  const martingaleCell = evRow.locator('td[data-col="1"]');
+  await expect(martingaleCell).toHaveAttribute("data-fragile", "true");
+  await expect(martingaleCell).toHaveText("6.24%* (fragile: see the note under the table)"); // the number is unchanged
+  await expect(martingaleCell).toHaveAttribute("aria-describedby", "fragile-note");
+  await expect(martingaleCell.locator(".fragile-mark")).toHaveAttribute("title", "Above the theoretical value, but one more whole-bankroll loss would undo that: this is not evidence of a gain. The figures are the run's own.");
+  await expect(evRow.locator('td[data-col="0"]')).not.toHaveAttribute("data-fragile", /.*/);
+  await expect(evRow.locator('td[data-col="0"]')).toHaveText("-1.68%");
+  await expect(table.locator("td[data-fragile]")).toHaveCount(1);
+  await expect(page.getByTestId("fragile-note")).toHaveText(
+    "* EV per $ wagered for Martingale: above the theoretical value, but one more whole-bankroll loss would undo that: this is not evidence of a gain. The figures are the run's own.",
+  );
+  await expect(page.getByTestId("run-announcer")).toContainText(
+    "EV per $ wagered: Flat -1.68%, Martingale 6.24% (above the theoretical value, but one more whole-bankroll loss would undo that: this is not evidence of a gain); theory -2.70%.",
+  );
+
   await openReport(page);
+  const reportEv = page.getByTestId("report-table").locator("tbody tr").first().locator("td");
+  await expect(reportEv.nth(1)).toHaveAttribute("data-fragile", "true");
+  await expect(reportEv.nth(1).locator(".fragile-mark")).toHaveText("*");
+  await expect(reportEv.nth(0)).not.toHaveAttribute("data-fragile", /.*/);
+  await expect(reportEv.nth(0).locator(".fragile-mark")).toHaveCount(0);
+  await expect(page.getByTestId("report-table").locator("td[data-fragile]")).toHaveCount(1);
+  await expect(page.getByTestId("report-fragile-note")).toContainText("Above the theoretical value, but one more whole-bankroll loss would undo that: this is not evidence of a gain.");
   const ev = page.getByTestId("report-takeaways").locator("li").nth(1);
   await expect(ev).toContainText("over the same 250 sessions (paired t-interval), Flat's EV per $ minus Martingale's is -7.92 percentage points (95% interval -12.16 to -3.67), which excludes zero, but one more whole-bankroll loss would undo that: the difference isn't clear at this sample size.");
   await expect(ev).not.toContainText("measured a lower EV");

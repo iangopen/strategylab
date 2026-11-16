@@ -33,7 +33,10 @@ import {
   type Bounds,
 } from "../engine/stats/interval";
 import type { PairedComparison } from "../engine/stats/paired";
-import { formatInterval, formatStat } from "../ui/format";
+import { edge as gameEdge } from "../engine/games";
+import type { MonteCarloResult } from "../engine/montecarlo";
+import { toCents, type ScenarioConfig } from "../scenario";
+import { formatInterval, formatStat, undoneByOneLoss, type EvNote } from "../ui/format";
 
 export interface TakeawayStrategy {
   label: string;
@@ -220,6 +223,11 @@ export interface EvClaim {
   nearZero: boolean;
   /** The interval lies wholly above zero (it reads as a gain). */
   looksLikeGain: boolean;
+  /**
+   * The interval lies wholly below zero, and still would after one more whole-bankroll loss (that
+   * session moves the mean down but widens the interval, so its upper end can rise above zero).
+   */
+  clearlyLoses: boolean;
 }
 
 /**
@@ -242,10 +250,13 @@ export function evClaim(input: TakeawayInput, index: number): EvClaim | null {
   const theory = -input.edge;
   // The lowest the interval's lower end goes once one more whole-bankroll loss is added.
   let low = iv.low;
+  // And the highest its upper end goes (for the "lost money per dollar" claim).
+  let high = iv.high;
   const worst = input.startBankroll !== undefined && stats.meanWagered! > 0 ? input.startBankroll / stats.meanWagered! : NaN;
   if (Number.isFinite(worst)) {
     const stressed = tIntervalWithOneMore(stats.evPerWagered!, stats.evSE!, input.nSessions, stats.evPerWagered! - worst);
     if (Number.isFinite(stressed.low)) low = Math.min(low, stressed.low);
+    if (Number.isFinite(stressed.high)) high = Math.max(high, stressed.high);
   }
   const fragile = iv.low > theory && low <= theory;
   return {
@@ -254,6 +265,30 @@ export function evClaim(input: TakeawayInput, index: number): EvClaim | null {
     missesTheory: iv.high < theory || (iv.low > theory && !fragile),
     nearZero: contains(iv, 0) || (iv.low > 0 && low <= 0),
     looksLikeGain: iv.low > 0,
+    clearlyLoses: high < 0,
+  };
+}
+
+/**
+ * The qualifier each strategy's EV per $ carries, straight from evClaim's `fragile` flag: null when
+ * there is none. The results table, the report table and the screen-reader announcement all read
+ * these, so they mark exactly the strategies the report sentence names.
+ */
+export function evNotes(input: TakeawayInput): (EvNote | null)[] {
+  return input.strategies.map((_, i) => {
+    const claim = evClaim(input, i);
+    return claim?.fragile ? { gain: claim.looksLikeGain } : null;
+  });
+}
+
+/** THE TakeawayInput for a finished run, from the run's own snapshot (the app and the report both use it). */
+export function runTakeawayInput(result: MonteCarloResult, labels: readonly string[], scenario: ScenarioConfig): TakeawayInput {
+  return {
+    edge: gameEdge({ outcomes: scenario.game.outcomes }),
+    nSessions: result.nSessions,
+    strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })),
+    comparisons: result.comparisons,
+    startBankroll: toCents(scenario.startBankroll),
   };
 }
 
@@ -307,7 +342,7 @@ function evSentence(input: TakeawayInput): string {
   if (misses.length > 0) clauses.push(`for ${names(misses)} the interval misses the theoretical ${pct2(theory)}, which a 95% interval does by chance about one time in twenty`);
   if (fragile.length > 0) {
     const gain = fragile.some((m) => m.claim.looksLikeGain);
-    clauses.push(`for ${names(fragile.map((m) => m.label))} the interval is above the theoretical ${pct2(theory)}, but one more whole-bankroll loss would undo that: this is not evidence of ${gain ? "a gain" : "doing better than theory"}`);
+    clauses.push(`for ${names(fragile.map((m) => m.label))} the interval is above the theoretical ${pct2(theory)}, but ${undoneByOneLoss(gain)}`);
   }
   if (Math.abs(input.edge) >= 1e-12) {
     // A fragile interval above zero is already covered by the clause above.
@@ -389,12 +424,16 @@ function timingSentence(input: TakeawayInput): string | null {
   return `Counting busted sessions only, ${timed.map((t) => `half of ${t.label}'s busts came by round ${r(t.med)} and the earliest tenth by round ${r(t.p10)}`).join("; ")}.`;
 }
 
-/** A strategy that clearly wins most sessions yet clearly loses per dollar: the core lesson, when the numbers show it. */
+/**
+ * A strategy that clearly wins most sessions yet clearly loses per dollar: the core lesson, when the
+ * numbers show it. "Loses per dollar" must survive one more whole-bankroll loss too (evClaim's
+ * clearlyLoses; session 25), not only the plain interval.
+ */
 function contrastSentence(input: TakeawayInput): string | null {
-  const candidates = input.strategies.flatMap((s) => {
-    const iv = evInterval(s.stats);
+  const candidates = input.strategies.flatMap((s, index) => {
+    const claim = evClaim(input, index);
     const { pProfit, pProfitLow, pProfitHigh } = s.stats;
-    if (!iv || pProfit === undefined || pProfitLow === undefined || !(pProfitLow > 0.5) || !(iv.high < 0)) return [];
+    if (!claim || pProfit === undefined || pProfitLow === undefined || !(pProfitLow > 0.5) || !claim.clearlyLoses) return [];
     return [{ label: s.label, pProfit, low: pProfitLow, high: pProfitHigh }];
   });
   if (candidates.length === 0) return null;

@@ -1,10 +1,10 @@
 import type { StrategyOutcome } from "../engine/montecarlo";
 import { seriesColorVar } from "./charts/adapters";
-import { TABLE_ROWS } from "./format";
+import { FRAGILE_CELL_TEXT, FRAGILE_MARK, fragileFootnote, TABLE_ROWS, type EvNote } from "./format";
 
 interface Props {
   /** colorIndex = the instance's index in the run: its ONE color everywhere (charts, replay, here). */
-  columns: { label: string; outcome: StrategyOutcome; colorIndex: number }[];
+  columns: { label: string; outcome: StrategyOutcome; colorIndex: number; evNote?: EvNote | null }[];
   nSessions: number;
   stale: boolean;
 }
@@ -19,6 +19,7 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
       </section>
     );
   }
+  const fragile = columns.filter((c) => c.evNote);
   return (
     <section className="panel">
       <h2>Results</h2>
@@ -43,16 +44,34 @@ export function ResultsTable({ columns, nSessions, stale }: Props) {
             {TABLE_ROWS.map((row) => (
               <tr key={row.id} data-stat={row.id} className={row.emphasis ? "emphasis" : undefined}>
                 <th scope="row">{row.label}</th>
-                {columns.map((c, i) => (
-                  <td key={i} data-col={i} data-raw={row.raw(c.outcome.stats)}>
-                    <Cell text={row.cell(c.outcome.stats)} />
-                  </td>
-                ))}
+                {columns.map((c, i) => {
+                  // The number and its interval stay exactly as measured; a fragile EV per $ only gains a marker.
+                  const marked = row.id === "evPerWagered" && c.evNote;
+                  return (
+                    <td key={i} data-col={i} data-raw={row.raw(c.outcome.stats)} data-fragile={marked ? "true" : undefined} aria-describedby={marked ? "fragile-note" : undefined}>
+                      <Cell text={row.cell(c.outcome.stats)} />
+                      {marked && (
+                        <>
+                          <span className="fragile-mark" aria-hidden="true" title={fragileFootnote(c.evNote!.gain)}>
+                            {FRAGILE_MARK}
+                          </span>
+                          <span className="sr-only"> {FRAGILE_CELL_TEXT}</span>
+                        </>
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {fragile.length > 0 && (
+        <p className="help fragile-note" id="fragile-note" data-testid="fragile-note">
+          <span aria-hidden="true">{FRAGILE_MARK} </span>
+          EV per $ wagered for {fragile.map((c) => c.label).join(", ")}: {fragileFootnote(fragile.some((c) => c.evNote!.gain)).replace(/^A/, "a")}
+        </p>
+      )}
     </section>
   );
 }

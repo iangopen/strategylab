@@ -34,6 +34,17 @@ describe("announcements (screen-reader text)", () => {
     );
   });
 
+  it("a fragile EV per $ is said with the report sentence's own qualifier; other strategies are unchanged", () => {
+    const cols = [
+      { label: "Flat", stats: { evPerWagered: -0.0168, evTheory: -0.027027, pProfit: 0.46 }, evNote: null },
+      { label: "Martingale", stats: { evPerWagered: 0.0624, evTheory: -0.027027, pProfit: 0.9 }, evNote: { gain: true } },
+    ];
+    expect(runAnnouncement(cols)).toBe(
+      "Results ready. EV per $ wagered: Flat -1.68%, Martingale 6.24% (above the theoretical value, but one more whole-bankroll loss would undo that: this is not evidence of a gain); theory -2.70%. P(profit > 0): Flat 46.0%, Martingale 90.0%. The full table follows.",
+    );
+    expect(runAnnouncement([{ ...cols[1]!, evNote: { gain: false } }])).toContain("this is not evidence of doing better than theory");
+  });
+
   it("a replay reads the legend lines", () => {
     expect(replayAnnouncement(1234, ["Flat: a", "Martingale: b"])).toBe("Replay of session 1,234: Flat: a; Martingale: b.");
   });

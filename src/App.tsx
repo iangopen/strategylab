@@ -14,8 +14,9 @@ import { baseUrl, bootFromLocation, canonicalizeAddressBar, noticeOf, pageLinkLo
 import { ResultsTable } from "./ui/ResultsTable";
 import { RunControls, type CopyStatus } from "./ui/RunControls";
 import { copyBlocker, encodeScenarioLink } from "./share/link";
-import { formatElapsed, instanceLabel, runAnnouncement } from "./ui/format";
+import { formatElapsed, instanceLabel, runAnnouncement, type EvNote } from "./ui/format";
 import { ReportView } from "./report/ReportView";
+import { evNotes, runTakeawayInput } from "./report/takeaways";
 import { previewContextOf } from "./ui/rules/preview";
 import { StrategyPicker } from "./ui/StrategyPicker";
 import { applyThemePref, loadThemePref, type ThemePref } from "./ui/theme";
@@ -39,6 +40,8 @@ interface CompletedRun {
   /** The exact request that produced this result (charts and replay use it, not the live form). */
   request: SimRequest;
   refs: ChartRefs;
+  /** Each strategy's EV per $ qualifier, from the report's own check (evNotes): table and announcement use it. */
+  notes: (EvNote | null)[];
 }
 
 export default function App() {
@@ -171,6 +174,7 @@ export default function App() {
       const ms = performance.now() - started;
       setElapsedMs(ms);
       const labels = snapshot.strategies.map((_, i) => instanceLabel(snapshot.strategies, i));
+      const notes = evNotes(runTakeawayInput(result, labels, snapshot));
       setRun({
         result,
         labels,
@@ -178,11 +182,12 @@ export default function App() {
         scenarioJson: runKey(snapshot),
         request,
         refs: { start: request.session.startBankroll, stopWin: request.session.stopWin, stopLoss: request.session.stopLoss },
+        notes,
       });
       setSelectedSession(null);
       setReplay(null);
       setReplayStatus(null);
-      setAnnouncement(runAnnouncement(result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats }))));
+      setAnnouncement(runAnnouncement(result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats, evNote: notes[i] ?? null }))));
       setStatus(`Done: ${result.nSessions.toLocaleString("en-US")} sessions in ${formatElapsed(ms)}.`);
     } catch (err) {
       setStatus(err instanceof CancelledError ? "Cancelled. Previous results (if any) are kept." : `Error: ${(err as Error).message}`);
@@ -255,7 +260,7 @@ export default function App() {
     );
   }, [run, selectedSession, running, sweeping]);
 
-  const columns = useMemo(() => (run ? run.result.perStrategy.map((outcome, i) => ({ label: run.labels[i] ?? outcome.strategyId, outcome, colorIndex: i })) : []), [run]);
+  const columns = useMemo(() => (run ? run.result.perStrategy.map((outcome, i) => ({ label: run.labels[i] ?? outcome.strategyId, outcome, colorIndex: i, evNote: run.notes[i] ?? null })) : []), [run]);
 
   if (reportOpen && run) {
     return (

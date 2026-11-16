@@ -3,16 +3,16 @@
 // "Print / save as PDF" calls window.print(), so no PDF library is needed. Everything on the page comes
 // from the run's own snapshot (never the live form), so the link reproduces exactly these numbers.
 import { useEffect, useMemo, useRef } from "react";
-import { edge } from "../engine/games";
 import type { MonteCarloResult } from "../engine/montecarlo";
-import { toCents, type ScenarioConfig } from "../scenario";
+import type { ScenarioConfig } from "../scenario";
 import { encodeScenarioLink } from "../share/link";
 import type { ChartRefs } from "../ui/charts/adapters";
 import { seriesColorVar } from "../ui/charts/adapters";
+import { FRAGILE_CELL_TEXT, FRAGILE_MARK, fragileFootnote } from "../ui/format";
 import { baseUrl } from "../ui/linkBoot";
 import { ReportChart } from "./ReportChart";
-import { REPORT_ROWS, scenarioSummary } from "./summary";
-import { takeaways } from "./takeaways";
+import { REPORT_EV_ROW, REPORT_ROWS, scenarioSummary } from "./summary";
+import { evNotes, runTakeawayInput, takeaways } from "./takeaways";
 
 /** The build this page was made from (vite.config.ts injects it). */
 const COMMIT_HASH: string = __COMMIT_HASH__;
@@ -54,10 +54,12 @@ export function ReportView({ result, labels, scenario, refs, onClose }: Props) {
   const link = useMemo(() => encodeScenarioLink(scenario, baseUrl()), [scenario]);
   const url = link.ok ? baseUrl() + link.fragment : null;
   const summary = useMemo(() => scenarioSummary(scenario, labels), [scenario, labels]);
-  const sentences = useMemo(
-    () => takeaways({ edge: edge({ outcomes: scenario.game.outcomes }), nSessions: result.nSessions, strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })), comparisons: result.comparisons, startBankroll: toCents(scenario.startBankroll) }),
-    [result, labels, scenario],
-  );
+  // One input for the sentences AND the table's fragile markers, so the two cannot disagree.
+  const { sentences, notes } = useMemo(() => {
+    const input = runTakeawayInput(result, labels, scenario);
+    return { sentences: takeaways(input), notes: evNotes(input) };
+  }, [result, labels, scenario]);
+  const anyFragile = notes.some((n) => n !== null);
 
   return (
     <div className="report-page">
@@ -109,15 +111,35 @@ export function ReportView({ result, labels, scenario, refs, onClose }: Props) {
               {REPORT_ROWS.map((row) => (
                 <tr key={row.label}>
                   <th scope="row">{row.label}</th>
-                  {result.perStrategy.map((o, i) => (
-                    <td key={i}>{row.cell(o.stats)}</td>
-                  ))}
+                  {result.perStrategy.map((o, i) => {
+                    const fragile = row.label === REPORT_EV_ROW && notes[i] !== null;
+                    return (
+                      <td key={i} data-fragile={fragile ? "true" : undefined}>
+                        {row.cell(o.stats)}
+                        {fragile && (
+                          <>
+                            <span className="fragile-mark" aria-hidden="true">
+                              {FRAGILE_MARK}
+                            </span>
+                            <span className="sr-only"> {FRAGILE_CELL_TEXT}</span>
+                          </>
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="report-note">
             Intervals are 95%: Wilson intervals for proportions, and EV per $ ± 1.96 standard errors. Rounds to bust count busted sessions only.
+            {anyFragile && (
+              <span data-testid="report-fragile-note">
+                {" "}
+                <span aria-hidden="true">{FRAGILE_MARK} </span>
+                {fragileFootnote(notes.some((n) => n?.gain === true))}
+              </span>
+            )}
           </p>
         </section>
 

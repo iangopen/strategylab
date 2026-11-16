@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contains, evClaim, evDifference, evInterval, overlaps, takeaways, type TakeawayStrategy } from "./takeaways";
+import { contains, evClaim, evDifference, evInterval, evNotes, overlaps, takeaways, type TakeawayStrategy } from "./takeaways";
 
 // Hand-built stats objects (no simulation): each case pins what the sentences may and may not claim.
 const EDGE = 1 / 37; // European roulette, theoretical EV per $ = -2.70%
@@ -214,6 +214,36 @@ describe("takeaways", () => {
       const ev = takeaways(input)[1]!;
       expect(ev).toContain("the interval includes the theoretical 10.00%");
       expect(ev).toContain("for Flat the result is not clearly different from zero at this sample size");
+    });
+
+    it("evNotes (the table and announcement markers) is exactly evClaim's fragile flag, with its gain reading", () => {
+      const gain = withWagered("Martingale", 0.0624, 0.0238, 1000);
+      const theory = withWagered("Fibonacci", -0.01, 0.005, 10_000);
+      const steady = withWagered("A", -0.02, 0.002, 500_000);
+      const input = { edge: EDGE, nSessions: 250, strategies: [gain, theory, steady], startBankroll: BANKROLL };
+      const notes = evNotes(input);
+      expect(notes).toEqual([{ gain: true }, { gain: false }, null]);
+      expect(notes.map((n) => n !== null)).toEqual(input.strategies.map((_, i) => evClaim(input, i)!.fragile));
+      // A strategy that placed no bets has no claim and no marker; without the bankroll nothing is fragile.
+      expect(evNotes({ ...input, strategies: [strat("Kelly", { ev: NaN, se: NaN, bust: [0, 0, 0] })] })).toEqual([null]);
+      expect(evNotes({ ...input, startBankroll: undefined })).toEqual([null, null, null]);
+    });
+
+    it("the contrast sentence ('lost money per dollar') must survive one more whole-bankroll loss too (session 25)", () => {
+      // 30 sessions, $10 wagered per session: the plain interval (-3.57% to -0.43%) is below zero, but one
+      // $1,000 loss widens it past zero, so "lost money per dollar wagered" is not claimed.
+      const s = withWagered("Martingale", -0.02, 0.008, 1000);
+      const ahead = { ...s, stats: { ...s.stats, pProfit: 0.9, pProfitLow: 0.74, pProfitHigh: 0.97 } };
+      const input = run(ahead, 30);
+      expect(evClaim(input, 0)).toMatchObject({ clearlyLoses: false });
+      expect(takeaways(input).join(" ")).not.toContain("lost money per dollar");
+      // The plain interval alone (no bankroll) would have claimed it.
+      expect(takeaways({ ...input, startBankroll: undefined }).at(-1)).toContain("Martingale ended ahead in 90.0% (74.0–97.0%) of sessions yet lost money per dollar wagered on average");
+      // Where one bankroll loss is small next to the sample, the sentence stays (the default-run case).
+      const big = { ...martingale, stats: { ...martingale.stats, meanWagered: 500_000 } };
+      const steady = { edge: EDGE, nSessions: N, strategies: [big], startBankroll: BANKROLL };
+      expect(evClaim(steady, 0)).toMatchObject({ clearlyLoses: true });
+      expect(takeaways(steady).at(-1)).toContain("Martingale ended ahead in 82.9% (82.2–83.7%) of sessions yet lost money per dollar wagered on average");
     });
   });
 

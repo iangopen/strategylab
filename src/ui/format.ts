@@ -130,19 +130,47 @@ export function formatElapsed(ms: number): string {
 export const BINARY_ONLY_NOTE = "Applies only to win/lose games; ignored here.";
 
 /**
- * The sentence a screen reader hears when a run finishes (the table itself is not a live region):
- * the headline EV per $ wagered next to the theory, and P(profit > 0), per strategy.
+ * A strategy whose EV per $ interval lies above the theoretical value only until one more
+ * whole-bankroll loss (evClaim's `fragile` flag in report/takeaways.ts, computed there ONCE per run).
+ * `gain`: the interval also lies above zero, so it would read as a gain.
  */
-export function runAnnouncement(columns: readonly { label: string; stats: Record<string, number> }[]): string {
+export interface EvNote {
+  gain: boolean;
+}
+
+/**
+ * THE qualifier for a fragile EV per $ interval, in one wording for the report sentences, both
+ * results tables and the screen-reader announcement, so they cannot say different things.
+ */
+export function undoneByOneLoss(gain: boolean): string {
+  return `one more whole-bankroll loss would undo that: this is not evidence of ${gain ? "a gain" : "doing better than theory"}`;
+}
+
+/** The table footnote for fragile EV per $ cells (the cells carry FRAGILE_MARK). */
+export function fragileFootnote(gain: boolean): string {
+  return `Above the theoretical value, but ${undoneByOneLoss(gain)}. The figures are the run's own.`;
+}
+
+/** The visible marker on a fragile EV per $ cell; screen readers get FRAGILE_CELL_TEXT instead. */
+export const FRAGILE_MARK = "*";
+export const FRAGILE_CELL_TEXT = "(fragile: see the note under the table)";
+
+/**
+ * The sentence a screen reader hears when a run finishes (the table itself is not a live region):
+ * the headline EV per $ wagered next to the theory, and P(profit > 0), per strategy. A fragile EV per $
+ * (`evNote`) carries the same qualifier as the report sentence.
+ */
+export function runAnnouncement(columns: readonly { label: string; stats: Record<string, number>; evNote?: EvNote | null }[]): string {
   // The table's precision: two decimals for EV per $, one for P(profit).
   const said = (v: number | undefined, digits: number) => {
     const s = formatInterval(v, undefined, undefined, digits);
     return s === "—" ? "not defined (no bets placed)" : s;
   };
   const per = (id: string, digits: number) => columns.map((c) => `${c.label} ${said(c.stats[id], digits)}`).join(", ");
+  const ev = columns.map((c) => `${c.label} ${said(c.stats["evPerWagered"], 2)}${c.evNote ? ` (above the theoretical value, but ${undoneByOneLoss(c.evNote.gain)})` : ""}`).join(", ");
   const theory = columns[0]?.stats["evTheory"];
   return (
-    `Results ready. EV per $ wagered: ${per("evPerWagered", 2)}` +
+    `Results ready. EV per $ wagered: ${ev}` +
     (theory === undefined ? "." : `; theory ${said(theory, 2)}.`) +
     ` P(profit > 0): ${per("pProfit", TABLE_INTERVAL_DIGITS)}. The full table follows.`
   );

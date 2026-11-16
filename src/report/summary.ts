@@ -73,10 +73,13 @@ export interface ReportRow {
   cell: (stats: Readonly<Record<string, number>>) => string;
 }
 
+/** The EV per $ row's label: the row whose cells carry the fragile marker. */
+export const REPORT_EV_ROW = "EV per $ wagered (95% interval)";
+
 /** The key statistics, in reading order. Intervals use the shared formatter. */
 export const REPORT_ROWS: readonly ReportRow[] = [
   {
-    label: "EV per $ wagered (95% interval)",
+    label: REPORT_EV_ROW,
     cell: (v) => {
       const iv = evInterval(v);
       return formatInterval(v.evPerWagered, iv?.low, iv?.high, 2);

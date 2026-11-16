@@ -252,6 +252,8 @@ table.results .interval { white-space: nowrap; }
 .report-takeaways { margin: 2px 0 0; padding-left: 1.2em; }
 .report-takeaways li { margin-bottom: 2px; }
 .report-note { margin: 2px 0; color: var(--muted); font-size: 7.5pt; }
+/* A fragile EV per $ cell (see evNotes): a marker beside the unchanged number, explained in a note. No extra line height. */
+.fragile-mark { font-weight: 700; margin-left: 1px; vertical-align: super; line-height: 0; font-size: 0.8em; }
 .report-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 8pt; }
 .report-table th, .report-table td { padding: 2px 6px; border-bottom: 1px solid var(--border); text-align: right; vertical-align: top; }
 .report-table thead th { font-weight: 600; white-space: nowrap; }
