@@ -60,6 +60,13 @@ export interface TakeawayInput {
    * interval is used.
    */
   startBankroll?: number;
+  /**
+   * The game's largest net payout per $1 staked (1 for even money, 974 for a 1-in-1000 long shot that
+   * pays 974 to 1). With startBankroll, the EV-difference check also asks whether one more session in
+   * which the WORSE-looking strategy won a whole-bankroll bet at this payout would undo the verdict (a
+   * hidden gain, the mirror of a hidden bust). Without it only a hidden loss is checked.
+   */
+  maxNet?: number;
 }
 
 export interface Interval {
@@ -141,6 +148,15 @@ function verdict(method: DifferenceVerdict["method"], diff: number, iv: Bounds, 
  * better-looking strategy lost its whole bankroll (and the other did nothing unusual). One such
  * session is the smallest stress that brought every measured case to 3% or less; where a bankroll
  * loss is small next to the sample (many sessions, or busts already common) it changes nothing.
+ *
+ * The mirror case (review, 2026-11-16): on a game with a rare large payout, a sample can just as well
+ * be missing a WIN of the worse-looking strategy. Flat against Paroli on a 1-in-1000 game paying 974
+ * to 1 (true difference zero), 10,000 sessions: the bankroll-loss stress alone left 36.75% false
+ * "clear". So, when the caller gives the game's top payout (`maxNet`), the one extra session is the
+ * LARGER of the two: the better-looking strategy loses its whole bankroll, or the worse-looking one
+ * wins a whole-bankroll bet at the top payout. On even money (maxNet = 1) this is the larger of the
+ * two strategies' bankroll terms, never smaller than before. Every true EV-per-$ difference in one run
+ * is zero, so a withheld verdict is never a wrong one.
  * The measurements are in src/report/comparison.stats.test.ts.
  */
 export function evDifference(input: TakeawayInput, i: number, j: number, family = 1): DifferenceVerdict | null {
@@ -151,7 +167,12 @@ export function evDifference(input: TakeawayInput, i: number, j: number, family 
     if (cmp.n < MIN_COMPARE_SESSIONS) return null;
     const diff = sign * cmp.evDiff;
     // i looks better when diff > 0: its bankroll loss is one more difference of −(its worst-case term).
-    const extra = diff > 0 ? -(sign === 1 ? cmp.worstA : cmp.worstB) : sign === 1 ? cmp.worstB : cmp.worstA;
+    // The worse-looking strategy's whole-bankroll win at the top payout moves the difference the same way.
+    const [worstI, worstJ] = sign === 1 ? [cmp.worstA, cmp.worstB] : [cmp.worstB, cmp.worstA];
+    const [better, worse] = diff > 0 ? [worstI, worstJ] : [worstJ, worstI];
+    const gain = input.maxNet !== undefined && input.maxNet > 0 ? input.maxNet * worse : 0;
+    const shift = Math.max(better, gain);
+    const extra = diff > 0 ? -shift : shift;
     return verdict("paired", diff, tInterval(diff, cmp.evDiffSE, cmp.n - 1, p), cmp.n, family, tIntervalWithOneMore(diff, cmp.evDiffSE, cmp.n, extra, p));
   }
   const a = input.strategies[i]?.stats;
@@ -289,6 +310,7 @@ export function runTakeawayInput(result: MonteCarloResult, labels: readonly stri
     strategies: result.perStrategy.map((o, i) => ({ label: labels[i] ?? o.strategyId, stats: o.stats })),
     comparisons: result.comparisons,
     startBankroll: toCents(scenario.startBankroll),
+    maxNet: Math.max(...scenario.game.outcomes.map((o) => o.net)),
   };
 }
 

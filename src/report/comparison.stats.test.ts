@@ -410,3 +410,43 @@ describe("small session counts, rare busts (session 23)", () => {
     });
   }
 });
+
+describe("a hidden GAIN: rare large payouts (review, 2026-11-16)", () => {
+  // Flat against Paroli on a 1-in-1000 game paying 974 to 1: both have EV per $ −2.5%, so the true
+  // difference is zero. Paroli differs from Flat only on the round after a win, where it stakes one
+  // more unit; a sample with no jackpot on those extra units makes Paroli look worse than it is. The
+  // bankroll ($200) is far below one jackpot ($974 on a $1 stake), so the bankroll-loss stress alone
+  // cannot cover the missing win.
+  it("the hidden-loss check alone names a false difference far above 5%; with the game's top payout it stays at or below 5% (within 4 SE)", () => {
+    const REPS = 200;
+    // 10,000 sessions: the regime where the review measured the defect (36.75% false clear). At 5,000
+    // the bankroll-loss stress still happens to cover one missing jackpot (0.00% either way).
+    const SESSIONS = 10_000;
+    const jackpot = { id: "jackpot", name: "1 in 1000, pays 974", winProb: 1 / 1000, netPayout: 974 };
+    const cfg = sessionConfig({ startBankroll: 20_000, baseBet: 100, maxRounds: 100 });
+    const specs = [{ strategy: flat, config: flat.defaultConfig }, { strategy: paroli, config: paroli.defaultConfig }];
+    let lossOnly = 0;
+    let both = 0;
+    for (let rep = 0; rep < REPS; rep++) {
+      const r = runMonteCarlo(jackpot, specs, cfg, SESSIONS, 26_000_000 + rep);
+      const input: TakeawayInput = { edge: 0.025, nSessions: SESSIONS, strategies: r.perStrategy.map((o) => ({ label: o.strategyId, stats: o.stats })), comparisons: r.comparisons, startBankroll: cfg.startBankroll };
+      if (evDifference(input, 0, 1)!.clear) lossOnly++;
+      if (evDifference({ ...input, maxNet: 974 }, 0, 1)!.clear) both++;
+    }
+    const se = rateSE(REPS);
+    console.log(`[hidden gain] Flat vs Paroli, 1-in-1000 x974, ${REPS} master seeds × ${SESSIONS} sessions: false clear with the loss check only ${pct(lossOnly / REPS)}, with the top-payout check too ${pct(both / REPS)} (nominal ${pct(NOMINAL)}, SE ${pct(se)})`);
+    expect(lossOnly / REPS).toBeGreaterThan(NOMINAL + 4 * se); // why the mirror check exists
+    expect(both / REPS).toBeLessThan(NOMINAL + 4 * se);
+  });
+
+  it("on even money the extra check never names a difference the loss check alone would not", () => {
+    const european = GAME_PRESETS.find((g) => g.id === "european")!;
+    const cfg = sessionConfig({ startBankroll: 20_000, baseBet: 100, maxRounds: 100 });
+    const specs = [{ strategy: flat, config: flat.defaultConfig }, { strategy: martingale, config: martingale.defaultConfig }];
+    for (let seed = 1; seed <= 50; seed++) {
+      const r = runMonteCarlo(european, specs, cfg, 1000, seed);
+      const input: TakeawayInput = { edge: 1 / 37, nSessions: 1000, strategies: r.perStrategy.map((o) => ({ label: o.strategyId, stats: o.stats })), comparisons: r.comparisons, startBankroll: cfg.startBankroll };
+      if (evDifference({ ...input, maxNet: 1 }, 0, 1)!.clear) expect(evDifference(input, 0, 1)!.clear).toBe(true);
+    }
+  });
+});
